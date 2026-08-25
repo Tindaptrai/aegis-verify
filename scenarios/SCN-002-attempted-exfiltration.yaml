@@ -1,0 +1,33 @@
+# Draft manifest. Issue #2 will formalize and validate the scenario schema.
+id: SCN-002
+name: Attempted Exfiltration
+version: 0.1.0
+status: draft
+description: >-
+  Attempt an approved outbound transfer to a controlled test endpoint and verify
+  network detection, firewall prevention, and Wazuh correlation.
+safety:
+  destructive: false
+  authorization_required: true
+  notes: Use non-sensitive test data and an allowlisted lab destination only.
+expected_sources:
+  - wazuh
+  - suricata
+  - pfsense
+expected_outcome: prevented
+assertions:
+  - id: SCN-002-A01
+    description: Endpoint telemetry proves the approved transfer attempt occurred.
+    source: wazuh
+  - id: SCN-002-A02
+    description: Suricata records the expected network alert.
+    source: suricata
+  - id: SCN-002-A03
+    description: pfSense records a block action for the correlated flow.
+    source: pfsense
+  - id: SCN-002-A04
+    description: Wazuh records the expected correlated detection.
+    source: wazuh
+tags:
+  - inc-002
+  - prevention

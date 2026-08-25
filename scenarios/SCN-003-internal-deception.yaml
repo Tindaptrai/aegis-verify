@@ -1,0 +1,34 @@
+# Draft manifest. Issue #2 will formalize and validate the scenario schema.
+id: SCN-003
+name: Internal Deception
+version: 0.1.0
+status: draft
+description: >-
+  Perform an approved internal scan, connect to a decoy address routed to Cowrie,
+  and verify the correlated network, NAT, honeypot, and Wazuh evidence.
+safety:
+  destructive: false
+  authorization_required: true
+  notes: Restrict targets to the documented cyber-range allowlist.
+expected_sources:
+  - suricata
+  - pfsense
+  - cowrie
+  - wazuh
+expected_outcome: detected
+assertions:
+  - id: SCN-003-A01
+    description: Suricata records the approved internal scan or decoy connection.
+    source: suricata
+  - id: SCN-003-A02
+    description: pfSense records the expected NAT or firewall action.
+    source: pfsense
+  - id: SCN-003-A03
+    description: Cowrie records the correlated session and approved interaction.
+    source: cowrie
+  - id: SCN-003-A04
+    description: Wazuh records the expected correlated detection.
+    source: wazuh
+tags:
+  - inc-002
+  - deception

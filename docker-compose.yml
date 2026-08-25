@@ -1,0 +1,5 @@
+name: aegis-verify
+
+# Services will be added only when an implemented MVP component requires one.
+# The first milestone is a fixture-driven local CLI.
+services: {}

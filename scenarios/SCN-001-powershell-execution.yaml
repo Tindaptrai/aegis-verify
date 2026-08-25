@@ -1,0 +1,30 @@
+# Draft manifest. Issue #2 will formalize and validate the scenario schema.
+id: SCN-001
+name: PowerShell Execution
+version: 0.1.0
+status: draft
+description: >-
+  Execute an approved, non-destructive PowerShell test script and verify that
+  endpoint telemetry and the expected Wazuh detection are present.
+safety:
+  destructive: false
+  authorization_required: true
+  notes: Run only in the approved lab with a reviewed test payload.
+expected_sources:
+  - sysmon
+  - powershell
+  - wazuh
+expected_outcome: detected
+assertions:
+  - id: SCN-001-A01
+    description: PowerShell process execution telemetry exists.
+    source: sysmon
+  - id: SCN-001-A02
+    description: PowerShell script or command telemetry exists.
+    source: powershell
+  - id: SCN-001-A03
+    description: Wazuh detection references the execution evidence.
+    source: wazuh
+tags:
+  - regression-demo
+  - gap-fix-retest
