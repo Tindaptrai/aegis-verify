@@ -6,7 +6,8 @@ AEGIS Verify replays safe security scenarios, normalizes telemetry from open-sou
 security controls, and verifies every security conclusion against raw evidence. Its
 core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
-> Status: repository foundation. The first 14-day milestone is a fixture-driven CLI;
+> Status: canonical event model v1.0 implemented on this branch, pending review.
+> The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
 
@@ -35,6 +36,20 @@ tests/fixtures Sanitized evidence used by tests and CI
 Start with [the MVP PRD](docs/PRD.md), then read
 [the architecture](docs/ARCHITECTURE.md). Contributors and coding agents must also
 follow [AGENTS.md](AGENTS.md).
+
+## Current implementation: event contract
+
+[Canonical Event v1.0](docs/CANONICAL_EVENT.md) provides validation, UTC timestamps,
+JSON serialization, and exact-byte SHA-256 hashing. No live lab is required:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[test]"
+.\.venv\Scripts\python.exe -m pytest backend/tests -q
+```
+
+Requires Python >=3.11. The tests use artificial contract data, not incident evidence.
+Parsers and the CLI described below are still planned.
 
 ## First technical milestone
 
