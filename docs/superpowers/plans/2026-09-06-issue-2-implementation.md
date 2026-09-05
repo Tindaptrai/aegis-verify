@@ -37,7 +37,7 @@ modify backend/app/models/__init__.py for exports.
 Produces: ScenarioSource, ExpectedOutcome, ScenarioSafety, ScenarioAssertion,
 ScenarioManifest with standard model_validate/model_validate_json/model_dump_json.
 
-- [ ] Add tests with an artificial scenario dictionary (SCN-900, one wazuh
+- [x] Add tests with an artificial scenario dictionary (SCN-900, one wazuh
   assertion SCN-900-A01, draft version 0.1.0, safe flags false/true).
   Example regression contract:
 
@@ -47,10 +47,10 @@ ScenarioManifest with standard model_validate/model_validate_json/model_dump_jso
       ScenarioManifest.model_validate(data)
   ```
 
-- [ ] Run `python -m pytest backend/tests/test_scenario.py -q` before creating
+- [x] Run `python -m pytest backend/tests/test_scenario.py -q` before creating
   the module and observe the missing contract; add typed fields, then exercise
   boundary tests to distinguish missing cross-field checks from import errors.
-- [ ] Implement strict nonblank UTF-8 strings with AfterValidator, ASCII ID
+- [x] Implement strict nonblank UTF-8 strings with AfterValidator, ASCII ID
   patterns anchored at the actual end, strict boolean fields followed by safety
   checks, string enums with before validators rejecting bytes, frozen nested
   models and tuple collections with before validators accepting only list/tuple.
@@ -61,14 +61,14 @@ ScenarioManifest with standard model_validate/model_validate_json/model_dump_jso
   tags: tuple[NonBlank, ...] | None = None
   ```
 
-- [ ] Add model-level relation validation: duplicate source and assertion IDs,
+- [x] Add model-level relation validation: duplicate source and assertion IDs,
   parent/child ID prefix, membership of assertion source and coverage of all
   declared sources. Give failures a stable field location with Pydantic
   ValidationError.from_exception_data and fixed error messages, never raw values.
-- [ ] Parametrize omissions, bad types, malformed IDs/versions, unsupported
+- [x] Parametrize omissions, bad types, malformed IDs/versions, unsupported
   status/outcome/source, safety coercion, unicode, empty/unordered collections;
   test both JSON paths, list isolation and nested immutability.
-- [ ] Run focused plus full suite; commit model and tests only after green.
+- [x] Run focused plus full suite; commit model and tests only after green.
 
 ## Task 2 — Bounded YAML policy and public loader
 
@@ -89,9 +89,9 @@ immutable tuple of ScenarioDiagnostic(code, field, line, column). Public message
 contain only these sanitized fields. Private policy exceptions carry fixed codes
 and positions, not source snippets. Scalar/model values never appear in diagnostics.
 
-- [ ] Add a real minimal YAML string and load actual repository manifests in
+- [x] Add a real minimal YAML string and load actual repository manifests in
   tests. Run before implementing loader to observe missing entry points.
-- [ ] Add PyYAML==6.0.3 and install editable package into the isolated venv.
+- [x] Add PyYAML==6.0.3 and install editable package into the isolated venv.
   Use the documented event stream to reject tags/anchors/aliases and enforce
   collection depth/node/document budgets before composing an object graph:
 
@@ -101,18 +101,18 @@ and positions, not source snippets. Scalar/model values never appear in diagnost
           raise YamlPolicyError('yaml_alias', event.start_mark)
   ```
 
-- [ ] Subclass SafeLoader without mutating its global registries. Limit the
+- [x] Subclass SafeLoader without mutating its global registries. Limit the
   boolean resolver to lowercase true/false. Reject duplicate keys before value
   construction, all non-string mapping keys and merge keys. Permit only standard
   scalar/collection tags; reject unsupported scalar tags instead of constructing
   dates, bytes or Python objects. Standard numeric values remain numbers and are
   rejected by strict domain fields, not converted to strings.
-- [ ] Convert YAML policy/parser/Unicode exceptions into fixed diagnostics;
+- [x] Convert YAML policy/parser/Unicode exceptions into fixed diagnostics;
   preserve mark line/column as one-based. Root must be a dict. Obtain scenario_id
   only if root id matches the strict public ID pattern. Convert model error loc
   components into allowlisted field names/indices; replace unknown keys with a
   fixed `<unknown>` segment, including suspicious nested paths.
-- [ ] Implement byte limit and strict UTF-8 checks for text and bounded file read:
+- [x] Implement byte limit and strict UTF-8 checks for text and bounded file read:
 
   ```python
   with Path(path).open('rb') as stream:
@@ -120,16 +120,16 @@ and positions, not source snippets. Scalar/model values never appear in diagnost
   # Reject oversized bytes before UTF-8 decoding; strip one leading BOM only.
   ```
 
-- [ ] Cover duplicate keys at every nested level, syntax/multi-document/empty
+- [x] Cover duplicate keys at every nested level, syntax/multi-document/empty
   roots, dangerous tags, aliases, merges, non-string keys, bool spellings,
   malformed UTF-8 and escaped surrogates. Assert fixed code/location and that an
   untrusted marker does not appear in formatted exceptions or traceback output.
-- [ ] Exercise exact byte boundary including BOM and multibyte UTF-8; depth 20/21
+- [x] Exercise exact byte boundary including BOM and multibyte UTF-8; depth 20/21
   and node 10,000/10,001 through parser policy before model validation. Test a
   thousands-deep input produces controlled depth rejection rather than recursion.
-- [ ] Use tmp_path for genuine read/no-write/missing-file/invalid-file tests.
+- [x] Use tmp_path for genuine read/no-write/missing-file/invalid-file tests.
   Test no environment interpolation and no mutation of global PyYAML behavior.
-- [ ] Run focused/full suite and pip check; commit after the green checkpoint.
+- [x] Run focused/full suite and pip check; commit after the green checkpoint.
 
 ## Task 3 — Delivery verification and next-step plan
 
@@ -138,22 +138,22 @@ docs/superpowers/plans/2026-09-06-issue-2-verification.md,
 docs/superpowers/plans/2026-09-06-after-issue-2.md;
 update README.md and backend/README.md; mark this plan completed with evidence.
 
-- [ ] Document every model field and loader policy, sample Powershell/Python
+- [x] Document every model field and loader policy, sample Powershell/Python
   commands, exception contract and the fact that validated draft is not approval
   to execute. Explain scenario version is a scenario revision, not event schema
   version; document current v0.1 contract through this guide and generated schema.
-- [ ] Run the documented example against all three repo manifests and confirm
+- [x] Run the documented example against all three repo manifests and confirm
   literal IDs, outcomes and assertion counts 3/4/4, without altering their bytes.
-- [ ] Build wheel and install into a separate clean venv; run tests from outside
+- [x] Build wheel and install into a separate clean venv; run tests from outside
   the source checkout using --import-mode=importlib and print imported module paths.
-- [ ] Self-review the complete diff for acceptance criteria, parser safety,
+- [x] Self-review the complete diff for acceptance criteria, parser safety,
   bounded allocations, diagnostics, strictness and immutable nested structures.
   Write failing regressions before fixing any newly confirmed defect.
-- [ ] Run fresh full pytest, pip check, git diff --check and
+- [x] Run fresh full pytest, pip check, git diff --check and
   `git diff --exit-code dc09897 -- scenarios backend/app/models/canonical_event.py`.
-- [ ] Record actual results, review limits, package checks, Python version and
+- [x] Record actual results, review limits, package checks, Python version and
   user-side commands. Inspect current Issue #3 read-only for the next-step plan.
-- [ ] Plan human test/review → PR/merge Issue #2 with approval → fixture handoff
+- [x] Plan human test/review → PR/merge Issue #2 with approval → fixture handoff
   and Issue #3 design. Specify sanitized Wazuh samples needed, never fabricate
   production/lab evidence or ask for credentials. Do not implement Issue #3.
-- [ ] Commit documentation; preserve branch/worktree for user verification.
+- [x] Commit documentation; preserve branch/worktree for user verification.
