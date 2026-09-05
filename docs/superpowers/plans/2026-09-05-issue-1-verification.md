@@ -54,3 +54,32 @@ contract data; no INC-002 fixture is supplied or invented.
 
 Human review should confirm the field contract before Issue #2 consumes it.
 Keep this branch for review and do not merge automatically.
+
+## P2 follow-up — invalid Unicode before JSON serialization
+
+The review found that optional text fields accepted lone surrogates through
+json.loads() + model_validate(), then model_dump_json() failed. The same failure
+was reproduced for IPv6 scope identifiers, including IP object input.
+
+Added strict UTF-8 encodability validation to all 13 optional text fields and to
+normalized IP address text. Invalid text now raises field-local ValidationError;
+valid text is returned unchanged. No stripping, replacement or Unicode
+normalization is performed. No dependencies or source fixtures changed.
+
+Actual checks for this follow-up:
+
+- New tests against 6d6aa25: 34 failed / 43 passed / 95 deselected. A focused
+  command_line case failed because ValidationError was not raised.
+- After the fix: `python -m pytest backend/tests -q` — 180 passed (103 existing
+  cases and 77 new cases covering both surrogate halves, 13 optional text fields,
+  both JSON input paths, valid Unicode and scoped IPv6 text/object input).
+- `python -m pip check` — No broken requirements found.
+- Additional in-memory review: all 2048 surrogate code points rejected for
+  command_line; valid scalar boundary samples round-tripped unchanged.
+- Generated JSON Schema compared equal to the 6d6aa25 baseline.
+- `git diff --check` passed.
+
+Self-review found no further actionable issue in this bounded fix. Verification
+used Python 3.13.14; no fresh wheel rebuild, lab validation or independent reviewer
+run was performed for the follow-up. User-side test confirmation is pending.
+No push or merge is part of this step.

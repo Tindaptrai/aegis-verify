@@ -2,6 +2,7 @@
 
 import json
 from datetime import datetime, timedelta, timezone
+from ipaddress import IPv6Address
 
 import pytest
 from pydantic import ValidationError
@@ -171,3 +172,60 @@ def test_formatted_validation_error_does_not_echo_untrusted_input(minimal_event)
     with pytest.raises(ValidationError) as error:
         CanonicalEvent.model_validate(minimal_event | {"event_action": marker})
     assert marker not in str(error.value)
+
+
+OPTIONAL_TEXT_FIELDS = [
+    "source_record_id", "event_provider", "asset_id", "hostname", "username",
+    "protocol", "process_name", "parent_process_name", "command_line",
+    "file_path", "file_hash", "rule_id", "signature_id",
+]
+
+
+@pytest.mark.parametrize("field", OPTIONAL_TEXT_FIELDS)
+@pytest.mark.parametrize("codepoint", [0xD800, 0xDFFF], ids=["high", "low"])
+def test_json_decoded_surrogates_are_rejected_before_serialization(minimal_event, field, codepoint):
+    # json.loads accepts escaped lone surrogates; a future parser may use it.
+    marker = "UNTRUSTED_UNIT_INPUT"
+    wire = json.dumps(minimal_event | {field: marker + chr(codepoint)})
+    decoded = json.loads(wire)
+    with pytest.raises(ValidationError) as error:
+        CanonicalEvent.model_validate(decoded)
+    assert field in {item["loc"][0] for item in error.value.errors()}
+    assert marker not in str(error.value)
+
+
+@pytest.mark.parametrize("field", OPTIONAL_TEXT_FIELDS)
+@pytest.mark.parametrize("text", [
+    "Tiếng Việt 🚀",
+    "  a\u0301\t\n",  # Decomposed accent: must not normalize or strip it.
+    "",  # Empty source text remains distinct from absent/null context.
+], ids=["vietnamese-emoji", "decomposed-whitespace", "empty"])
+def test_valid_unicode_is_preserved_through_both_json_paths(minimal_event, field, text):
+    wire = json.dumps(minimal_event | {field: text})
+    event = CanonicalEvent.model_validate(json.loads(wire))
+    direct = CanonicalEvent.model_validate_json(wire)
+    assert direct == event
+    assert json.loads(event.model_dump_json())[field] == text
+    assert CanonicalEvent.model_validate_json(event.model_dump_json()) == event
+
+
+@pytest.mark.parametrize("field", ["src_ip", "dst_ip"])
+@pytest.mark.parametrize("as_object", [False, True], ids=["text", "ip-object"])
+@pytest.mark.parametrize("codepoint", [0xD800, 0xDFFF], ids=["high", "low"])
+def test_ipv6_scope_surrogates_are_rejected_before_serialization(minimal_event, field, as_object, codepoint):
+    # IPv6Address permits arbitrary scope text, including malformed Unicode.
+    address = "fe80::1%" + chr(codepoint)
+    value = IPv6Address(address) if as_object else address
+    with pytest.raises(ValidationError) as error:
+        CanonicalEvent.model_validate(minimal_event | {field: value})
+    assert field in {item["loc"][0] for item in error.value.errors()}
+
+
+@pytest.mark.parametrize("field", ["src_ip", "dst_ip"])
+@pytest.mark.parametrize("as_object", [False, True], ids=["text", "ip-object"])
+def test_valid_ipv6_scope_survives_serialization(minimal_event, field, as_object):
+    address = "fe80::1%unit-interface"
+    value = IPv6Address(address) if as_object else address
+    event = CanonicalEvent.model_validate(minimal_event | {field: value})
+    assert json.loads(event.model_dump_json())[field] == address
+    assert CanonicalEvent.model_validate_json(event.model_dump_json()) == event

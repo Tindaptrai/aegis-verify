@@ -7,6 +7,7 @@ from ipaddress import IPv4Address, IPv6Address
 from typing import Annotated, Literal
 
 from pydantic import (
+    AfterValidator,
     AwareDatetime,
     BaseModel,
     ConfigDict,
@@ -34,6 +35,16 @@ class EventAction(StrEnum):
     OTHER = "other"
 
 
+def _require_utf8(value: str) -> str:
+    """Reject malformed Unicode without rewriting the source text."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("text must be encodable as UTF-8") from None
+    return value
+
+
+Utf8Text = Annotated[StrictStr, AfterValidator(_require_utf8)]
 NonBlank = Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
 Port = Annotated[int, Field(strict=True, ge=0, le=65535)]
 NonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
@@ -57,24 +68,24 @@ class CanonicalEvent(BaseModel):
     raw_event_hash: RawHash
     ingested_at: AwareDatetime
 
-    source_record_id: StrictStr | None = None
-    event_provider: StrictStr | None = None
-    asset_id: StrictStr | None = None
-    hostname: StrictStr | None = None
-    username: StrictStr | None = None
+    source_record_id: Utf8Text | None = None
+    event_provider: Utf8Text | None = None
+    asset_id: Utf8Text | None = None
+    hostname: Utf8Text | None = None
+    username: Utf8Text | None = None
     src_ip: IPvAnyAddress | None = None
     src_port: Port | None = None
     dst_ip: IPvAnyAddress | None = None
     dst_port: Port | None = None
-    protocol: StrictStr | None = None
-    process_name: StrictStr | None = None
+    protocol: Utf8Text | None = None
+    process_name: Utf8Text | None = None
     process_id: NonNegativeInt | None = None
-    parent_process_name: StrictStr | None = None
-    command_line: StrictStr | None = None
-    file_path: StrictStr | None = None
-    file_hash: StrictStr | None = None
-    rule_id: StrictStr | None = None
-    signature_id: StrictStr | None = None
+    parent_process_name: Utf8Text | None = None
+    command_line: Utf8Text | None = None
+    file_path: Utf8Text | None = None
+    file_hash: Utf8Text | None = None
+    rule_id: Utf8Text | None = None
+    signature_id: Utf8Text | None = None
     event_action: EventAction | None = None
     severity: NonNegativeInt | None = None
     technique_ids: tuple[NonBlank, ...] | None = None
@@ -112,6 +123,16 @@ class CanonicalEvent(BaseModel):
         if value is None or isinstance(value, (str, IPv4Address, IPv6Address)):
             return value
         raise ValueError("expected IP address text or an IP address object")
+
+    @field_validator("src_ip", "dst_ip")
+    @classmethod
+    def require_serializable_address(
+        cls, value: IPv4Address | IPv6Address | None,
+    ) -> IPv4Address | IPv6Address | None:
+        """IPv6 scope IDs are text even when the input is an IP object."""
+        if value is not None:
+            _require_utf8(str(value))
+        return value
 
     @field_validator("source_type", "event_action", mode="before")
     @classmethod

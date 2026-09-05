@@ -74,6 +74,10 @@ cung cấp. Không nhận set hoặc tự sắp xếp/deduplicate làm thay đ�
 ## Quy tắc xử lý
 
 - Từ chối field lạ: connector giữ trường riêng của vendor trong raw evidence.
+- Text tùy chọn và scope ID của IPv6 phải mã hóa được thành UTF-8. Surrogate
+  đơn lẻ (ví dụ `\ud800` được `json.loads()` chấp nhận) bị báo ValidationError
+  ngay khi tạo model, trước bước xuất JSON. Không tự xóa/thay ký tự lỗi; tiếng Việt,
+  emoji, dấu tổ hợp, khoảng trắng và chuỗi rỗng hợp lệ được giữ nguyên.
 - Nhận RFC 3339 dạng `2026-09-05T22:30:00+07:00` hoặc aware datetime; xuất UTC.
 - Text timestamp phải có giây, `T`, `Z` hoặc offset `+/-HH:MM`, tối đa 6 chữ số
   thập phân. Từ chối epoch số, ngày không có giờ, giờ không có múi giờ, offset
