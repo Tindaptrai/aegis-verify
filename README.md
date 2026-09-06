@@ -6,7 +6,8 @@ AEGIS Verify replays safe security scenarios, normalizes telemetry from open-sou
 security controls, and verifies every security conclusion against raw evidence. Its
 core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
-> Status: canonical event model v1.0 implemented on this branch, pending review.
+> Status: Canonical Event v1.0 is merged; read-only Scenario YAML validation is
+> implemented on this branch, pending user verification and review.
 > The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
@@ -50,6 +51,16 @@ python -m venv .venv
 
 Requires Python >=3.11. The tests use artificial contract data, not incident evidence.
 Parsers and the CLI described below are still planned.
+
+## Current implementation: scenario contract
+
+[Scenario YAML v0.1](docs/SCENARIO_SCHEMA.md) validates the three unchanged draft
+manifests, their safety metadata, source declarations and assertion identities.
+`aegis_verify.scenario_loader.load_scenario(path)` reads one local UTF-8 YAML file
+without rewriting it. Malformed or ambiguous YAML raises a contextual error.
+
+This checks the manifest contract only: it does not execute a scenario, authorize
+a lab action, evaluate log evidence or return detection/prevention results.
 
 ## First technical milestone
 
