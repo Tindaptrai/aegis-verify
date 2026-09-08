@@ -1,5 +1,8 @@
 # Issue #3 — thiết kế Wazuh fixture parser, profile Windows 4688
 
+**LỊCH SỬ, KHÔNG DÙNG ĐỂ IMPLEMENT:** Sau merge Issue #15/PR #16, thay bằng
+[thiết kế v2 lossless](2026-09-08-wazuh-win4688-v2-design.md).
+
 Ngày: 2026-09-08. Trạng thái: TẠM DỪNG — PHƯƠNG ÁN CẮT PRECISION ĐÃ BỊ THAY THẾ.
 
 Người dùng chọn giữ nguyên độ chính xác thời gian và tách nâng cấp canonical

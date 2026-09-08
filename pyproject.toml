@@ -13,8 +13,8 @@ dependencies = ["pydantic==2.13.5", "PyYAML==6.0.3"]
 test = ["pytest==9.1.1"]
 
 [tool.setuptools]
-packages = ["aegis_verify", "aegis_verify.models"]
-package-dir = { aegis_verify = "backend/app" }
+packages = ["aegis_verify", "aegis_verify.models", "aegis_verify.connectors", "aegis_verify.connectors.wazuh"]
+package-dir = { aegis_verify = "backend/app", "aegis_verify.connectors" = "connectors" }
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
