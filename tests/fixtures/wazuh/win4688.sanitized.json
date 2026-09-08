@@ -1,0 +1,82 @@
+{
+  "_index": "wazuh-alerts-4.x-2026.09.08",
+  "_id": "MhA3gaABsVQEx1Uwl6Gi",
+  "_score": null,
+  "_source": {
+    "input": {
+      "type": "log"
+    },
+    "agent": {
+      "ip": "192.0.2.11",
+      "name": "LAB-WIN-001",
+      "id": "901"
+    },
+    "manager": {
+      "name": "lab-manager-001"
+    },
+    "data": {
+      "win": {
+        "eventdata": {
+          "subjectLogonId": "0x3e7",
+          "parentProcessName": "C:\\\\Windows\\\\System32\\\\services.exe",
+          "subjectDomainName": "WORKGROUP",
+          "tokenElevationType": "%%1936",
+          "newProcessId": "0x1ed4",
+          "mandatoryLabel": "S-1-16-16384",
+          "newProcessName": "C:\\\\Windows\\\\System32\\\\sppsvc.exe",
+          "targetLogonId": "0x3e4",
+          "targetUserName": "LAB-WIN-001$",
+          "subjectUserSid": "S-1-5-18",
+          "processId": "0x2a4",
+          "targetDomainName": "WORKGROUP",
+          "commandLine": "C:\\\\Windows\\\\system32\\\\sppsvc.exe",
+          "targetUserSid": "S-1-0-0",
+          "subjectUserName": "LAB-WIN-001$"
+        },
+        "system": {
+          "eventID": "4688",
+          "keywords": "0x8020000000000000",
+          "providerGuid": "{54849625-5478-4994-a5ba-3e3b0328c30d}",
+          "level": "0",
+          "channel": "Security",
+          "opcode": "0",
+          "message": "\"A new process has been created.\r\n\r\nCreator Subject:\r\n\tSecurity ID:\t\tS-1-5-18\r\n\tAccount Name:\t\tLAB-WIN-001$\r\n\tAccount Domain:\t\tWORKGROUP\r\n\tLogon ID:\t\t0x3E7\r\n\r\nTarget Subject:\r\n\tSecurity ID:\t\tS-1-0-0\r\n\tAccount Name:\t\tLAB-WIN-001$\r\n\tAccount Domain:\t\tWORKGROUP\r\n\tLogon ID:\t\t0x3E4\r\n\r\nProcess Information:\r\n\tNew Process ID:\t\t0x1ed4\r\n\tNew Process Name:\tC:\\Windows\\System32\\sppsvc.exe\r\n\tToken Elevation Type:\t%%1936\r\n\tMandatory Label:\t\tS-1-16-16384\r\n\tCreator Process ID:\t0x2a4\r\n\tCreator Process Name:\tC:\\Windows\\System32\\services.exe\r\n\tProcess Command Line:\tC:\\Windows\\system32\\sppsvc.exe\r\n\r\nToken Elevation Type indicates the type of token that was assigned to the new process in accordance with User Account Control policy.\r\n\r\nType 1 is a full token with no privileges removed or groups disabled.  A full token is only used if User Account Control is disabled or if the user is the built-in Administrator account or a service account.\r\n\r\nType 2 is an elevated token with no privileges removed or groups disabled.  An elevated token is used when User Account Control is enabled and the user chooses to start the program using Run as administrator.  An elevated token is also used when an application is configured to always require administrative privilege or to always require maximum privilege, and the user is a member of the Administrators group.\r\n\r\nType 3 is a limited token with administrative privileges removed and administrative groups disabled.  The limited token is used when User Account Control is enabled, the application does not require administrative privilege, and the user does not choose to start the program using Run as administrator.\"",
+          "version": "2",
+          "systemTime": "2026-09-08T13:31:34.6479839Z",
+          "eventRecordID": "22339",
+          "threadID": "280",
+          "computer": "LAB-WIN-001",
+          "task": "13312",
+          "processID": "4",
+          "severityValue": "AUDIT_SUCCESS",
+          "providerName": "Microsoft-Windows-Security-Auditing"
+        }
+      }
+    },
+    "rule": {
+      "firedtimes": 315,
+      "mail": false,
+      "level": 3,
+      "description": "A process was created.",
+      "groups": [
+        "windows",
+        " WEF"
+      ],
+      "id": "67027"
+    },
+    "location": "EventChannel",
+    "decoder": {
+      "name": "windows_eventchannel"
+    },
+    "id": "1788874297.6897107",
+    "timestamp": "2026-09-08T13:31:37.724+0000"
+  },
+  "fields": {
+    "timestamp": [
+      "2026-09-08T13:31:37.724Z"
+    ]
+  },
+  "sort": [
+    1788874297724
+  ]
+}
