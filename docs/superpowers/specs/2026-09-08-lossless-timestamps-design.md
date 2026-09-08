@@ -1,6 +1,7 @@
 # Issue #15 — Canonical Event v2 với thời gian không mất độ chính xác
 
-Ngày: 2026-09-08. Trạng thái: thiết kế chi tiết chờ người dùng duyệt trước code.
+Ngày: 2026-09-08. Trạng thái: người dùng đã duyệt; implementation trên nhánh riêng,
+chờ human review trước merge. Phần hiện trạng/lựa chọn dưới đây ghi lại lúc thiết kế.
 Issue: https://github.com/Tindaptrai/aegis-verify/issues/15
 
 ## 1. Tóm tắt dành cho người dùng
@@ -207,9 +208,10 @@ Người dùng duyệt spec này trước implementation plan/TDD. Sau khi Issue
 kiểm chứng và review, cập nhật spec Issue #3 bỏ toàn bộ floor-microsecond policy,
 dùng CanonicalEventV2 và systemTime nguyên độ chính xác. Không tự push/merge.
 
-Đầu ra trong bước này là thiết kế và issue tracking, chưa có implementation hoặc
-kết quả test mới. Khi triển khai sẽ chuẩn bị nhánh/môi trường tách biệt với baseline
-test, không dùng nhầm editable install đang trỏ tới worktree Issue #1/#2.
+Thiết kế đã chuyển sang implementation theo
+[kế hoạch](../plans/2026-09-08-lossless-timestamps.md), sử dụng worktree và môi trường
+riêng. Xem [hướng dẫn v2](../../CANONICAL_EVENT_V2.md) và
+[kết quả kiểm chứng](../plans/2026-09-08-issue-15-verification.md).
 
 Nguồn: AGENTS.md, PRD, ARCHITECTURE, CANONICAL_EVENT và model/tests hiện tại.
 [Python datetime](https://docs.python.org/3/library/datetime.html) giải thích giới

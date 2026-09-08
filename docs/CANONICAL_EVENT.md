@@ -1,5 +1,8 @@
 # Canonical Event v1.0 — dữ liệu chung của AEGIS
 
+V1 vẫn giữ nguyên API microsecond. Xem [Canonical Event v2.0](CANONICAL_EVENT_V2.md)
+cho thời gian tối đa 9 chữ số, reader có version và nâng cấp chủ động v1 -> v2.
+
 Canonical Event là hợp đồng dữ liệu dùng chung cho bốn connector. Model kiểm tra
 cấu trúc và kiểu dữ liệu; việc kết luận một scenario được phát hiện hay ngăn chặn
 thuộc validation engine ở Issue #7.
