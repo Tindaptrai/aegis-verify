@@ -256,3 +256,50 @@ def test_loader_and_error_redaction(api, sample, context, tmp_path):
     with pytest.raises(api.SuricataParseError) as error:
         api.load_suricata_wazuh_document(path, **context)
     assert error.value.diagnostic.code == 'input_too_large'
+
+
+@pytest.mark.parametrize('path,fields', [
+    ('_source.agent', ('collector_agent_id', 'collector_agent_name', 'collector_agent_ip')),
+    ('_source.manager', ('collector_manager_name',)),
+    ('_source.rule.id', ('wazuh_rule_id',)),
+    ('_source.rule.level', ('wazuh_rule_level',)),
+    ('_source.data.alert.gid', ('signature_gid',)),
+    ('_source.data.alert.rev', ('signature_rev',)),
+    ('_source.data.flow_id', ('flow_id_raw',)),
+    ('_source.id', ()),
+])
+@pytest.mark.parametrize('omit', [False, True])
+def test_optional_provenance_absence(api, sample, context, path, fields, omit):
+    result = api.parse_suricata_wazuh_document(variant(sample, path, omit=omit), **context)
+    for field in fields:
+        assert getattr(result.provenance, field) is None
+    if path == '_source.id':
+        assert result.event.source_record_id is None
+    if path == '_source.rule.id':
+        assert result.event.rule_id is None
+
+
+@pytest.mark.parametrize('path,value,field,want', [
+    ('_source.data.alert.signature_id', '0'*128, 'signature_id', '0'*128),
+    ('_source.data.alert.signature_id', 10**127, 'signature_id', str(10**127)),
+    ('_source.data.alert.severity', '9'*128, 'severity', int('9'*128)),
+    ('_source.data.alert.severity', 10**127, 'severity', 10**127),
+    ('_source.rule.id', 10**127, 'rule_id', str(10**127)),
+])
+def test_accepted_numeric_width_boundary(api, sample, context, path, value, field, want):
+    event = api.parse_suricata_wazuh_document(variant(sample, path, value), **context).event
+    assert getattr(event, field) == want
+    assert parse_canonical_event_json(event.model_dump_json()) == event
+
+
+@pytest.mark.parametrize('value,accepted', [('1'*118 + '.000000000', True),
+                                         ('1.0000000000', False),
+                                         ('1'*119 + '.000000000', False)])
+def test_flow_text_boundaries(api, sample, context, value, accepted):
+    raw = variant(sample, '_source.data.flow_id', value)
+    if accepted:
+        assert api.parse_suricata_wazuh_document(raw, **context).provenance.flow_id_raw == value
+    else:
+        with pytest.raises(api.SuricataParseError) as error:
+            api.parse_suricata_wazuh_document(raw, **context)
+        assert error.value.diagnostic.field_path == '_source.data.flow_id'
