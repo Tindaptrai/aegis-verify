@@ -6,8 +6,9 @@ AEGIS Verify replays safe security scenarios, normalizes telemetry from open-sou
 security controls, and verifies every security conclusion against raw evidence. Its
 core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
-> Status: Canonical Event v1.0 is merged; read-only Scenario YAML validation is
-> implemented on this branch, pending user verification and review.
+> Status: Canonical Event v1.0 and read-only Scenario YAML validation are merged.
+> Canonical Event v2.0 lossless timestamps are implemented on this branch,
+> pending human review and verification before merge.
 > The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
@@ -42,6 +43,10 @@ follow [AGENTS.md](AGENTS.md).
 
 [Canonical Event v1.0](docs/CANONICAL_EVENT.md) provides validation, UTC timestamps,
 JSON serialization, and exact-byte SHA-256 hashing. No live lab is required:
+
+[Canonical Event v2.0](docs/CANONICAL_EVENT_V2.md) adds exact 0..9-digit timestamps,
+an explicit versioned reader and v1 migration, without changing the v1 alias.
+The v2 guide includes Vietnamese explanations and runnable Python examples.
 
 ```powershell
 python -m venv .venv
