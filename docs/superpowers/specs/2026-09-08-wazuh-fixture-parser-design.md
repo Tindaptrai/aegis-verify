@@ -1,6 +1,13 @@
 # Issue #3 — thiết kế Wazuh fixture parser, profile Windows 4688
 
-Ngày: 2026-09-08. Trạng thái: thiết kế chi tiết chờ người dùng duyệt.
+Ngày: 2026-09-08. Trạng thái: TẠM DỪNG — PHƯƠNG ÁN CẮT PRECISION ĐÃ BỊ THAY THẾ.
+
+Người dùng chọn giữ nguyên độ chính xác thời gian và tách nâng cấp canonical
+thành [Issue #15](https://github.com/Tindaptrai/aegis-verify/issues/15).
+KHÔNG triển khai floor-microsecond-v1, discarded_nanoseconds hoặc việc cắt 7–9
+chữ số xuống 6 theo nội dung lịch sử bên dưới. Issue #3 chờ hợp đồng mới được
+review/kiểm chứng, sau đó sửa thiết kế parser sang kiểu thời gian lossless.
+Phần dưới giữ lại để truy vết thiết kế cũ, không phải spec hiện hành để viết code.
 
 Người dùng đã duyệt hướng ưu tiên thời gian sự kiện và phân biệt máy nguồn với
 agent thu thập. Các quy tắc chi tiết dưới đây được trình duyệt trước kế hoạch code.
