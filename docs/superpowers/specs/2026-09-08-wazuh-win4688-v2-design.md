@@ -44,7 +44,12 @@ timestamp_policy=`lossless-nanosecond-v2`; bỏ discarded_nanoseconds.
 | hostname | data.win.system.computer |
 | username | data.win.eventdata.subjectUserName (creator, không target user) |
 | process_name | data.win.eventdata.newProcessName, giữ nguyên path |
-| process_id | data.win.eventdata.newProcessId: hex 0x/0X, 1..126 hex digits |
+| process_id | data.win.eventdata.newProcessId: hex 0x/0X, 1..126 hex digits; converted decimal value <=128 digits |
+
+Review refinement: the decimal PID budget prevents accepting a hex string that
+produces a numeric token rejected by the canonical JSON reader. Leading zeros
+remain accepted within the source-length budget. This does not change canonical
+v2 or impose a guessed platform PID width; artificial boundary tests cover it.
 | parent_process_name | data.win.eventdata.parentProcessName |
 | command_line | data.win.eventdata.commandLine, không thực thi hoặc decode lần hai |
 | rule_id | rule.id: string hoặc integer >=0 -> string, không bool/float |

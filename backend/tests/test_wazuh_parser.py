@@ -245,3 +245,19 @@ def test_error_privacy_for_validation_and_io(api, sample, context, tmp_path):
         # causes/contexts are suppressed and the diagnostic itself is value-free.
         assert caught.value.__suppress_context__
         assert 'SECRET' not in repr(caught.value.diagnostic)
+
+
+@pytest.mark.parametrize('pid', ['0x' + 'f' * 107, hex(10 ** 128)])
+def test_pid_conversion_cannot_exceed_canonical_numeric_budget(api, sample, context, pid):
+    raw = variant(sample, '_source.data.win.eventdata.newProcessId', pid)
+    with pytest.raises(api.WazuhParseError) as caught:
+        api.parse_wazuh_document(raw, **context)
+    assert caught.value.diagnostic.code == 'invalid_field'
+    assert caught.value.diagnostic.field_path == '_source.data.win.eventdata.newProcessId'
+
+
+@pytest.mark.parametrize('pid', ['0x0', hex(10 ** 128 - 1), '0x' + '0' * 125 + '1'])
+def test_accepted_pid_round_trips_through_canonical_reader(api, sample, context, pid):
+    from aegis_verify.canonical_io import parse_canonical_event_json
+    event = api.parse_wazuh_document(variant(sample, '_source.data.win.eventdata.newProcessId', pid), **context).event
+    assert parse_canonical_event_json(event.model_dump_json()) == event

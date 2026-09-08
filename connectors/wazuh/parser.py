@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from aegis_verify.evidence import hash_raw_event
 from aegis_verify.models import CanonicalEventV2, PreciseTimestamp
-from ._json import MAX_BYTES, decode_document
+from ._json import MAX_BYTES, MAX_NUMERIC_CHARS, decode_document
 from .errors import WazuhParseError
 
 
@@ -119,6 +119,10 @@ def parse_wazuh_document(
         if re.fullmatch(r'0[xX][0-9a-fA-F]{1,126}', pid) is None:
             raise WazuhParseError('invalid_field', pid_path) from None
         pid = int(pid, 16)
+        # Hex can expand in decimal. Keep emitted numeric tokens within the
+        # 128-character budget also used at the canonical JSON boundary.
+        if len(str(pid)) > MAX_NUMERIC_CHARS:
+            raise WazuhParseError('invalid_field', pid_path) from None
     rule_id = rule.get('id')
     if type(rule_id) is int and rule_id >= 0:
         rule_id = str(rule_id)
