@@ -7,8 +7,9 @@ security controls, and verifies every security conclusion against raw evidence. 
 core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
 > Status: Canonical Event v1.0 and read-only Scenario YAML validation are merged.
-> Canonical Event v2.0 lossless timestamps are implemented on this branch,
-> pending human review and verification before merge.
+> Canonical Event v2.0 lossless timestamps are merged via PR #16.
+> A fixture-only Wazuh Windows 4688 parser is implemented on this branch,
+> pending human mapping/lab review before Issue #3 integration.
 > The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
@@ -54,8 +55,15 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 ```
 
-Requires Python >=3.11. The tests use artificial contract data, not incident evidence.
-Parsers and the CLI described below are still planned.
+Requires Python >=3.11. Contract tests use artificial data; Wazuh parser tests also
+use one reviewed, sanitized user sample, not proof of an incident.
+The full validation CLI described below is still planned.
+
+## Current implementation: Wazuh fixture parser
+
+[Wazuh Windows 4688 guide](docs/WAZUH_FIXTURE_PARSER.md) explains the first JSON-only
+profile, exact timestamp mapping, evidence identity, explicit collection topology,
+safe errors and runnable local comparison. No live SIEM or scenario execution.
 
 ## Current implementation: scenario contract
 

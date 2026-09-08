@@ -45,11 +45,6 @@ timestamp_policy=`lossless-nanosecond-v2`; bỏ discarded_nanoseconds.
 | username | data.win.eventdata.subjectUserName (creator, không target user) |
 | process_name | data.win.eventdata.newProcessName, giữ nguyên path |
 | process_id | data.win.eventdata.newProcessId: hex 0x/0X, 1..126 hex digits; converted decimal value <=128 digits |
-
-Review refinement: the decimal PID budget prevents accepting a hex string that
-produces a numeric token rejected by the canonical JSON reader. Leading zeros
-remain accepted within the source-length budget. This does not change canonical
-v2 or impose a guessed platform PID width; artificial boundary tests cover it.
 | parent_process_name | data.win.eventdata.parentProcessName |
 | command_line | data.win.eventdata.commandLine, không thực thi hoặc decode lần hai |
 | rule_id | rule.id: string hoặc integer >=0 -> string, không bool/float |
@@ -57,6 +52,11 @@ v2 or impose a guessed platform PID width; artificial boundary tests cover it.
 | environment_id, ingested_at | validated caller context |
 | asset_id | agent.id nếu direct, optional string; không suy từ hostname |
 | event_action, network, file, signature, technique | null; không suy từ message/rule text |
+
+Review refinement: the decimal PID budget prevents accepting a hex string that
+produces a numeric token rejected by the canonical JSON reader. Leading zeros
+remain accepted within the source-length budget. This does not change canonical
+v2 or impose a guessed platform PID width; artificial boundary tests cover it.
 
 Optional string nhận empty string nếu canonical cho phép; bytes/numeric từ chối.
 Các container agent/manager/rule/eventdata thiếu/null là vắng context; nếu có phải
