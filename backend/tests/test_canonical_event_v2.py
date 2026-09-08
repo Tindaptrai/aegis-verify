@@ -76,3 +76,8 @@ def test_explicit_versions_and_schema(v2, event_data):
     assert schema['properties']['timestamp']['type'] == 'string'
     assert schema['properties']['ingested_at']['format'] == 'date-time'
     assert schema['additionalProperties'] is False
+
+
+def test_deep_model_copy_keeps_timestamp_value(v2, event_data):
+    event = v2.model_validate(event_data)
+    assert event.model_copy(deep=True).model_dump_json() == event.model_dump_json()

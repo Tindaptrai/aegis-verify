@@ -139,3 +139,65 @@ def test_upgrade_rejects_wrong_types_and_unvalidated_construct(api, data):
     for value in (data, CanonicalEventV2.model_validate(data | {'schema_version': '2.0'}), CanonicalEvent.model_construct(**(data | {'timestamp': None}))):
         with pytest.raises(api.CanonicalReadError):
             api.upgrade_canonical_event(value)
+
+
+def test_exact_wire_size_limit(api, data):
+    compact = json.dumps(data, separators=(',', ':'))
+    at_limit = compact + ' ' * (api.MAX_INPUT_BYTES - len(compact))
+    assert api.parse_canonical_event_json(at_limit).event_id == data['event_id']
+    with pytest.raises(api.CanonicalReadError) as caught:
+        api.parse_canonical_event_json(at_limit + ' ')
+    assert caught.value.code == 'input_too_large'
+
+
+@pytest.mark.parametrize('containers,code', [(32, 'invalid_event'), (33, 'input_too_deep')])
+def test_exact_depth_boundary_both_routes(api, data, containers, code):
+    node = 0
+    for _ in range(containers - 1):
+        node = [node]
+    payload = data | {'extra': node}
+    for parse, value in ((api.parse_canonical_event, payload), (api.parse_canonical_event_json, json.dumps(payload))):
+        with pytest.raises(api.CanonicalReadError) as caught:
+            parse(value)
+        assert caught.value.code == code
+
+
+def test_numeric_token_boundary(api, data):
+    for digits in (128, 129):
+        value = 10 ** (digits - 1)
+        for parse, payload in ((api.parse_canonical_event, data | {'severity': value}),
+            (api.parse_canonical_event_json, json.dumps(data | {'severity': value}))):
+            if digits == 128:
+                assert parse(payload).severity == value
+            else:
+                with pytest.raises(api.CanonicalReadError) as caught:
+                    parse(payload)
+                assert caught.value.code == 'invalid_number'
+
+
+def test_shared_tree_expansion_is_bounded(api, data):
+    shared = [0]
+    for _ in range(25):
+        shared = [shared, shared]
+    with pytest.raises(api.CanonicalReadError) as caught:
+        api.parse_canonical_event(data | {'extra': shared})
+    assert caught.value.code == 'input_too_large'
+
+
+def test_bad_json_types_keys_and_duplicate_escaped_keys(api, data):
+    for value in (None, [], b'{}', data | {1: 'wrong-key'}, data | {'\ud800': 0}):
+        with pytest.raises(api.CanonicalReadError):
+            api.parse_canonical_event(value)
+    with pytest.raises(api.CanonicalReadError) as caught:
+        api.parse_canonical_event_json('{"schema_version":"1.0","schema_\\u0076ersion":"2.0"}')
+    assert caught.value.code == 'invalid_json'
+
+
+@pytest.mark.parametrize('field,value', [('command_line', 'x' * (1024 * 1024)), ('process_id', 10 ** 128)], ids=['large-text', 'large-integer'])
+def test_model_upgrade_does_not_inherit_wire_reader_budgets(api, data, field, value):
+    old = CanonicalEvent.model_validate(data | {field: value})
+    expected = CanonicalEventV2.model_validate(old.model_dump(mode='json') | {'schema_version': '2.0'})
+    upgraded = api.upgrade_canonical_event(old)
+    assert upgraded == expected
+    assert getattr(upgraded, field) == value
+    assert old.schema_version == '1.0'

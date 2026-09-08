@@ -35,6 +35,13 @@ class PreciseTimestamp:
     def __init__(self):
         raise TypeError('use PreciseTimestamp.parse')
 
+    def __copy__(self):
+        return self
+
+    def __deepcopy__(self, memo):
+        # Sharing is safe for an immutable value, including model_copy(deep=True).
+        return self
+
     @classmethod
     def _from_parts(cls, seconds: int, nanos: int, digits: int):
         if (

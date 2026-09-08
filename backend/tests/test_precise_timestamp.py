@@ -1,4 +1,5 @@
-from datetime import datetime, timedelta, timezone
+from copy import copy, deepcopy
+from datetime import datetime, timedelta, timezone, tzinfo
 import json
 
 import pytest
@@ -96,3 +97,43 @@ def test_pydantic_roundtrip_and_schema(timestamp_type):
     assert schema['type'] == 'string'
     assert schema['format'] == 'date-time'
     assert 'pattern' in schema
+
+
+@pytest.mark.parametrize('parts', [(True, 0, 0), (0, False, 0), (0, 0, True),
+    (0, -1, 9), (0, 1_000_000_000, 9), (0, 1, 0), (0, 1, 8),
+    (0, 0, -1), (0, 0, 10), (-62135596801, 0, 0), (253402300800, 0, 0)])
+def test_internal_factory_cannot_create_invalid_state(timestamp_type, parts):
+    with pytest.raises(ValueError):
+        timestamp_type._from_parts(*parts)
+
+
+def test_immutable_value_can_be_copied(timestamp_type):
+    stamp = timestamp_type.parse('2026-01-01T00:00:00.000000001Z')
+    assert copy(stamp) is stamp
+    assert deepcopy(stamp) is stamp
+
+
+def test_unknown_datetime_offset_rejected(timestamp_type):
+    class UnknownOffset(tzinfo):
+        def utcoffset(self, dt):
+            return None
+    with pytest.raises(ValueError):
+        timestamp_type.parse(datetime(2026, 1, 1, tzinfo=UnknownOffset()))
+
+
+@pytest.mark.parametrize('value', [
+    datetime(1, 1, 1, tzinfo=timezone(timedelta(hours=1))),
+    datetime(9999, 12, 31, 23, 59, tzinfo=timezone(timedelta(hours=-1))),
+])
+def test_datetime_utc_overflow_rejected(timestamp_type, value):
+    with pytest.raises(ValueError):
+        timestamp_type.parse(value)
+
+
+@pytest.mark.parametrize('field_value', ['1969-12-31T23:59:59.000000001Z',
+    '0001-01-01T00:00:00.999999999Z', '9999-12-31T23:59:59.999999999Z'])
+def test_exact_integer_and_serialization_at_extreme_dates(timestamp_type, field_value):
+    stamp = timestamp_type.parse(field_value)
+    adapter = TypeAdapter(timestamp_type)
+    assert adapter.validate_json(adapter.dump_json(stamp)) == stamp
+    assert timestamp_type.parse(stamp.isoformat()).epoch_nanoseconds == stamp.epoch_nanoseconds

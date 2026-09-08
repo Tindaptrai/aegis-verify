@@ -194,7 +194,9 @@ def upgrade_canonical_event(event: CanonicalEvent) -> CanonicalEventV2:
         validated = CanonicalEvent.model_validate(values)
         data = validated.model_dump(mode='json', warnings=False)
         data['schema_version'] = '2.0'
-        return parse_canonical_event(data)
+        # Migration is model-to-model, not a wire reader: preserve all valid
+        # model values, including values beyond the reader's resource policy.
+        return CanonicalEventV2.model_validate(data)
     except ValidationError as error:
         raise _validation_error(error, 'invalid_upgrade') from None
     except (PydanticSerializationError, UnicodeError, OverflowError, ValueError):
