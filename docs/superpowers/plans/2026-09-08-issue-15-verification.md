@@ -52,11 +52,17 @@ Sai sót setup đã xử lý: lượt baseline đầu dùng `--basetemp=build/..
 parent `build`, dẫn đến 360 passed + 5 setup errors. Sau tạo parent và dùng đường
 dẫn temp mới, baseline đạt 365 passed. Đây không phải lỗi code sản phẩm.
 
+Lượt thử thêm với lệnh pytest mặc định sau đó chạy tới 100% nhưng thất bại ở
+session cleanup: Windows từ chối quyền truy cập `Temp/pytest-of-kuroh/pytest-current`.
+Không tính lượt đó là pass; không sửa ACL hoặc xóa thư mục Temp của người dùng.
+Lệnh đối chiếu dưới đây chọn basetemp mới trong worktree như các lượt đã xanh.
+
 ## Lệnh đối chiếu dành cho người dùng
 
 ```powershell
 cd 'I:\AEGIS-VERIFY\.worktrees\issue-15-lossless-timestamps'
-& '.\.venv\Scripts\python.exe' -m pytest backend/tests -q
+$aegisTestTemp = 'build/pytest-user-' + [guid]::NewGuid().ToString('N')
+& '.\.venv\Scripts\python.exe' -m pytest backend/tests -q --basetemp $aegisTestTemp
 & '.\.venv\Scripts\python.exe' -m pip check
 ```
 
