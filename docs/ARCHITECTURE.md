@@ -85,6 +85,7 @@ frontend/          Deferred results dashboard
 
 ## V1 boundary
 
-Live Wazuh API/Indexer, direct EVE JSON, pfSense syslog/export, and direct Cowrie JSON
-are V1 connectors. They must reuse the canonical model and validation engine rather
-than bypassing the V0 architecture.
+Live Wazuh API/Indexer and continuous ingestion of Suricata EVE, pfSense syslog,
+and Cowrie streams are V1 connectors. Offline sanitized files, including the
+direct EVE JSONL fixtures introduced by Suricata B, remain part of V0. Live adapters
+must reuse the canonical model and validation engine rather than bypassing them.

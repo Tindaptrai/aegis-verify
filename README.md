@@ -9,8 +9,10 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 > Status: Canonical Event v1.0 and read-only Scenario YAML validation are merged.
 > Canonical Event v2.0 lossless timestamps are merged via PR #16.
 > The fixture-only Wazuh Windows 4688 profile is merged via PR #17.
-> This branch adds Suricata A (Wazuh-exported alert), pending human/lab comparison.
-> Issue #4 remains partial; direct EVE/flow coverage is not implemented yet.
+> Suricata A (Wazuh-exported alert) is merged via PR #18.
+> This branch adds B: direct EVE JSONL alert/flow with per-line evidence.
+> Real EVE alerts and standalone TCP/UDP flows have passed independent review and user test comparison.
+> See the B pull request and Issue #4 for integration status and acceptance evidence.
 > The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
@@ -68,9 +70,6 @@ safe errors and runnable local comparison. No live SIEM or scenario execution.
 
 ## Current implementation: scenario contract
 
-See also [Suricata A: Vietnamese walkthrough and next-day B checklist](docs/SURICATA_WAZUH_ALERT.md)
-for the offline Suricata alert profile, source-time/action semantics and sample commands.
-
 [Scenario YAML v0.1](docs/SCENARIO_SCHEMA.md) validates the three unchanged draft
 manifests, their safety metadata, source declarations and assertion identities.
 `aegis_verify.scenario_loader.load_scenario(path)` reads one local UTF-8 YAML file
@@ -78,6 +77,13 @@ without rewriting it. Malformed or ambiguous YAML raises a contextual error.
 
 This checks the manifest contract only: it does not execute a scenario, authorize
 a lab action, evaluate log evidence or return detection/prevention results.
+
+## Current implementation: Suricata fixture parsers
+
+[Suricata A](docs/SURICATA_WAZUH_ALERT.md) handles Wazuh-exported alerts.
+[Suricata B](docs/SURICATA_EVE_JSONL.md) handles direct EVE JSONL alert/flow,
+including skip outcomes, exact line evidence and explicit sensor context.
+The B guide documents the four initial lab exports and the additional real MGMT flow sample.
 
 ## First technical milestone
 

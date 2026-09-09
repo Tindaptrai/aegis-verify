@@ -1,0 +1,1 @@
+{"timestamp":"2026-04-03T20:57:48.032154+0700","flow_id":100000000000004,"in_iface":"lab-dmz","event_type":"dns","src_ip":"192.0.2.7","src_port":41442,"dest_ip":"192.0.2.6","dest_port":53,"proto":"UDP","pkt_src":"wire/pcap"}

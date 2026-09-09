@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from aegis_verify.models import CanonicalEventV2
 
 _CODES = frozenset('input_type input_too_large invalid_encoding invalid_unicode invalid_json duplicate_key invalid_number max_depth max_nodes invalid_root missing_source invalid_field unsupported_profile missing_event_time invalid_event_time invalid_context canonical_validation io_error'.split())
+_CODES = _CODES | {'invalid_bom', 'max_records', 'total_input_too_large'}
 _FIELDS = frozenset({
     'source_ref', 'environment_id', 'ingested_at', 'deployment_mode',
     '_source', '_source.id', '_source.data', '_source.rule', '_source.rule.id',
@@ -16,6 +17,12 @@ _FIELDS = frozenset({
        'gid', 'rev', 'signature', 'category')),
     *('canonical.' + k for k in CanonicalEventV2.model_fields),
 })
+_FIELDS = _FIELDS | {
+    'sensor_id', 'event_type', 'icmp_type', 'icmp_code', 'flow',
+    *(path.removeprefix('_source.data.') for path in _FIELDS if path.startswith('_source.data.')),
+    *('flow.' + k for k in ('start', 'end', 'action', 'alerted', 'state', 'reason',
+       'pkts_toserver', 'pkts_toclient', 'bytes_toserver', 'bytes_toclient')),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,11 +35,11 @@ class SuricataDiagnostic:
 
 
 class SuricataParseError(ValueError):
-    def __init__(self, code, field_path=None, *, line=None, column=None):
+    def __init__(self, code, field_path=None, *, line=None, column=None, record_index=1):
         code = code if type(code) is str and code in _CODES else 'invalid_field'
         field_path = field_path if type(field_path) is str and field_path in _FIELDS else None
         self.diagnostic = SuricataDiagnostic(
-            code, field_path,
+            code, field_path, record_index=record_index if type(record_index) is int and record_index > 0 else 1,
             line=line if type(line) is int and line > 0 else None,
             column=column if type(column) is int and column > 0 else None,
         )
