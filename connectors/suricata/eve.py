@@ -63,7 +63,8 @@ def _line(raw, index, context):
         raise SuricataParseError('canonical_validation', 'canonical.' + str(loc[0]) if loc else None) from None
     warnings = ('ids_blocked_action_requires_review',) if context['deployment_mode']=='ids' and fields.get('event_action')=='blocked' else ()
     return SuricataEveRecord(status='parsed', event=event,
-        provenance=SuricataEveProvenance(**provenance, **metadata, event_id=event_id, warnings=warnings))
+        provenance=SuricataEveProvenance(**provenance, **metadata, event_id=event_id,
+                                       timestamp_basis='eve.timestamp', warnings=warnings))
 
 
 def _read_stream(stream, context):

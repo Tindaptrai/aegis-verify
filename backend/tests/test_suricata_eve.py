@@ -64,6 +64,7 @@ def test_direct_alert_uses_source_time_and_icmp_semantics():
     assert p.flow_id_raw == '100000000000001'
     assert p.sensor_id == 'sensor-lab-1' and p.action_scope == 'alert_rule'
     assert p.source_fraction_digits == 6 and p.event_type == 'alert'
+    assert p.timestamp_basis == 'eve.timestamp'
     assert p.warnings == () and p.record_index == p.line_start == p.line_end == 1
     assert p.raw_event_ref == e.raw_event_ref == 'eve-test.jsonl#L1-L1'
     assert p.raw_event_hash == e.raw_event_hash == hashlib.sha256(fixture()).hexdigest()
@@ -320,3 +321,11 @@ def test_direct_numeric_boundary_and_optional_flow_id():
         record,=parse(raw)
         assert record.provenance.flow_id_raw is None
         assert record.event.source_record_id is None
+
+
+@pytest.mark.parametrize('raw', [b'\n', b'{"event_type":"dns"}\n'])
+def test_skip_has_no_mapped_timestamp_metadata(raw):
+    record,=parse(raw)
+    assert record.provenance.timestamp_basis is None
+    assert record.provenance.source_fraction_digits is None
+    assert record.provenance.action_scope is None

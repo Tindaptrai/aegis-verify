@@ -10,7 +10,7 @@ class SuricataEveProvenance(BaseModel):
     model_config = ConfigDict(frozen=True, extra='forbid', strict=True, hide_input_in_errors=True)
     mapping_version: Literal['suricata-eve-v1'] = 'suricata-eve-v1'
     input_profile: Literal['suricata-eve-jsonl-v1'] = 'suricata-eve-jsonl-v1'
-    timestamp_basis: Literal['eve.timestamp'] = 'eve.timestamp'
+    timestamp_basis: Literal['eve.timestamp'] | None = None
     event_type: str | None = None
     source_fraction_digits: int | None = None
     action_scope: Literal['alert_rule', 'flow'] | None = None
