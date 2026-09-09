@@ -11,7 +11,9 @@ Tech: Python>=3.11, existing Pydantic/pytest; no new dependencies.
 
 Canonical v2 unchanged. 256KiB per line, 32MiB total, 100000 lines; JSON depth20,
 nodes10000,numeric128. Explicit sensor/context. No live access, cross-export dedup,
-ground truth change or publication. Real exports have NO standalone flow records.
+ground truth change or publication. Initial four exports had NO standalone flow
+records; the subsequent MGMT export and real-flow checks are recorded in the
+verification report. No production change was needed for that follow-up.
 
 ## Task 1 — reviewed fixtures and mapping
 

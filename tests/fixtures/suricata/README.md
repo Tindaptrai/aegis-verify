@@ -18,7 +18,7 @@ This fixture proves parsing of this representation only. Hashing the sanitized
 file does not authenticate the original event or establish a security verdict.
 Test-generated variants are artificial validation inputs, not production evidence.
 
-## Future direct EVE coverage
+## Reviewed direct EVE coverage
 
 Direction B adds four one-line `eve-*.sanitized.jsonl` derivatives from user-supplied
 direct EVE exports. `eve-fixture-manifest.json` records original file hashes, source
@@ -34,8 +34,14 @@ All other retained values/types, including timestamps, SID, ports, counters and 
 descriptions, are unchanged. Do not interpret aliases as real network topology.
 
 The four original exports contain 1651 alerts and ZERO standalone flow records.
-Flow examples in `test_suricata_eve.py` are artificial unit data based on the EVE
-contract, not captured lab evidence. Direct flow lab validation remains pending.
+A subsequent `suricata-mgmt-flow-20260910-030813.jsonl` export contains 32 real
+standalone flows. Three additional one-line derivatives cover TCP new (source line
+14518), TCP closed (14577), and UDP alerted (14579); their hashes and aliases are
+in the same manifest. Only IPs, flow IDs and interface labels were substituted,
+consistently with the earlier fixtures. All other values/types remain unchanged.
+The real-flow tests verify timestamps, counters, direction and absent action;
+`artificial_flow()` inputs separately cover synthetic boundary cases. The parser
+has been checked against all 32 real flows; these are not prevention verdicts.
 No incident or ground-truth association is established by these samples.
 
 Add the reviewed INC-002 EVE export as `inc002-eve.json`. Preserve SID, timestamp,

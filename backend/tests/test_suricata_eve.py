@@ -1,4 +1,4 @@
-"""Real sanitized alert derivatives; flow inputs below are artificial unit data."""
+"""Real sanitized alert/flow derivatives and explicitly artificial boundary inputs."""
 import hashlib
 import json
 from pathlib import Path
@@ -94,6 +94,63 @@ def test_flow_record_time_action_and_metadata_do_not_invent_alert():
     assert p.action_scope == 'flow' and p.source_flow_action == 'pass'
     assert e.event_action == 'allowed' and p.source_alert_action is None
     assert parse_canonical_event_json(e.model_dump_json()) == e
+
+
+@pytest.mark.parametrize(
+    'name,proto,src,dst,ports,times,counters,state,alerted,flow_id',
+    [
+        ('tcp-new', 'TCP', '192.0.2.8', '192.0.2.5', (443, 49982),
+         ('2026-09-09T20:03:01.045948Z', '2026-09-09T20:01:57.969970Z',
+          '2026-09-09T20:01:57.969970Z'), (1, 0, 54, 0), 'new', False,
+         '100000000000005'),
+        ('tcp-closed', 'TCP', '192.0.2.5', '192.0.2.9', (50025, 443),
+         ('2026-09-09T20:07:10.197936Z', '2026-09-09T20:04:02.843124Z',
+          '2026-09-09T20:05:03.498150Z'), (30, 36, 5277, 37336), 'closed', False,
+         '100000000000006'),
+        ('udp-alerted', 'UDP', '192.0.2.5', '192.0.2.10', (62534, 443),
+         ('2026-09-09T20:07:38.119428Z', '2026-09-09T20:02:07.410952Z',
+          '2026-09-09T20:02:37.421421Z'), (23, 26, 5410, 6242), 'established', True,
+         '100000000000007'),
+    ],
+)
+def test_real_flow_preserves_source_time_counters_and_missing_action(
+        name, proto, src, dst, ports, times, counters, state, alerted, flow_id):
+    # Catches endpoint swaps, timestamp fallback/truncation, lost zero/False,
+    # and invented action/signature when an actual flow says alerted=True.
+    path = FIXTURES / f'eve-flow-{name}.sanitized.jsonl'
+    raw = path.read_bytes()
+    context = CONTEXT | {'source_ref': path.name}
+    record, = suricata.parse_suricata_eve_jsonl(raw, **context)
+    assert tuple(suricata.iter_suricata_eve_file(path, **context)) == (record,)
+    e, p = record.event, record.provenance
+    assert record.status == 'parsed' and record.reason is None
+    assert (e.protocol, str(e.src_ip), str(e.dst_ip)) == (proto, src, dst)
+    assert (e.src_port, e.dst_port) == ports
+    assert (e.timestamp.isoformat(), p.flow_start.isoformat(), p.flow_end.isoformat()) == times
+    assert (p.flow_pkts_toserver, p.flow_pkts_toclient,
+            p.flow_bytes_toserver, p.flow_bytes_toclient) == counters
+    assert p.flow_state == state and p.flow_reason == 'timeout'
+    assert p.flow_alerted is alerted and p.flow_id_raw == flow_id
+    assert p.timestamp_basis == 'eve.timestamp' and p.source_fraction_digits == 6
+    assert p.event_type == 'flow' and p.action_scope == 'flow'
+    assert p.source_flow_action is p.source_alert_action is e.event_action is None
+    assert e.signature_id is e.rule_id is e.severity is e.source_record_id is None
+    assert p.warnings == ()
+    assert e.raw_event_ref == p.raw_event_ref == path.name + '#L1-L1'
+    assert e.raw_event_hash == p.raw_event_hash == hashlib.sha256(raw).hexdigest()
+    assert parse_canonical_event_json(e.model_dump_json()) == e
+
+
+def test_eve_fixture_manifest_matches_exact_evidence_bytes():
+    # Detects derivative edits/newline conversion that would break provenance.
+    manifest = json.loads((FIXTURES / 'eve-fixture-manifest.json').read_text())
+    assert {m['fixture'] for m in manifest} == {p.name for p in FIXTURES.glob('eve-*.sanitized.jsonl')}
+    assert len(manifest) == len({m['fixture'] for m in manifest})
+    for entry in manifest:
+        raw = (FIXTURES / entry['fixture']).read_bytes()
+        assert len(raw.splitlines()) == 1 and raw.endswith(b'\n')
+        assert entry['derivative_line'] == 1
+        assert hashlib.sha256(raw).hexdigest() == entry['derivative_sha256']
 
 
 @pytest.mark.parametrize('action,expected', [(None,None), ('pass','allowed'), ('drop','blocked')])

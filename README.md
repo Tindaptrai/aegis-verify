@@ -9,10 +9,10 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 > Status: Canonical Event v1.0 and read-only Scenario YAML validation are merged.
 > Canonical Event v2.0 lossless timestamps are merged via PR #16.
 > The fixture-only Wazuh Windows 4688 profile is merged via PR #17.
-> Suricata A (Wazuh-exported alert) has passed user test comparison on its branch.
+> Suricata A (Wazuh-exported alert) is merged via PR #18.
 > This branch adds B: direct EVE JSONL alert/flow with per-line evidence.
-> Real EVE alerts are verified locally; standalone flow still needs a lab sample.
-> A/B integration and full Issue #4 completion remain pending review.
+> Real EVE alerts and standalone TCP/UDP flows have passed independent review and user test comparison.
+> See the B pull request and Issue #4 for integration status and acceptance evidence.
 > The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
@@ -83,7 +83,7 @@ a lab action, evaluate log evidence or return detection/prevention results.
 [Suricata A](docs/SURICATA_WAZUH_ALERT.md) handles Wazuh-exported alerts.
 [Suricata B](docs/SURICATA_EVE_JSONL.md) handles direct EVE JSONL alert/flow,
 including skip outcomes, exact line evidence and explicit sensor context.
-The B guide documents the four lab exports and the missing standalone-flow sample.
+The B guide documents the four initial lab exports and the additional real MGMT flow sample.
 
 ## First technical milestone
 

@@ -178,5 +178,50 @@
         "operation": "removed"
       }
     ]
+  },
+  {
+    "fixture": "eve-flow-tcp-new.sanitized.jsonl",
+    "source_export": "suricata-mgmt-flow-20260910-030813.jsonl",
+    "source_export_sha256": "11332034f69ec798d75393c79dfebb59fbaeff1d2bd72b1ba06e2d49b025d30f",
+    "source_line": 14518,
+    "source_line_sha256": "e7b9a8bcacf47d9eb0a1a85830c7cf1a008b534c404a9d4dc9488947a568a4aa",
+    "derivative_line": 1,
+    "derivative_sha256": "75e7f87cfaab34fdf99f70318439d577a83830b6ba2f491c895d30861b8250f9",
+    "operations": [
+      {"field": "flow_id", "operation": "aliased"},
+      {"field": "in_iface", "operation": "aliased"},
+      {"field": "src_ip", "operation": "aliased"},
+      {"field": "dest_ip", "operation": "aliased"}
+    ]
+  },
+  {
+    "fixture": "eve-flow-tcp-closed.sanitized.jsonl",
+    "source_export": "suricata-mgmt-flow-20260910-030813.jsonl",
+    "source_export_sha256": "11332034f69ec798d75393c79dfebb59fbaeff1d2bd72b1ba06e2d49b025d30f",
+    "source_line": 14577,
+    "source_line_sha256": "60f7d84d448617cd769019ee4f6ae6fac13155cc2fcb163d68b38e117d27805a",
+    "derivative_line": 1,
+    "derivative_sha256": "6a72b483dcb94a440826ad57566676b6c3d0d96ca4fe6e08e60d38623addc298",
+    "operations": [
+      {"field": "flow_id", "operation": "aliased"},
+      {"field": "in_iface", "operation": "aliased"},
+      {"field": "src_ip", "operation": "aliased"},
+      {"field": "dest_ip", "operation": "aliased"}
+    ]
+  },
+  {
+    "fixture": "eve-flow-udp-alerted.sanitized.jsonl",
+    "source_export": "suricata-mgmt-flow-20260910-030813.jsonl",
+    "source_export_sha256": "11332034f69ec798d75393c79dfebb59fbaeff1d2bd72b1ba06e2d49b025d30f",
+    "source_line": 14579,
+    "source_line_sha256": "e2a61d12656137150398c017ee92356fae176093830a5254e9bd670f18d7ce6b",
+    "derivative_line": 1,
+    "derivative_sha256": "22d53409a7d060f82ec1ed666b61f06edc72dc4abaf6d931b20ab869d3b1fd30",
+    "operations": [
+      {"field": "flow_id", "operation": "aliased"},
+      {"field": "in_iface", "operation": "aliased"},
+      {"field": "src_ip", "operation": "aliased"},
+      {"field": "dest_ip", "operation": "aliased"}
+    ]
   }
 ]

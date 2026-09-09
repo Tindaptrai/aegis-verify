@@ -4,11 +4,12 @@
 
 A đọc một JSON export của Wazuh chứa alert Suricata. Bạn đã chạy đối chiếu A đạt
 826 tests và dependency check sạch. A có trên nhánh
-`codex/issue-4-suricata-wazuh-alert`, chưa merge trong lượt triển khai B này.
+`codex/issue-4-suricata-wazuh-alert`; đã merge qua PR #18 tại `c958f26` ngày 10/09/2026.
 
 B đọc trực tiếp file `eve.json`/`.jsonl`, mỗi dòng là một JSON object. B được xây trên
 commit A `f872eb2`, ở nhánh `codex/issue-4-suricata-direct-eve`. Nhánh riêng giúp review
-phần B mà không gộp lẫn phạm vi A. Chưa push, merge hoặc đóng Issue #4 trong lượt này.
+phần B mà không gộp lẫn phạm vi A. Tài liệu này ghi snapshot chuẩn bị tích hợp B;
+xem PR B và Issue #4 để biết trạng thái merge/đóng issue sau bàn giao.
 
 B hỗ trợ `event_type=alert` và `event_type=flow`. Cùng file có DNS/TLS/HTTP… thì B trả
 kết quả `skipped` kèm số dòng/hash và lý do, thay vì mất dấu dòng đó. Kết quả parsed
@@ -32,9 +33,31 @@ HTTP/fileinfo/TLS, nên 0 alert trong export này không chứng minh IDS không
 
 Điểm cần phân biệt: alert có object `flow` bên trong để mô tả kết nối liên quan,
 nhưng nó vẫn là `event_type=alert`. Để kiểm chứng flow reader bằng log thật, cần một
-dòng riêng có **`"event_type":"flow"`**. Các file hiện tại không có dòng như vậy.
-Flow parser đã có unit tests từ dữ liệu mô phỏng rõ nguồn gốc; lab validation cho
-flow vẫn chờ mẫu thật. Chưa đủ điều kiện tuyên bố toàn bộ Issue #4 hoàn tất.
+dòng riêng có **`"event_type":"flow"`**. Bốn export ban đầu không có dòng như vậy.
+
+### Bổ sung mẫu flow thật ngày 10/09/2026
+
+File `suricata-mgmt-flow-20260910-030813.jsonl` có 10.138.493 bytes, 14.587 dòng.
+SHA-256: `11332034f69ec798d75393c79dfebb59fbaeff1d2bd72b1ba06e2d49b025d30f`.
+B đã đọc hết file: **1.806 alert + 32 flow parsed, 12.749 skipped**, không lỗi hoặc
+warning. Không cộng file này với MGMT cũ để đếm event duy nhất: đây là export cùng
+nguồn ở thời điểm sau và có thể chồng lặp dữ liệu.
+
+- 32 flow gồm 18 TCP, 14 UDP; 25 state `new`, 1 `closed`, 6 `established`.
+- Cả 32 có reason `timeout`; 29 có `alerted=false`, 3 có `alerted=true`.
+- Cả 32 thiếu `flow.action`: canonical action giữ `null`. `alerted=true` không cung
+  cấp SID hoặc tự chứng minh scenario đã được phát hiện/ngăn chặn.
+- Ba derivative: `eve-flow-tcp-new.sanitized.jsonl` từ dòng 14518,
+  `eve-flow-tcp-closed.sanitized.jsonl` từ dòng 14577 và
+  `eve-flow-udp-alerted.sanitized.jsonl` từ dòng 14579. Mỗi derivative có một dòng.
+- Chỉ thay IP, `flow_id`, `in_iface` bằng alias nhất quán với bộ mẫu hiện có.
+  Timestamp, counters, state/reason, boolean và TCP metadata giữ nguyên.
+  Manifest ghi hash file gốc, dòng gốc, hash dòng, hash derivative và từng phép đổi.
+
+Đã có đối chiếu parser trên flow thật; không còn chờ mẫu này. Bổ sung ba ca kiểm
+thử mapping trên dữ liệu thật và một ca kiểm tra hash/manifest; không đổi production
+code, canonical schema, dependencies hay ground truth. Kết quả: **927 passed in
+3.85s**, `pip check` sạch. Vẫn cần human review trước khi merge/đóng Issue #4.
 
 ## 3. Các quyết định mapping bạn cần hiểu
 
@@ -182,15 +205,14 @@ dùng bản copy đã hoàn tất như các file bạn cung cấp.
 
 ## 8. Việc còn lại trước khi đóng Issue #4
 
-1. Bạn chạy đối chiếu test và ví dụ B, xem manifest các mẫu đã sanitize.
-2. Bổ sung 1–3 dòng **flow riêng** nếu có để kiểm chứng bộ đọc flow trên lab. Không
-   đổi `event_type` của alert thành flow và không xem dữ liệu mô phỏng là log thật.
-3. Nếu chưa có flow, lần tiếp theo kiểm tra cấu hình EVE output có ghi loại flow
-   hay không; việc thiếu flow trong export hiện tại chưa xác định được nguyên nhân.
-   Chưa có thay đổi cấu hình, restart dịch vụ hoặc replay lab nào trong lượt này.
-4. Review/push/merge A trước, sau đó B; giữ hai PR nhỏ. Sau khi A merge, cập nhật base
-   của PR B về main đã có A. Chỉ đánh giá đóng Issue #4 khi acceptance criteria và
+1. Đã đối chiếu: người dùng chạy **927 tests trong 3.24s**, `pip check` sạch.
+   Reviewer độc lập chạy lại **927 tests trong 2.98s** và xác minh các mẫu/hash/mapping.
+2. Xem ba mẫu flow mới và manifest; đã đủ mẫu cho lần kiểm chứng TCP/UDP này,
+   chưa cần tải thêm log. Mẫu thật chưa bao phủ flow ICMP hoặc action pass/drop;
+   các trường hợp đó vẫn được kiểm tra bằng unit data, không coi là lab evidence.
+3. A đã merge qua PR #18. Push/merge B vào main đã có A; giữ hai PR riêng.
+   Chỉ đánh giá đóng Issue #4 khi acceptance criteria và
    bằng chứng flow đã được review.
 
-Phần code/test B có thể bàn giao ngay trong khi chờ bước 2. Canonical flow field,
+Phần code/test B và mẫu flow thật sẵn sàng cho review. Canonical flow field,
 correlation engine, CSV/live connectors và dashboard vẫn là các scope riêng.

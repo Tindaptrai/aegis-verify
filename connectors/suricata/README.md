@@ -16,6 +16,7 @@ sensor context scopes identity; no global flow-ID assumptions or cross-export de
 See [B guide, real-file counts and flow lab gate](../../docs/SURICATA_EVE_JSONL.md).
 
 The B branch is based on reviewed A. Real sanitized fixtures cover ICMP/TCP/UDP
-alerts and a DNS skip; standalone flow tests are artificial because user exports
-contain zero flow records. Live collection, schema changes and security verdicts
+alerts, a DNS skip and three standalone TCP/UDP flow derivatives from a later MGMT
+export. Artificial unit inputs separately cover boundary cases. Live collection,
+schema changes and security verdicts
 remain outside this milestone. Issue #4 completion still needs human/lab review.
