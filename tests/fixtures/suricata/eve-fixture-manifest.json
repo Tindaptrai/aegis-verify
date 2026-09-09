@@ -1,0 +1,182 @@
+[
+  {
+    "fixture": "eve-wan.sanitized.jsonl",
+    "source_export": "suricata-wan-20260910-013635.jsonl",
+    "source_export_sha256": "b088513d6d5d967b635801b7aec7a680dbab68a5dc9704468cbf2331963104bd",
+    "source_line": 1,
+    "source_line_sha256": "3882ec5273987354682762bb7205ba726815ec4176a68196b0ef31c6af60b811",
+    "derivative_line": 1,
+    "derivative_sha256": "b94de52be8f3a8ed95c65ff0af64b696ffdd2d34fc5662da3ac608b38a7e1581",
+    "operations": [
+      {
+        "field": "flow_id",
+        "operation": "aliased"
+      },
+      {
+        "field": "in_iface",
+        "operation": "aliased"
+      },
+      {
+        "field": "src_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "dest_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "alert.metadata",
+        "operation": "removed"
+      },
+      {
+        "field": "flow.src_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "flow.dest_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "payload",
+        "operation": "removed"
+      },
+      {
+        "field": "payload_printable",
+        "operation": "removed"
+      },
+      {
+        "field": "packet",
+        "operation": "removed"
+      }
+    ]
+  },
+  {
+    "fixture": "eve-lan.sanitized.jsonl",
+    "source_export": "suricata-lan.jsonl",
+    "source_export_sha256": "bc4170e592d80e7e7455a6f946d414ca6f3e00d8cb96e05399d0da50e2d82c49",
+    "source_line": 15,
+    "source_line_sha256": "56528b50726642de35768339cb8f730da7eda69aab92975f9e39b62637548002",
+    "derivative_line": 1,
+    "derivative_sha256": "30d8fe7b9e80fe10956294ed434ca8c581f50e750410a4efe68cbc773ebc09ef",
+    "operations": [
+      {
+        "field": "flow_id",
+        "operation": "aliased"
+      },
+      {
+        "field": "in_iface",
+        "operation": "aliased"
+      },
+      {
+        "field": "src_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "dest_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "metadata",
+        "operation": "removed"
+      },
+      {
+        "field": "flow.src_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "flow.dest_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "payload",
+        "operation": "removed"
+      },
+      {
+        "field": "payload_printable",
+        "operation": "removed"
+      },
+      {
+        "field": "packet",
+        "operation": "removed"
+      }
+    ]
+  },
+  {
+    "fixture": "eve-mgmt.sanitized.jsonl",
+    "source_export": "suricata-mgmt.jsonl",
+    "source_export_sha256": "3950807549a9f2fe1ef7692bffeb4ddd33d94e5fd408e6007cdd4e00b49015c8",
+    "source_line": 7,
+    "source_line_sha256": "731068b14de89abd77a27773931546cef0d8e7c0fec1cf8a13ff267e5d9b6002",
+    "derivative_line": 1,
+    "derivative_sha256": "7bb833d9fffb1c2f72478e17f0f0812a704c2c3b20699c85637743026b217fe2",
+    "operations": [
+      {
+        "field": "flow_id",
+        "operation": "aliased"
+      },
+      {
+        "field": "in_iface",
+        "operation": "aliased"
+      },
+      {
+        "field": "src_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "dest_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "flow.src_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "flow.dest_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "payload",
+        "operation": "removed"
+      },
+      {
+        "field": "payload_printable",
+        "operation": "removed"
+      },
+      {
+        "field": "packet",
+        "operation": "removed"
+      }
+    ]
+  },
+  {
+    "fixture": "eve-dmz.sanitized.jsonl",
+    "source_export": "suricata-dmz.jsonl",
+    "source_export_sha256": "7364ba8d93728d027c2c4fadaa2c3fefb69f7d022fa6079e8ffc12b180a1b816",
+    "source_line": 1,
+    "source_line_sha256": "85e3f3c7c8397580ded2bf2bb5846dcfdb649c2eba566bcd90a7761ce2909a30",
+    "derivative_line": 1,
+    "derivative_sha256": "6290ec4ff09bcd35dd4679537fe3d17e3368607bc7a9611f4af0b17b858cb997",
+    "operations": [
+      {
+        "field": "flow_id",
+        "operation": "aliased"
+      },
+      {
+        "field": "in_iface",
+        "operation": "aliased"
+      },
+      {
+        "field": "src_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "dest_ip",
+        "operation": "aliased"
+      },
+      {
+        "field": "dns",
+        "operation": "removed"
+      }
+    ]
+  }
+]

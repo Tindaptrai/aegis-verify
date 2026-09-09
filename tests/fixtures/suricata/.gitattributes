@@ -1,1 +1,2 @@
 suricata-wazuh-alert-001.sanitized.json -text
+eve-*.sanitized.jsonl -text
