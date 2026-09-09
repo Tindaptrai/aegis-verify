@@ -8,8 +8,9 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
 > Status: Canonical Event v1.0 and read-only Scenario YAML validation are merged.
 > Canonical Event v2.0 lossless timestamps are merged via PR #16.
-> A fixture-only Wazuh Windows 4688 parser is implemented on this branch,
-> pending human mapping/lab review before Issue #3 integration.
+> The fixture-only Wazuh Windows 4688 profile is merged via PR #17.
+> This branch adds Suricata A (Wazuh-exported alert), pending human/lab comparison.
+> Issue #4 remains partial; direct EVE/flow coverage is not implemented yet.
 > The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
@@ -66,6 +67,9 @@ profile, exact timestamp mapping, evidence identity, explicit collection topolog
 safe errors and runnable local comparison. No live SIEM or scenario execution.
 
 ## Current implementation: scenario contract
+
+See also [Suricata A: Vietnamese walkthrough and next-day B checklist](docs/SURICATA_WAZUH_ALERT.md)
+for the offline Suricata alert profile, source-time/action semantics and sample commands.
 
 [Scenario YAML v0.1](docs/SCENARIO_SCHEMA.md) validates the three unchanged draft
 manifests, their safety metadata, source declarations and assertion identities.

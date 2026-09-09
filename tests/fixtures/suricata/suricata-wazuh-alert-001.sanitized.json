@@ -1,0 +1,92 @@
+{
+  "_index": "wazuh-alerts-4.x-2026.04.29",
+  "_id": "lab-suricata-alert-001",
+  "_score": null,
+  "_source": {
+    "input": {
+      "type": "log"
+    },
+    "agent": {
+      "ip": "192.0.2.1",
+      "name": "LAB-FW-001",
+      "id": "911"
+    },
+    "manager": {
+      "name": "lab-manager-001"
+    },
+    "data": {
+      "quic": {
+        "version": "1"
+      },
+      "tx_id": "4",
+      "app_proto": "quic",
+      "packet_info": {
+        "linktype": "1"
+      },
+      "in_iface": "if-lab-1",
+      "src_ip": "192.0.2.30",
+      "src_port": "55237",
+      "event_type": "alert",
+      "alert": {
+        "severity": "3",
+        "signature_id": "2231000",
+        "rev": "1",
+        "gid": "1",
+        "signature": "SURICATA QUIC failed decrypt",
+        "action": "allowed",
+        "category": "Generic Protocol Command Decode"
+      },
+      "stream": "0",
+      "flow_id": "100000000000001.000000",
+      "dest_ip": "198.51.100.8",
+      "proto": "UDP",
+      "suricata": {
+        "source": "pfsense",
+        "interface": "lab-net-1"
+      },
+      "dest_port": "443",
+      "pkt_src": "wire/pcap",
+      "flow": {
+        "src_ip": "192.0.2.30",
+        "src_port": "55237",
+        "pkts_toserver": "5",
+        "dest_ip": "198.51.100.8",
+        "start": "2026-04-30T00:18:09.337760+0700",
+        "bytes_toclient": "0",
+        "bytes_toserver": "3269",
+        "pkts_toclient": "0",
+        "dest_port": "443"
+      },
+      "timestamp": "2026-04-30T00:18:09.338512+0700",
+      "direction": "to_server"
+    },
+    "rule": {
+      "firedtimes": 107,
+      "mail": false,
+      "level": 3,
+      "description": "Suricata: Alert - SURICATA QUIC failed decrypt",
+      "groups": [
+        "ids",
+        "suricata"
+      ],
+      "id": "86601"
+    },
+    "location": "/var/log/suricata/suricata_lab/eve.json",
+    "decoder": {
+      "name": "json"
+    },
+    "id": "lab-wazuh-suricata-001",
+    "timestamp": "2026-04-29T17:18:11.639+0000"
+  },
+  "fields": {
+    "timestamp": [
+      "2026-04-29T17:18:11.639Z"
+    ],
+    "data.timestamp": [
+      "2026-04-29T17:18:09.338Z"
+    ]
+  },
+  "sort": [
+    1777483091639
+  ]
+}
