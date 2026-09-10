@@ -186,6 +186,21 @@ sanitize ngoài runtime — parser không tự redaction dữ liệu production.
 | Không live dependency; existing tests pass | File/bytes API offline và lệnh pytest/pip check ở trên | Human/lab comparison vẫn chờ |
 | Native Cowrie input | Chưa có trong hướng A | Cần profile B JSONL riêng trước khi coi mục này hoàn tất |
 
+## Bằng chứng kiểm tra hiện tại
+
+Fixture/runtime handoff ở commit `8978ef5`. Focused Cowrie parser, mapping và
+fixture tests: **193 passed in 0.61s**. Full suite editable: **1334 passed in
+5.22s**; `pip check` sạch. Audit read-only đối chiếu đủ 9 nguồn/derivative xác
+nhận hash nguồn không đổi, phép sanitize đúng allowlist, LF/duration lexical
+token được giữ và không tạo reverse alias map.
+
+Wheel cuối có SHA-256
+`653f6c8228f8ba60fc426a708b710480b978c7d307454973bb24886eb6662fde`.
+Sau khi cài wheel với test extra vào venv mới, `python -I` xác nhận package và
+Cowrie import từ `venv-final/Lib/site-packages`; cả hai public APIs callable.
+Full suite từ wheel: **1334 passed in 5.86s**; `pip check` sạch. Đây là kiểm tra
+local/fixture, không thay cho human hoặc lab validation.
+
 ## Ranh giới kết luận
 
 Validation engine hiện chỉ nhận canonical event, nên chưa đọc được
