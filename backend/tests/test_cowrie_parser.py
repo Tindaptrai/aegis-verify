@@ -324,6 +324,21 @@ def test_models_are_immutable_strict_extra_forbid_and_identity_consistent():
 
 
 @pytest.mark.parametrize(
+    "field,value",
+    [
+        ("record_index", True),
+        ("record_index", 1.0),
+        ("line_start", True),
+        ("line_start", 1.0),
+    ],
+)
+def test_provenance_fixed_coordinates_require_strict_integer_one(field, value):
+    provenance = parse().provenance
+    with pytest.raises(ValidationError):
+        api().CowrieProvenance(**(provenance.model_dump() | {field: value}))
+
+
+@pytest.mark.parametrize(
     "change",
     [
         {"session_key": "cowrie:session-v1:" + "0" * 64},

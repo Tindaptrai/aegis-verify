@@ -64,6 +64,7 @@ EnvironmentId = Annotated[StrictStr, AfterValidator(_valid_environment)]
 Utf8Text = Annotated[StrictStr, AfterValidator(_valid_utf8)]
 RawHash = Annotated[StrictStr, AfterValidator(_valid_hash)]
 PositiveInt = Annotated[int, Field(strict=True, gt=0)]
+FixedOne = Annotated[int, Field(strict=True, ge=1, le=1)]
 FractionDigits = Annotated[int, Field(strict=True, ge=0, le=9)]
 RuleLevel = Annotated[int, Field(strict=True, ge=0)]
 
@@ -81,8 +82,8 @@ class CowrieProvenance(BaseModel):
     environment_id: EnvironmentId
     sensor_id: SafeLabel
     source_ref: SafeLabel
-    record_index: Literal[1] = 1
-    line_start: Literal[1] = 1
+    record_index: FixedOne = 1
+    line_start: FixedOne = 1
     line_end: PositiveInt
     event_id: Utf8Text
     raw_event_hash: RawHash
