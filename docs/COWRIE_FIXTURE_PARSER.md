@@ -3,8 +3,9 @@
 Parser offline hướng A đã có trên nhánh `codex/issue-6-cowrie-fixture-parser`.
 Nó nhận đúng một Wazuh search-hit chứa Cowrie data, phát một Canonical Event v2
 và provenance bất biến. Không cần live Wazuh/Cowrie, không thực thi scenario,
-command hoặc URL. Review toàn nhánh và human/lab validation còn chờ; chưa push,
-merge, đóng Issue #6 hoặc kết luận pass/fail security.
+command hoặc URL. Review kỹ thuật toàn nhánh `664880d..70477ee` đã hoàn tất,
+không có finding cần hành động. Human/lab review vẫn còn chờ; chưa push, merge,
+đóng Issue #6 hoặc kết luận pass/fail security.
 
 ## Chạy trên Windows
 
