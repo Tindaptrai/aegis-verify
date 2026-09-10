@@ -1,0 +1,133 @@
+{
+  "manifest_version": 1,
+  "source_sha256": "7c32779ba3825a2183b5eeae182af1ceb96d240b1f299cbb0d14f35f6de30f0c",
+  "source_size_bytes": 245311,
+  "source_physical_lines": 1592,
+  "derivation": "Sanitized single-line derivatives of user-provided offline evidence; original is outside Git.",
+  "parser_context": {
+    "environment_id": "fixture-lab",
+    "sensor_id": "fixture-fw",
+    "ingested_at": "2026-09-10T15:00:00Z",
+    "source_year": 2026,
+    "source_utc_offset": "+07:00"
+  },
+  "context_basis": "Year and offset supplied by caller using the documented source-clock comparison; historical clock correctness is unverified. Ingestion time is explicit fixture replay context.",
+  "fixtures": [
+    {
+      "file": "rotation.sanitized.log",
+      "source_line": 1,
+      "source_line_sha256": "355eb3cf15ed39f4466dda94d09fbbaf72e62da49115983327f7c80f2407f20f",
+      "derivative_sha256": "8865d7c084a7ad287ce86a256aef2314bfb0f00a760a3e6da7b6cf917c4623ac",
+      "source_ref": "pfsense-l0001-sha256-8865d7c084a7ad287ce86a256aef2314bfb0f00a760a3e6da7b6cf917c4623ac",
+      "expected_status": "skipped",
+      "expected_reason": "rotation_notice",
+      "expected_code": null,
+      "transformations": [
+        "Replace header hostname with fixture-fw.",
+        "Replace newsyslog PID with 1."
+      ]
+    },
+    {
+      "file": "udp-block.sanitized.log",
+      "source_line": 2,
+      "source_line_sha256": "4c29305fb79fa54651a8a17f17f9c5a6b1c3fd20bf59b927402e8f87574b7e88",
+      "derivative_sha256": "c21fd077dc37aa87f222197e49732f48e76e98f4b58d569befe096512a1ab214",
+      "source_ref": "pfsense-l0002-sha256-c21fd077dc37aa87f222197e49732f48e76e98f4b58d569befe096512a1ab214",
+      "expected_status": "parsed",
+      "expected_reason": null,
+      "expected_code": null,
+      "transformations": [
+        "Replace header hostname with fixture-fw.",
+        "Replace filterlog PID with 1.",
+        "Replace tracker column 4 with a consistent alias in 1000000001..1000000002.",
+        "Replace interface column 5 with a consistent alias in fixture0..fixture3.",
+        "Replace both IPv4 addresses in columns 19 and 20 with consistent 192.0.2.0/24 aliases."
+      ]
+    },
+    {
+      "file": "igmp.sanitized.log",
+      "source_line": 38,
+      "source_line_sha256": "d03dd56d4a4258a28dec6ab9d14ce15b0e5b37e59ca6ae691febfd4062207285",
+      "derivative_sha256": "5fab1dd2e277e5e1f7f985e6e1978745d37811340d87ff4918d4a1f2971123ca",
+      "source_ref": "pfsense-l0038-sha256-5fab1dd2e277e5e1f7f985e6e1978745d37811340d87ff4918d4a1f2971123ca",
+      "expected_status": "skipped",
+      "expected_reason": "unsupported_protocol",
+      "expected_code": null,
+      "transformations": [
+        "Replace header hostname with fixture-fw.",
+        "Replace filterlog PID with 1.",
+        "Replace tracker column 4 with a consistent alias in 1000000001..1000000002.",
+        "Replace interface column 5 with a consistent alias in fixture0..fixture3.",
+        "Replace both IPv4 addresses in columns 19 and 20 with consistent 192.0.2.0/24 aliases."
+      ]
+    },
+    {
+      "file": "ipv6-options.sanitized.log",
+      "source_line": 39,
+      "source_line_sha256": "7dde5cd793cca4c2d0080346626b3d750aecbd83fb37987921bcf50691c2d2d7",
+      "derivative_sha256": "4c21b44f5939deb91e32c2a0403b4ce7cbc9b1beb0999aa6673dfb50bfc7eed0",
+      "source_ref": "pfsense-l0039-sha256-4c21b44f5939deb91e32c2a0403b4ce7cbc9b1beb0999aa6673dfb50bfc7eed0",
+      "expected_status": "skipped",
+      "expected_reason": "unsupported_ip_version",
+      "expected_code": null,
+      "transformations": [
+        "Replace header hostname with fixture-fw.",
+        "Replace filterlog PID with 1.",
+        "Replace tracker column 4 with a consistent alias in 1000000001..1000000002.",
+        "Replace interface column 5 with a consistent alias in fixture0..fixture3.",
+        "Replace both IPv6 addresses in columns 16 and 17 with consistent 2001:db8::/32 aliases."
+      ]
+    },
+    {
+      "file": "ipv6-udp.sanitized.log",
+      "source_line": 45,
+      "source_line_sha256": "b5271302453918d98dcd4c3e207ecc3e401e8626efafa5f459e6a32c1efc784b",
+      "derivative_sha256": "2f6fff1c57e59866ba4fa6e90b7672c349851ad29521a899740aad1c7471774a",
+      "source_ref": "pfsense-l0045-sha256-2f6fff1c57e59866ba4fa6e90b7672c349851ad29521a899740aad1c7471774a",
+      "expected_status": "skipped",
+      "expected_reason": "unsupported_ip_version",
+      "expected_code": null,
+      "transformations": [
+        "Replace header hostname with fixture-fw.",
+        "Replace filterlog PID with 1.",
+        "Replace tracker column 4 with a consistent alias in 1000000001..1000000002.",
+        "Replace interface column 5 with a consistent alias in fixture0..fixture3.",
+        "Replace both IPv6 addresses in columns 16 and 17 with consistent 2001:db8::/32 aliases."
+      ]
+    },
+    {
+      "file": "tcp-block.sanitized.log",
+      "source_line": 726,
+      "source_line_sha256": "1ed0a70de56c55b7fa91194641b4a064a8f6d21db32ba4dd250946d0b983989e",
+      "derivative_sha256": "98588338bd65cce1f80ea17e5e390e4dc2ca9c249c414192cb34bc0e400c1e39",
+      "source_ref": "pfsense-l0726-sha256-98588338bd65cce1f80ea17e5e390e4dc2ca9c249c414192cb34bc0e400c1e39",
+      "expected_status": "parsed",
+      "expected_reason": null,
+      "expected_code": null,
+      "transformations": [
+        "Replace header hostname with fixture-fw.",
+        "Replace filterlog PID with 1.",
+        "Replace tracker column 4 with a consistent alias in 1000000001..1000000002.",
+        "Replace interface column 5 with a consistent alias in fixture0..fixture3.",
+        "Replace both IPv4 addresses in columns 19 and 20 with consistent 192.0.2.0/24 aliases."
+      ]
+    },
+    {
+      "file": "malformed-header.sanitized.log",
+      "source_line": 296,
+      "source_line_sha256": "48584262d5221a96007230baae4bee04192f11629b64ef65d7217db8cebd12cb",
+      "derivative_sha256": "643230f44d6642602f88deb17d119142dce5289c85b3625b40d8cecf9258d417",
+      "source_ref": "pfsense-l0296-sha256-643230f44d6642602f88deb17d119142dce5289c85b3625b40d8cecf9258d417",
+      "expected_status": "error",
+      "expected_reason": null,
+      "expected_code": "malformed_header",
+      "transformations": [
+        "Replace both hostname occurrences with fixture-fw.",
+        "Replace filterlog PID with 1.",
+        "Replace tracker column 4 with a consistent alias in 1000000001..1000000002.",
+        "Replace interface column 5 with a consistent alias in fixture0..fixture3.",
+        "Replace both IPv4 addresses in columns 19 and 20 with consistent 192.0.2.0/24 aliases."
+      ]
+    }
+  ]
+}
