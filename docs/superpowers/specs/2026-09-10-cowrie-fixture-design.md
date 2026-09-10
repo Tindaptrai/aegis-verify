@@ -1,6 +1,8 @@
 # Cowrie fixture parser — bản đề xuất sau khảo sát mẫu
 
-Trạng thái: **DRAFT, chưa duyệt phạm vi triển khai**. Ngày 10/09/2026 (UTC+7).
+Trạng thái: **hướng A đã chốt; acceptance Issue #6 được người dùng cung cấp ngày 11/09**.
+Ngày 10/09/2026 (UTC+7). Giới hạn canonical ở mục 6 vẫn phải được giữ rõ;
+việc chọn A không phải phê duyệt thay canonical.
 Nhánh chuẩn bị: `codex/issue-6-cowrie-fixture-parser`, xuất phát từ `664880d`.
 Chưa viết production parser, chưa thêm fixture hoặc thay canonical/scenario.
 
@@ -12,9 +14,13 @@ Chuẩn bị connector thứ tư cho luồng offline của AEGIS Verify: Cowrie 
 
 Căn cứ đã đọc: AGENTS.md, docs/PRD.md, docs/ARCHITECTURE.md,
 docs/THREAT_MODEL.md, tests/fixtures/README.md, canonical fields/v2 và các parser
-Wazuh/Suricata/pfSense hiện có. Nội dung acceptance criteria trực tiếp của
-Issue #6 chưa truy cập được qua công cụ GitHub. Phạm vi dưới đây là đề xuất,
-không phải bản chép acceptance criteria hoặc cam kết rằng toàn Issue #6 đã đủ.
+Wazuh/Suricata/pfSense hiện có. Người dùng đã cung cấp trực tiếp Issue #6 ngày
+11/09: canonical hợp lệ cho connection/login/command; giữ session, event ID,
+timestamp, peer addresses, login result và command context khi có; bảo toàn
+cross-record session identity; thiếu giữ null; stable evidence ID và line-level
+raw_event_ref; test session sequences/missing/malformed; không live dependency;
+existing tests vẫn pass. Phạm vi thực thi là hướng A do người dùng đã chọn.
+Native JSONL không nằm trong lượt A; không tự đóng issue dựa trên phạm vi hẹp hơn.
 
 ## 2. Mẫu thực tế đã có
 
@@ -31,11 +37,42 @@ không phải bản chép acceptance criteria hoặc cam kết rằng toàn Issu
 - Timestamp Wazuh: `2026-05-02T01:03:21.836+07:00`.
 - Không có src_port, dst_ip, dst_port, username, password hoặc input trong data.
 
-Chưa có session.connect, login.success, login.failed, command.input hoặc
-session.closed trong mẫu này. Không suy diễn có login/command từ event params.
+Không có session.connect, login.success, login.failed, command.input hoặc
+session.closed trong mẫu params này. Không suy diễn có login/command từ params.
 Chênh lệch hai timestamp không tự chứng minh độ trễ ingest vì đồng hồ và pipeline
 chưa được kiểm chứng. Nội dung file gốc được giữ ở Downloads, chưa thêm vào Git.
 Chữ sanitized trong tên file không thay thế review quyền riêng tư và fixture.
+
+### Bổ sung sau khi người dùng chọn A
+
+Hai file mới đã kiểm tra riêng: `1.json` là cowrie.session.connect, `2.json`
+là cowrie.login.failed, đều protocol telnet. Hai event khác session và có cùng
+uuid. Cả hai không cùng session với mẫu closed `9bf382529eea` dán trong chat
+trước đó. Không coi chúng là một chuỗi session. `2.json` chưa sạch credentials:
+password không rỗng lặp lại ở data/password, data/message và hai chỗ tương ứng
+trong JSON full_log. Không đưa file gốc vào Git.
+
+CSV đi kèm có 257 hàng, chỉ năm cột timestamp, agent.name, rule.description,
+rule.id, rule.level. Không có data.eventid/session/full_log nên chỉ dùng khảo
+sát danh sách alert, không chuyển ngược thành Wazuh search-hit hoàn chỉnh.
+Chi tiết intake/hashes nằm trong [báo cáo mẫu](../../COWRIE_SAMPLE_INTAKE_2026-09-10.md).
+
+Ngày 11/09 người dùng bổ sung `3.json`–`8.json`: hai login.success (telnet/ssh),
+hai command.input và hai session.closed (telnet). Cùng mẫu params ban đầu và
+1.json/2.json, nay có sample cho đủ sáu event types dự kiến. Đây là độ phủ loại
+event, không phải phê duyệt acceptance hoặc chứng minh một scenario end to end.
+5.json/6.json cùng sensor và session; các file 1–8 còn lại khác session nhau.
+Các closed mới đã có artifact để hash; không xem chúng là cùng bản ghi closed
+từng dán trong chat nếu chưa đối chiếu identity.
+
+3.json thiếu username/password ở data; full_log còn tên hai trường nhưng giá
+trị là chuỗi rỗng, message có cặp login rỗng. Không coi đó là password chưa che.
+4.json còn password không rỗng ở cả data và full_log/message.
+Giữ username canonical null cho 3.json, không fallback full_log. 5.json chứa
+command wget với URL; parser chỉ giữ chuỗi, không tải URL hoặc chạy command.
+7.json/8.json có data.duration dạng chuỗi đã làm tròn so với full_log số thực;
+không gọi hai biểu diễn là lossless tương đương. Chi tiết tại
+[intake ngày 11/09](../../COWRIE_SAMPLE_INTAKE_2026-09-11.md).
 
 ## 3. Các hướng và đề xuất
 
@@ -43,11 +80,11 @@ Chữ sanitized trong tên file không thay thế review quyền riêng tư và 
 | --- | --- | --- |
 | A: Wazuh-exported Cowrie JSON | Có mẫu thực tế ngay; khớp cách người dùng đang export; tái dùng mẫu kiến trúc Suricata A | Chỉ thấy event được Wazuh lưu/export; chưa chứng minh bao phủ toàn bộ session |
 | B: Cowrie JSONL trực tiếp từ file offline | Phù hợp đọc chuỗi connection/login/command, không lệ thuộc lọc alert ở Wazuh | Cần mẫu trực tiếp; thêm API stream, outcomes và giới hạn đọc file |
-| A+B cùng lượt | Hai đường nhập ngay từ đầu | Phạm vi review lớn hơn; hiện chỉ có một mẫu A thuộc params |
+| A+B cùng lượt | Hai đường nhập ngay từ đầu | Phạm vi review lớn hơn; chưa có native file export |
 
 **Đề xuất A trước, B tiếp theo khi có file**, với lõi mapping đặt trong
 `connectors/cowrie/` để B có thể tái dùng. Profile A đề xuất nhận sáu event types
-ở bảng dưới; chỉ params được gọi là có real-sample coverage hiện tại. Nếu
+ở bảng dưới; cả sáu loại hiện có mẫu nguồn để làm sạch và kiểm chứng. Nếu
 acceptance của Issue #6 bắt buộc native JSONL, A chỉ là phần bổ sung và không đủ
 đóng issue. Không biến JSON trích từ full_log thành bằng chứng đã lấy native file.
 
@@ -101,7 +138,9 @@ sensor_id là namespace caller xác nhận; không tự lấy Wazuh agent làm h
 Các trường chung:
 
 - source_type và event_provider là `cowrie`.
-- timestamp lấy data.timestamp, giữ 0–9 chữ số phần giây, chuẩn hóa UTC. Thiếu,
+- timestamp lấy data.timestamp, giữ 0–9 chữ số phần giây, chuẩn hóa UTC. Offset
+  dạng +0000 trong mẫu được chuẩn hóa cú pháp thành +00:00 trước khi đọc bằng
+  PreciseTimestamp, không đổi instant hoặc cắt phần giây. Thiếu,
   sai kiểu hoặc thiếu timezone gây lỗi; không fallback sang timestamp Wazuh.
 - data.src_ip/src_port/dst_ip/dst_port đi vào network fields tương ứng nếu có.
 - data.protocol giữ `ssh`/`telnet` theo nguồn; không tự đổi thành tcp. Khác profile
@@ -145,8 +184,15 @@ serialize lại hoặc full_log con rồi gắn hash đó cho wrapper.
 ID đề xuất: `cowrie:wazuh-evidence-v1:` + SHA-256 của UTF-8 JSON array compact
 `["cowrie-wazuh-evidence-v1", environment_id, sensor_id, source_ref, 1, raw_hash]`,
 với ensure_ascii=True và separators=(",", ":"). ingested_at không tham gia ID.
-Cùng bytes/context cùng ID; đổi artifact/sensor/môi trường/bytes đổi ID. Session
-được namespace khi sử dụng về sau, không coi session string là duy nhất toàn cục.
+Cùng bytes/context cùng ID; đổi artifact/sensor/môi trường/bytes đổi ID.
+Provenance giữ `session` và `session_key`: nếu session có mặt và không trắng,
+session_key là `cowrie:session-v1:` + SHA-256 của JSON compact UTF-8
+`["cowrie-session-v1", environment_id, sensor_id, session]` với ensure_ascii=True.
+Nếu session thiếu/null, cả session/session_key là null; session rỗng/trắng bị
+từ chối. Key độc lập với event source_ref, raw hash và ingested_at, nên giữ
+identity qua nhiều documents. Caller phải dùng sensor_id nhất quán và phân biệt
+instance khi session namespace có thể tái sử dụng; key không chứng minh global
+uniqueness của session nguồn. Không suy instance từ uuid chưa rõ semantics.
 
 Một-document API trả một result hoặc raise CowrieParseError; không partial
 success. Event không thuộc sáu types báo unsupported_profile, không gọi là
@@ -169,12 +215,13 @@ CowrieParseError, không mở refactor chung ngoài scope.
 | Thời gian | offset, 0–9 digits, ngày sai, thiếu zone, không fallback Wazuh |
 | Evidence | exact bytes/BOM/LF/CRLF, line ref, ID lặp lại, namespace, đổi ingested_at |
 | Input bất thường | duplicate keys, encoding, depth/nodes/size/numeric limits, lỗi không rò input |
-| Fixture thật | derivative của params, manifest/hash/sanitize review, không thêm event giả vào nguồn |
+| Fixture thật | derivatives cho sáu event types hiện đã có, manifest/hash/sanitize review, không thêm event giả vào nguồn |
 | Đóng gói | public imports, pytest/pip check; wheel verification trước tích hợp |
 
 Synthetic unit inputs phải được ghi nhãn rõ; không xem chúng là lab validation.
-Để xác nhận profile đầy đủ cần các event connect, login result, command và nếu
-có closed cùng session từ hoạt động lab đã được cho phép. Không yêu cầu người
+Mẫu ngày 11/09 đủ để bắt đầu kiểm chứng mapping sáu loại sau sanitize, nhưng
+chưa có chuỗi connect/login/command/closed cùng session. Nếu acceptance cần
+correlation toàn phiên, phải bổ sung bằng chứng cùng session. Không yêu cầu người
 dùng chạy tấn công mới hay đổi rule để có dữ liệu. Login log có thể chứa password,
 command có thể chứa bí mật; remove/alias nhất quán cả data và full_log, không chỉ
 ẩn một bản sao. Không commit credentials hoặc reverse alias map.
@@ -185,7 +232,7 @@ command có thể chứa bí mật; remove/alias nhất quán cả data và full
   errors.py, __init__.py và README.md.
 - backend/tests/: test_cowrie_parser.py, test_cowrie_mapping.py,
   test_cowrie_fixtures.py.
-- tests/fixtures/cowrie/: derivative params đã review, manifest và README.
+- tests/fixtures/cowrie/: derivatives sáu loại event đã review, manifest và README.
 - docs/COWRIE_FIXTURE_PARSER.md; pyproject.toml thêm package Cowrie khi code có.
 
 Không sửa canonical model, scenario manifests, rule content, live adapter,
@@ -194,7 +241,8 @@ engine/CLI hoặc connector nguồn khác trong phần việc này.
 ## 10. Điều kiện chuyển sang implementation
 
 1. Đối chiếu mô tả/acceptance Issue #6 mà người dùng cung cấp hoặc GitHub cho đọc.
-2. Người dùng duyệt profile A và giới hạn canonical ở mục 6, hoặc chọn B trước.
+2. Hướng A đã được người dùng chọn. Đối chiếu sáu types đề xuất với acceptance;
+   giữ rõ giới hạn canonical ở mục 6, không tự mở rộng hợp đồng.
 3. Chốt coverage lab còn thiếu là follow-up hay bắt buộc trước merge theo issue.
 4. Sau đó lập implementation plan và chạy test-first; không tự đóng issue/merge.
 
