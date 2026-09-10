@@ -62,6 +62,32 @@ class PfSenseDiagnostic:
     record_index: int = 1
     line: int | None = None
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "code",
+            self.code if type(self.code) is str and self.code in _CODES else "invalid_field",
+        )
+        object.__setattr__(
+            self,
+            "field_path",
+            self.field_path
+            if type(self.field_path) is str and self.field_path in _FIELDS
+            else None,
+        )
+        object.__setattr__(
+            self,
+            "record_index",
+            self.record_index
+            if type(self.record_index) is int and self.record_index > 0
+            else 1,
+        )
+        object.__setattr__(
+            self,
+            "line",
+            self.line if type(self.line) is int and self.line > 0 else None,
+        )
+
 
 class PfSenseParseError(ValueError):
     """Public parse failure carrying only allowlisted diagnostics."""

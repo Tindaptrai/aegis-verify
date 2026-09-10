@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from aegis_verify.connectors.pfsense import (
     PfSenseContext,
+    PfSenseDiagnostic,
     PfSenseParseError,
     PfSenseProvenance,
     PfSenseRecord,
@@ -180,6 +181,17 @@ def test_parse_error_sanitizes_unknown_diagnostics_and_positions():
     assert error.line is None
     assert error.record_index == 1
     assert "SECRET" not in str(error)
+
+
+def test_direct_diagnostic_construction_sanitizes_values_and_positions():
+    # Catches bypassing the public error sanitizer through the exported value type.
+    diagnostic = PfSenseDiagnostic(
+        code="SECRET_CODE", field_path="SECRET_FIELD", record_index=0, line=0
+    )
+    assert diagnostic.code == "invalid_field"
+    assert diagnostic.field_path is None
+    assert diagnostic.record_index == 1
+    assert diagnostic.line is None
 
 
 def test_parsed_record_requires_matching_evidence_identity():
