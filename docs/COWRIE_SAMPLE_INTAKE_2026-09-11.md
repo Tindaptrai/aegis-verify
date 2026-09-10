@@ -44,9 +44,11 @@ và UTC mà không cắt phần giây, không fallback timestamp collector.
 
 | File | data.duration (string) | full_log.duration (number) |
 | --- | --- | --- |
-| 7.json | 5.001782 | 5.001781940460205 |
-| 8.json | 5.015054 | 5.015053987503052 |
+| 7.json | 5.001782 | 5.0017819404602051 |
+| 8.json | 5.015054 | 5.0150539875030518 |
 
+Các số full_log trong bảng là token thập phân nguyên văn, đã đối chiếu lại khi
+chuẩn bị derivative; không dùng số double của công cụ đọc để chép lại token.
 Không xem đây là duration giống hệt về độ chính xác. Profile A đã chọn data làm
 nguồn mapping; full_log giữ trong raw evidence. Canonical hiện không có duration
 nên không cần thêm field hoặc tính lại timestamp từ duration cho parser này.
