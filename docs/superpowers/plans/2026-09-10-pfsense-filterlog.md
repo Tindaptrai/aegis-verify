@@ -10,6 +10,11 @@
 
 **Spec:** [Approved design](../specs/2026-09-10-pfsense-filterlog-design.md), sections 1–11 are normative.
 
+**Status (2026-09-10):** Tasks 1–4 implemented and reviewed; Task 5 documentation,
+local regression and isolated current-runtime wheel checks performed. Final whole-branch
+review and human/lab comparison remain pending. No push, PR, issue closure or merge.
+See [usage and verification](../../PFSENSE_FIXTURE_PARSER.md) for commands and limits.
+
 ## Global Constraints
 
 - Worktree: `I:/AEGIS-VERIFY/.worktrees/issue-5-pfsense-fixture-parser`.
@@ -38,6 +43,7 @@
 | `backend/tests/test_pfsense_parser.py` | Framing, IDs, errors, streaming and limits |
 | `backend/tests/test_pfsense_fixtures.py` | Reviewed derivative fixtures and manifest consistency |
 | `tests/fixtures/pfsense/` | Sanitized fixtures, manifest and README |
+| `tests/fixtures/pfsense/.gitattributes` | Preserve exact log bytes across Git checkouts |
 | `docs/PFSENSE_FIXTURE_PARSER.md` | Usage, profile, time/coverage limitations |
 | `pyproject.toml` | Add `aegis_verify.connectors.pfsense` package entry only |
 
@@ -49,7 +55,7 @@ context: PfSenseContext) -> PreciseTimestamp`. Context stores validated caller
 fields unchanged; year is strict int, offset validated ASCII string. Define
 `PfSenseParseError` with safe `code`, `field_path`, `line`, `record_index`.
 
-- [ ] Create a dedicated venv; do not use the old baseline wheel for new code.
+- [x] Create a dedicated venv; do not use the old baseline wheel for new code.
 
 ```powershell
 cd 'I:/AEGIS-VERIFY/.worktrees/issue-5-pfsense-fixture-parser'
@@ -58,7 +64,7 @@ cd 'I:/AEGIS-VERIFY/.worktrees/issue-5-pfsense-fixture-parser'
 & '.venv/Scripts/python.exe' -c 'import aegis_verify; print(aegis_verify.__file__)'
 ```
 
-- [ ] Add red tests before implementation. A representative synthetic test:
+- [x] Add red tests before implementation. A representative synthetic test:
 
 ```python
 def test_explicit_year_offset_preserves_second_precision():
@@ -70,8 +76,8 @@ def test_explicit_year_offset_preserves_second_precision():
     assert value.fractional_digits == 0
 ```
 
-- [ ] Run `.venv/Scripts/python.exe -m pytest backend/tests/test_pfsense_context.py -q` and record the expected missing-symbol failure.
-- [ ] Implement context validation from spec §4/§7 and source_timestamp using a fixed English month table, ASCII regex, calendar validation and explicit offset. Construct RFC3339 text with seconds, then call PreciseTimestamp.parse; never use datetime.now.
+- [x] Run `.venv/Scripts/python.exe -m pytest backend/tests/test_pfsense_context.py -q` and record the expected missing-symbol failure.
+- [x] Implement context validation from spec §4/§7 and source_timestamp using a fixed English month table, ASCII regex, calendar validation and explicit offset. Construct RFC3339 text with seconds, then call PreciseTimestamp.parse; never use datetime.now.
 
 ```python
 # Core conversion after validating and extracting year/month/day/time:
@@ -79,9 +85,9 @@ wire = f'{year:04d}-{month:02d}-{day:02d}T{hour:02d}:{minute:02d}:{second:02d}{o
 timestamp = PreciseTimestamp.parse(wire)
 ```
 
-- [ ] Parameterize invalid tests: True/0/10000 year, -00:00/bad offsets, February 30, non-leap February 29, 24:00:00, second 60, invalid UTF-8 context, invalid labels, UTC boundary overflow, naive ingestion datetime. Verify exceptions contain neither secret marker nor raw input.
-- [ ] Add model invariants: parsed requires event and matching event_id/hash/ref; skipped requires event/event_id null and a valid skip reason. Include invalid direct model construction through normal validators in tests.
-- [ ] Run the context suite green, inspect diff, commit only task files: `feat(pfsense): validate explicit fixture context`.
+- [x] Parameterize invalid tests: True/0/10000 year, -00:00/bad offsets, February 30, non-leap February 29, 24:00:00, second 60, invalid UTF-8 context, invalid labels, UTC boundary overflow, naive ingestion datetime. Verify exceptions contain neither secret marker nor raw input.
+- [x] Add model invariants: parsed requires event and matching event_id/hash/ref; skipped requires event/event_id null and a valid skip reason. Include invalid direct model construction through normal validators in tests.
+- [x] Run the context suite green, inspect diff, commit only task files: `feat(pfsense): validate explicit fixture context`.
 
 ## Task 2: BSD header and IPv4 TCP/UDP mapping
 
@@ -91,7 +97,7 @@ skip, not a fabricated event. Framing strips newline/BOM before this function;
 raw bytes stay untouched outside it. Source timestamp function remains public
 within the connector and must not use local machine time.
 
-- [ ] Add synthetic mapping tests, including this pass record (not real evidence):
+- [x] Add synthetic mapping tests, including this pass record (not real evidence):
 
 ```python
 SYNTHETIC_PASS = ('Sep 10 21:01:41 fixture-fw filterlog[1]: '
@@ -109,8 +115,8 @@ def test_pass_mapping(context):
     assert metadata['nat_context'] is None
 ```
 
-- [ ] Run the mapping test red; implement anchored BSD header parsing and preserve empty payload cells via `payload.split(',')`. Reject embedded quote/control/newline tokens. Validate common fields before classifying; metadata keys use the exact names in this test plus spec §6.
-- [ ] Implement TCP/UDP field indexes from Netgate layout: common 0..8, IPv4 9..16, length 17, IPs 18/19, ports 20/21, payload length 22; TCP tail 23..28. Check field counts, protocol number/text, ASCII number syntax/ranges from spec §5. Null applies only to empty optional cells, never a missing column or bad token.
+- [x] Run the mapping test red; implement anchored BSD header parsing and preserve empty payload cells via `payload.split(',')`. Reject embedded quote/control/newline tokens. Validate common fields before classifying; metadata keys use the exact names in this test plus spec §6.
+- [x] Implement TCP/UDP field indexes from Netgate layout: common 0..8, IPv4 9..16, length 17, IPs 18/19, ports 20/21, payload length 22; TCP tail 23..28. Check field counts, protocol number/text, ASCII number syntax/ranges from spec §5. Null applies only to empty optional cells, never a missing column or bad token.
 
 ```python
 action_map = {'pass': 'allowed', 'block': 'blocked'}
@@ -122,9 +128,9 @@ fields = dict(source_type='pfsense', event_provider='pfSense-filterlog',
               src_port=src_port, dst_port=dst_port, rule_id=tracker)
 ```
 
-- [ ] Test TCP block, UDP block/pass, empty ports/tracker/IP null, port zero, all absent process/user/severity null after canonical construction. Reject port 65536, signed/float tokens, protocol mismatches, wrong version/address, missing/extra cells, overlong numbers and unknown action/direction.
-- [ ] Test valid-header IPv6/IGMP skips separately from malformed supported TCP/UDP failures. Add narrow newsyslog size-rotation notice recognition; unrelated non-filterlog messages fail. Skips are not protocol-specific validity claims.
-- [ ] Run context+mapping suites green; commit `feat(pfsense): map bounded IPv4 firewall records`.
+- [x] Test TCP block, UDP block/pass, empty ports/tracker/IP null, port zero, all absent process/user/severity null after canonical construction. Reject port 65536, signed/float tokens, protocol mismatches, wrong version/address, missing/extra cells, overlong numbers and unknown action/direction.
+- [x] Test valid-header IPv6/IGMP skips separately from malformed supported TCP/UDP failures. Add narrow newsyslog size-rotation notice recognition; unrelated non-filterlog messages fail. Skips are not protocol-specific validity claims.
+- [x] Run context+mapping suites green; commit `feat(pfsense): map bounded IPv4 firewall records`.
 
 ## Task 3: Bounded ingestion and evidence provenance
 
@@ -134,7 +140,7 @@ environment_id, sensor_id, ingested_at, source_year, source_utc_offset)
 *, same keyword context) -> Iterator[PfSenseRecord]`. Export both plus error
 and outcome types in `__init__.py`; no network I/O.
 
-- [ ] Write red tests for one-line parsing and exact byte hash:
+- [x] Write red tests for one-line parsing and exact byte hash:
 
 ```python
 def test_exact_bytes_identity(parser_kwargs):
@@ -147,7 +153,7 @@ def test_exact_bytes_identity(parser_kwargs):
     assert first.event.schema_version == '2.0'
 ```
 
-- [ ] Run red; implement binary readline(MAX_LINE_BYTES+1), per-file/per-line/count budgets, strict UTF-8 and first-line-only BOM, blank-line outcome. Both public APIs share the line reader; bytes API tuple-materializes it atomically. Streaming closes files and exposes late errors safely.
+- [x] Run red; implement binary readline(MAX_LINE_BYTES+1), per-file/per-line/count budgets, strict UTF-8 and first-line-only BOM, blank-line outcome. Both public APIs share the line reader; bytes API tuple-materializes it atomically. Streaming closes files and exposes late errors safely.
 
 ```python
 identity = ['pfsense-filterlog-evidence-v1', ctx.environment_id,
@@ -158,9 +164,9 @@ digest = sha256(json.dumps(identity, ensure_ascii=True,
 event_id = 'pfsense:filterlog-evidence-v1:' + digest
 ```
 
-- [ ] Construct CanonicalEventV2 normally, never model_construct/model_copy bypasses. Attach provenance version/profile, line index/ref/hash, source fields, context and year/offset warning. Map internal errors to fixed safe field names with no input or chained exception disclosure.
-- [ ] Test duplicate lines, environment/sensor/ref changes, year/offset changes, ingestion-time-only replay, LF/CRLF/BOM changes, last line without LF, empty/skip-only input, limits at/beyond boundaries, invalid bytes, unsupported headers, I/O failures and late streaming errors.
-- [ ] Add source package entry in pyproject, reinstall editable and verify pfsense module resolves inside this worktree. Run all three pfsense suites green and commit `feat(pfsense): add bounded offline ingestion APIs`.
+- [x] Construct CanonicalEventV2 normally, never model_construct/model_copy bypasses. Attach provenance version/profile, line index/ref/hash, source fields, context and year/offset warning. Map internal errors to fixed safe field names with no input or chained exception disclosure.
+- [x] Test duplicate lines, environment/sensor/ref changes, year/offset changes, ingestion-time-only replay, LF/CRLF/BOM changes, last line without LF, empty/skip-only input, limits at/beyond boundaries, invalid bytes, unsupported headers, I/O failures and late streaming errors.
+- [x] Verify the source package entry and editable installation prepared in Task 1 resolve pfsense inside this worktree; no redundant reinstall needed. Run all three pfsense suites green and commit `feat(pfsense): add bounded offline ingestion APIs`.
 
 ## Task 4: Sanitized derivatives and real-file comparison
 
@@ -168,8 +174,8 @@ event_id = 'pfsense:filterlog-evidence-v1:' + digest
 **Outputs:** reviewed minimal derivative fixture set, manifest, README and
 fixture tests. No production-generated events or fake lab pass records.
 
-- [ ] Verify full original hash before extraction. Select at least one real UDP block, TCP block, IPv6 skip, IGMP skip and rotation notice with original physical line numbers. Extract only after reading raw records locally; keep output sanitized.
-- [ ] Red-test manifest hash and fixture roundtrip before creating derivatives:
+- [x] Verify full original hash before extraction. Select real UDP block, TCP block, IPv6 skip, IGMP skip and rotation notice plus malformed physical line 296 (two concatenated/partial headers), each with original physical line number. Extract only after reading raw records locally; keep output sanitized, including every hostname occurrence in malformed line. Mark malformed derivative expected error, not successful parsed/skip record.
+- [x] Red-test manifest hash and fixture roundtrip before creating derivatives:
 
 ```python
 def test_derivative_hashes_and_schema():
@@ -178,6 +184,11 @@ def test_derivative_hashes_and_schema():
         raw = (FIXTURE_DIR / entry['file']).read_bytes()
         assert hash_raw_event(raw) == entry['derivative_sha256']
         context = dict(manifest['parser_context'], source_ref=entry['source_ref'])
+        if entry['expected_status'] == 'error':
+            with pytest.raises(PfSenseParseError) as error:
+                parse_pfsense_filterlog(raw, **context)
+            assert error.value.code == entry['expected_code']
+            continue
         records = parse_pfsense_filterlog(raw, **context)
         assert len(records) == 1
         if records[0].event is not None:
@@ -185,15 +196,16 @@ def test_derivative_hashes_and_schema():
             assert parse_canonical_event_json(event.model_dump_json()) == event
 ```
 
-- [ ] Create derivatives using apply_patch, consistent documentation-range address/host/interface/tracker aliases; preserve action, timestamp, column structure and empty fields. Manifest entries include file, source_ref, original source line number/hash, derivative_sha256 and transformation list, never sensitive reverse aliases. Store original file SHA once. Give each derivative its own immutable source_ref, a file-safe label.
-- [ ] Document that pass is synthetic in backend tests, not observed lab evidence. Verify each derivative against the original permitted transformations locally; only emit counts/hash results. Never commit or echo all original lines.
-- [ ] Run fixture suite then full original-file parser locally. Expect 1,403 parsed and 189 skipped; inspect each discrepancy instead of changing validation to force the count. Verify line refs/hashes and null fields across parsed outcomes, not just totals.
-- [ ] Commit only reviewed fixture/test/README files: `test(pfsense): add sanitized firewall evidence fixtures`.
+- [x] Create derivatives using apply_patch, consistent documentation-range address/host/interface/tracker aliases; preserve action, timestamp, column structure and empty fields. Manifest entries include file, source_ref, original source line number/hash, derivative_sha256 and transformation list, never sensitive reverse aliases. Store original file SHA once. Give each derivative its own immutable source_ref, a file-safe label.
+- [x] Add fixture-local `.gitattributes`: `*.sanitized.log -text whitespace=-blank-at-eol`. Preserve source LF and intentional trailing spaces in derivative records; no Git CRLF conversion. Verify hashes from Git object bytes as well as working copy; README explains intentional raw whitespace.
+- [x] Document that pass is synthetic in backend tests, not observed lab evidence. Verify each derivative against the original permitted transformations locally; only emit counts/hash results. Never commit or echo all original lines.
+- [x] Run fixture suite then full original-file parser locally. Atomic API must fail at physical line296; streaming may yield earlier records then fail and is INCOMPLETE. A separate per-line audit should account for 1,402 parsed, 189 skipped, 1 malformed_header (not a successful whole-file import). Verify valid-record fields/hashes and original physical positions through explicit audit mapping; preserve the malformed raw line without repair. Report discrepancies, never loosen validation to force preliminary counts.
+- [x] Commit only reviewed fixture/test/README files: `test(pfsense): add sanitized firewall evidence fixtures`.
 
 ## Task 5: Verification, documentation and human checkpoint
 
-- [ ] Create usage docs with exact public signatures, parser context, time warning, supported/unsupported profile, null/NAT rules, provenance identity, input limits, skip accounting and INCOMPLETE streaming contract. Include synthetic pass and unknown historical clock limitations.
-- [ ] Run full suite and dependency check with a fresh temp directory; build exists before pytest creates its child:
+- [x] Create usage docs with exact public signatures, parser context, time warning, supported/unsupported profile, null/NAT rules, provenance identity, input limits, skip accounting and INCOMPLETE streaming contract. Include synthetic pass and unknown historical clock limitations.
+- [x] Run full suite and dependency check with a fresh temp directory; build exists before pytest creates its child:
 
 ```powershell
 New-Item -ItemType Directory -Force -Path build | Out-Null
@@ -202,10 +214,11 @@ $aegisTestTemp = 'build/pytest-issue5-' + [guid]::NewGuid().ToString('N')
 & '.venv/Scripts/python.exe' -m pip check
 ```
 
-- [ ] Build a wheel in a fresh output folder with default build isolation; install into a separate fresh venv and verify imports resolve from site-packages outside checkout. Run the tests against that installation, including package exports. Do not reuse old wheel baseline as verification of new code.
-- [ ] Run `git diff --check`, inspect staged names and diff for raw logs, secrets, placeholders, scope creep and accidental scenario/schema changes. Record exact test counts, runtime, original-file comparison, wheel checks and remaining gaps in usage docs.
+- [x] Build a wheel in a fresh output folder with default build isolation; install into a separate fresh venv and verify imports resolve from site-packages outside checkout. Run the tests against that installation, including package exports. Do not reuse old wheel baseline as verification of new code.
+- [x] Run `git diff --check`, inspect staged names and diff for raw logs, secrets, placeholders, scope creep and accidental scenario/schema changes. Record exact test counts, runtime, original-file comparison, wheel checks and remaining gaps in usage docs.
 - [ ] Use requesting-code-review workflow before merge; review source validation, timestamps, nulls, hash/ID stability, skip/error boundaries and fixture sanitization. Address findings with regression tests, then rerun verification.
-- [ ] Commit verified docs. Give the user exact PowerShell commands in this worktree for independent comparison. Stop for human/lab review; do not close issue or merge automatically.
+- [x] Prepare verified docs for the Task 5 documentation commit, including exact PowerShell commands for independent comparison.
+- [ ] Complete final whole-branch review and hand off to the user for human/lab comparison. Do not close issue or merge automatically; push/PR/merge remain unperformed.
 
 ## Self-review coverage
 
@@ -213,5 +226,6 @@ Spec §4 time/context -> Task 1; §5 source validation -> Task 2;
 §6 mapping/NAT -> Task 2; §7 APIs and bounded framing -> Task 3;
 §8 identity -> Task 3 and sanitization -> Task 4; §9 test/AC -> Tasks 1–5;
 §10 review gates and §11 isolated runtime -> Tasks 1 and 5.
-Future protocols/syslog remain out of scope. No implementation task has been
-marked complete by creation of this plan.
+Future protocols/syslog remain out of scope. Checked implementation items reflect
+performed work and recorded verification, not completion by plan creation. Pending
+review/human/lab gates above are intentionally unchecked.

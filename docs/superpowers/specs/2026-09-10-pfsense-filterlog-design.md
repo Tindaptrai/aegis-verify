@@ -1,8 +1,8 @@
 # Issue #5 — Thiết kế pfSense filterlog fixture parser
 
-Ngày: 10/09/2026. Trạng thái: **người dùng đã duyệt phạm vi IPv4 TCP/UDP,
-pass/block, offline; chuyển sang lập kế hoạch triển khai**.
-Chưa triển khai parser, chưa đóng Issue #5, chưa mở PR hoặc merge.
+Ngày: 10/09/2026. Trạng thái: **đã triển khai phạm vi được duyệt IPv4 TCP/UDP,
+pass/block, offline; chờ review cuối toàn nhánh và đối chiếu human/lab**.
+Parser, tests và sanitized derivatives đã có; chưa đóng Issue #5, push, PR hoặc merge.
 Base: `370cd2a`; nhánh: `codex/issue-5-pfsense-fixture-parser`.
 
 Xác nhận tiếp theo của người dùng: làm profile giới hạn trước; xem xét mở rộng
@@ -15,9 +15,10 @@ Mục tiêu là đọc file firewall log đã xuất, chuyển mỗi bản ghi �
 Canonical Event v2 để engine sau này có thể sử dụng. Không kết nối trực tiếp
 pfSense, không thay rule, không chạy tấn công và không thay cấu hình hệ thống.
 
-Bạn đã cung cấp đủ mẫu để thiết kế và bắt đầu triển khai phạm vi IPv4 TCP/UDP.
-Hiện bạn chỉ cần duyệt tài liệu này. Khi code sẵn sàng, bạn chạy test trên máy
-Windows chứa dự án AEGIS; không chạy pytest trong Shell pfSense.
+Phạm vi IPv4 TCP/UDP đã triển khai và kiểm tra offline. Hướng dẫn API, kết quả
+kiểm chứng và lệnh đối chiếu trên Windows ở
+[PFSENSE_FIXTURE_PARSER.md](../../PFSENSE_FIXTURE_PARSER.md).
+Không cần chạy lệnh nào trên pfSense lúc này.
 
 Ba quyết định quan trọng:
 
@@ -56,10 +57,13 @@ SHA-256 toàn file:
 | Ngoài phạm vi | 69 IPv4 IGMP + 119 IPv6 = 188 |
 | Timestamp ghi trong file | Từ Sep 8 23:01:00 đến Sep 10 20:53:30; không có năm/offset |
 
-Mục tiêu đối chiếu sau triển khai: 1.403 parsed, 189 skipped (188 ngoài profile
-và 1 rotation notice), không thất thoát dòng. Đây là kỳ vọng để test, không phải
-cam kết parser đã chạy thành công. Nếu gặp nội dung sai, phải điều tra thay vì
-nới validation để ép đạt số đếm.
+Đếm sơ bộ theo payload cho thấy 1.403 dòng thuộc TCP/UDP; kiểm tra header chặt
+trong lúc triển khai phát hiện **dòng 296 có hai header nối dở**, bị từ chối với
+`malformed_header`. Kết quả audit mapping từng dòng: 1.402 map được, 189 skip
+(188 ngoài profile + 1 rotation notice), 1 lỗi. Không tự cắt prefix để sửa dòng.
+Đọc toàn file bằng API chặt phải dừng/báo lỗi tại dòng 296; không tuyên bố toàn
+file nhập thành công. Audit độc lập từng dòng chỉ thống kê độ phủ, không phải
+một lần nhập evidence hoàn chỉnh. Không nới validation để ép đạt số đếm sơ bộ.
 
 Log gốc ở Downloads ngoài Git; không sao chép toàn bộ vào worktree hoặc tài liệu.
 Kiểm tra này chưa chứng minh nguồn đáng tin, đồng hồ đúng lịch sử hoặc một
@@ -120,7 +124,9 @@ tính; quote, newline nhúng hoặc trường dư trong bản ghi TCP/UDP đều
   chữ số ASCII thập phân 0..65535; giữ giá trị 0. Không nhận dấu, float hoặc bool.
 - Các trường số của header IP/transport có dữ liệu phải có dạng và range tương
   ứng: TTL/TOS/ECN 0..255 (TOS/ECN cho phép hex có prefix), IP ID/length/window
-  0..65535, TCP sequence/ACK 0..2^32-1; URG 0..65535. Offset nhận số thập phân
+  0..65535, TCP sequence/ACK 0..2^32-1; TCP sequence còn nhận dạng `start:end`
+  có mỗi đầu 0..2^32-1 (mẫu TCP thật dòng 726 có dạng này), không suy quan hệ
+  thứ tự vì sequence có thể wrap. Giữ nguyên biểu diễn ở raw; URG 0..65535. Offset nhận số thập phân
   không âm trong giới hạn 128 chữ số, giữ ở raw; không tự diễn giải đơn vị offset.
   Không ép chuyển chuỗi lạ thành 0. Dữ liệu rỗng không phải số 0.
 - Trường canonical tùy chọn rỗng (ví dụ tracker hoặc port) thành null; không
@@ -167,7 +173,8 @@ riêng; không âm thầm để engine đọc vendor metadata trong Issue #5.
 
 ## 7. API, lỗi và ranh giới module
 
-API dự kiến trong `aegis_verify.connectors.pfsense`:
+API đã triển khai trong `aegis_verify.connectors.pfsense` (chữ ký đầy đủ và ví dụ
+chạy được ở tài liệu usage):
 
 ```python
 parse_pfsense_filterlog(raw: bytes, *, source_ref, environment_id, sensor_id,
@@ -199,7 +206,7 @@ Tách trách nhiệm trong `connectors/pfsense/`: framing/API, header/time conte
 field validation/mapping, outcome/provenance models và safe errors. Không import
 private helper Suricata để dùng như thư viện chung; chỉ reuse public canonical,
 PreciseTimestamp và hash helper. Không refactor connector khác trong issue này.
-Thêm package entry khi triển khai; không thêm dependency.
+Package entry đã thêm; không thêm dependency.
 
 ## 8. Evidence identity và sanitization
 
@@ -230,7 +237,7 @@ không biến bản ghi block thật thành pass rồi gọi đó là lab eviden
 
 ## 9. Kiểm thử và acceptance criteria
 
-| Yêu cầu Issue #5 | Kiểm chứng cần thực hiện khi viết code |
+| Yêu cầu Issue #5 | Kiểm chứng triển khai (kết quả ở tài liệu usage) |
 | --- | --- |
 | Schema-valid canonical outputs | Validate/serialize/roundtrip v2 cho mọi parsed fixture |
 | Pass/block, time, interface, network, firewall/NAT context khi có | Bảng mapping ở mục 6; test metadata và null NAT, không suy đoán |
@@ -263,16 +270,23 @@ Dừng để hỏi khi gặp format ngoài profile cần hỗ trợ, năm/múi g
 cứ cho mục đích đánh giá thật, cần đổi canonical, hoặc muốn thêm live dependency.
 Không đổi ground truth và không mở rộng sang issue khác.
 
-## 11. Kiểm chứng ở bước tài liệu
+## 11. Baseline thiết kế và kiểm chứng triển khai
 
-Worktree tạo từ main `370cd2a`; chỉ thêm tài liệu này, không sửa code/test.
+Worktree tạo từ main `370cd2a`; tại bước thiết kế ban đầu chỉ thêm tài liệu,
+chưa sửa code/test.
 Baseline chạy bằng môi trường wheel đã cài từ cùng base (không cài editable
 trỏ sang nhánh khác): **927 passed**, `pip check` không có dependency hỏng.
 Lượt đầu có 12 setup errors do thiếu thư mục cha `build` của basetemp; tạo đúng
 thư mục rồi chạy lại toàn suite thành công, không sửa code hoặc quyền truy cập.
-Kết quả baseline không chứng minh parser Issue #5 hoạt động vì parser chưa viết.
-Trước khi triển khai phải tạo môi trường riêng của worktree và kiểm tra import
-đúng code nhánh mới; không dùng wheel baseline để test code mới.
+Kết quả baseline không chứng minh parser Issue #5 hoạt động; đó là lần kiểm tra
+trước triển khai. Sau đó đã tạo `.venv` riêng, kiểm tra import đúng code nhánh.
+Runtime cuối thay đổi tại `2b10121`; fixtures/tests tại `d4742ca`.
+Task 4 full suite đạt 1.141 passed in 3.29s. Task 5 đã build wheel mới với build
+isolation, cài noneditable trong fresh venv, xác minh import site-packages bằng
+`python -I` từ ngoài checkout: 1.141 passed in 3.54s, pip check sạch.
+Chi tiết wheel SHA, audit từng dòng (không phải whole-file import thành công),
+ví dụ và giới hạn còn lại ở [usage](../../PFSENSE_FIXTURE_PARSER.md).
+Review cuối toàn nhánh và đối chiếu human/lab vẫn là gate còn chờ.
 
 ## Nguồn tham chiếu
 
