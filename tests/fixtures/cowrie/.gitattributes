@@ -1,0 +1,2 @@
+# Cowrie derivative and manifest hashes assume UTF-8 files with LF endings.
+*.json text eol=lf

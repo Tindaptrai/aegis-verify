@@ -1,10 +1,12 @@
-# Cowrie fixture parser — bản đề xuất sau khảo sát mẫu
+# Cowrie fixture parser — thiết kế lịch sử và trạng thái triển khai
 
-Trạng thái: **hướng A đã chốt; acceptance Issue #6 được người dùng cung cấp ngày 11/09**.
+Trạng thái: **hướng A đã được triển khai trên nhánh; còn chờ review/human-lab validation**.
 Ngày 10/09/2026 (UTC+7). Giới hạn canonical ở mục 6 vẫn phải được giữ rõ;
 việc chọn A không phải phê duyệt thay canonical.
 Nhánh chuẩn bị: `codex/issue-6-cowrie-fixture-parser`, xuất phát từ `664880d`.
-Chưa viết production parser, chưa thêm fixture hoặc thay canonical/scenario.
+Production parser và fixture direction A hiện đã có; canonical/scenario không đổi.
+Tài liệu này giữ lại quyết định thiết kế lịch sử; hướng dẫn chạy hiện hành nằm tại
+`docs/COWRIE_FIXTURE_PARSER.md`.
 
 ## 1. Mục tiêu và căn cứ
 
@@ -33,8 +35,8 @@ Native JSONL không nằm trong lượt A; không tự đóng issue dựa trên 
 - Các trường eventid, timestamp, src_ip, session, sensor, protocol, arch, uuid,
   @source, @service trùng giữa data và JSON trong full_log khi đối chiếu cục bộ.
 - `protocol=ssh`; arch có mặt. Không cần message dạng string để nhận params.
-- Timestamp Cowrie: `2026-05-02T01:02:46.697252+07:00`.
-- Timestamp Wazuh: `2026-05-02T01:03:21.836+07:00`.
+- Chuỗi timestamp Cowrie trong nguồn: `2026-05-01T18:02:46.697252+0000`.
+- Chuỗi timestamp Wazuh trong nguồn: `2026-05-01T18:03:21.836+0000`.
 - Không có src_port, dst_ip, dst_port, username, password hoặc input trong data.
 
 Không có session.connect, login.success, login.failed, command.input hoặc
@@ -106,7 +108,7 @@ load_cowrie_wazuh_document(
 ) -> CowrieParseResult
 ```
 
-Đây là API đề xuất, chưa tồn tại để chạy. `CowrieParseResult` chứa một `event`
+Đây là API public đã triển khai. `CowrieParseResult` chứa một `event`
 v2 và `provenance` bất biến; source-specific data không truyền vào engine.
 Chỉ nhận một search-hit object có `_source.data` và Wazuh group `cowrie`.
 Không tự nhận array, hits.hits, CSV hoặc native event qua cùng API.

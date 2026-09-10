@@ -1,0 +1,62 @@
+{
+  "_index": "wazuh-alerts-4.x-2026.05.06",
+  "_id": "fixture-docid-02",
+  "_score": null,
+  "_source": {
+    "input": {
+      "type": "log"
+    },
+    "agent": {
+      "ip": "192.0.2.11",
+      "name": "fixture-host-01",
+      "id": "fixture-agent-01"
+    },
+    "manager": {
+      "name": "fixture-host-02"
+    },
+    "data": {
+      "eventid": "cowrie.session.connect",
+      "@source": "cowrie",
+      "session": "fixture-session-02",
+      "uuid": "fixture-uuid-01",
+      "dst_ip": "192.0.2.11",
+      "src_ip": "192.0.2.10",
+      "src_port": "2553",
+      "protocol": "telnet",
+      "dst_port": "2223",
+      "sensor": "fixture-host-01",
+      "@service": "ssh-telnet-honeypot",
+      "timestamp": "2026-05-06T08:17:02.662625+0000"
+    },
+    "rule": {
+      "firedtimes": 79,
+      "mail": false,
+      "level": 3,
+      "description": "Cowrie JSON event detected",
+      "groups": [
+        "cowrie",
+        "honeypot"
+      ],
+      "id": "100300"
+    },
+    "location": "/fixture/cowrie/cowrie.json",
+    "decoder": {
+      "name": "json"
+    },
+    "id": "fixture-sourceid-02",
+    "full_log": "{\"eventid\":\"cowrie.session.connect\",\"src_ip\":\"192.0.2.10\",\"src_port\":2553,\"dst_ip\":\"192.0.2.11\",\"dst_port\":2223,\"session\":\"fixture-session-02\",\"protocol\":\"telnet\",\"sensor\":\"fixture-host-01\",\"uuid\":\"fixture-uuid-01\",\"timestamp\":\"2026-05-06T08:17:02.662625+0000\",\"@source\":\"cowrie\",\"@service\":\"ssh-telnet-honeypot\"}",
+    "timestamp": "2026-05-06T08:17:04.222+0000"
+  },
+  "fields": {
+    "timestamp": [
+      "2026-05-06T08:17:04.222Z"
+    ],
+    "data.timestamp": [
+      "2026-05-06T08:17:02.662Z"
+    ]
+  },
+  "sort": [
+    1778055424222,
+    3
+  ]
+}

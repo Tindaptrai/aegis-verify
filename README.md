@@ -10,9 +10,10 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 > Canonical Event v2.0 lossless timestamps are merged via PR #16.
 > The fixture-only Wazuh Windows 4688 profile is merged via PR #17.
 > Suricata A (Wazuh-exported alert) is merged via PR #18.
-> This branch adds B: direct EVE JSONL alert/flow with per-line evidence.
-> Real EVE alerts and standalone TCP/UDP flows have passed independent review and user test comparison.
-> See the B pull request and Issue #4 for integration status and acceptance evidence.
+> This branch adds Cowrie direction A: offline Wazuh-exported search-hit parsing.
+> Nine reviewed derivatives cover all six supported Cowrie event types; only the
+> two command records are a real same-session pair.
+> This is not native Cowrie JSONL support and still requires human/lab validation.
 > The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
@@ -84,6 +85,12 @@ a lab action, evaluate log evidence or return detection/prevention results.
 [Suricata B](docs/SURICATA_EVE_JSONL.md) handles direct EVE JSONL alert/flow,
 including skip outcomes, exact line evidence and explicit sensor context.
 The B guide documents the four initial lab exports and the additional real MGMT flow sample.
+
+## Current implementation: Cowrie fixture parser
+
+[Cowrie direction A](docs/COWRIE_FIXTURE_PARSER.md) parses one offline
+Wazuh-exported Cowrie search-hit and emits a canonical v2 event plus immutable
+source provenance. Native Cowrie JSONL and live access are not implemented.
 
 ## First technical milestone
 

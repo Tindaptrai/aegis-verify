@@ -79,17 +79,17 @@ def test_login_failed_is_a_fact_with_preserved_session():
 
 **Produces:** Nine reviewed derivative documents for original params and 1–8.json, manifest with original SHA-256, derivative SHA-256, file names, transformation descriptions, parser context and expected kind/action/outcome. No reverse identifier map. source_ref = 'cowrie-' + derivative hash (under 128 chars). Retain 5/6 session relationship. Do not synthesize a full session from unrelated records.
 
-- [ ] First write a failing fixture coverage test that requires manifest and all six event types; record RED before final fixtures are added.
+- [x] First write a failing fixture coverage test that requires manifest and all six event types; record RED before final fixtures are added.
 ```python
 def test_manifest_covers_profile():
     assert (Path('tests/fixtures/cowrie') / 'manifest.json').is_file()
     # Once manifest exists, compare its parsed outputs to hand-derived expectations
     # for all six kinds, including login success username null and command pair.
 ```
-- [ ] Integrate reviewed candidates with exact line endings pinned to LF in .gitattributes; preserve absence/null and timestamp values, ports, event kinds, outcomes and command structure except declared safe alias/redaction substitutions. Credentials become removed/redacted consistently at every duplicate location, never invented. Sanitization is fixture preparation only, never runtime behavior. Keep source raw bytes unchanged and verify before/after hashes.
-- [ ] Test every derivative bytes/hash/source_ref, line range and public parser output against manifest expected values; test 5/6 share session_key and distinct event IDs, other input records are not invented as one session. Verify remaining absent username in derivative of 3.json remains null. Data/full_log duplicate mapped fields match aside from known numeric display normalization. Assert no password keys or auth credential fragments survive and URLs/identifiers use safe aliases. Do not run log commands/URLs.
-- [ ] Document runnable Windows sample using manifest context, safe fields only, parser limits/null/error/evidence/session namespace, A vs native JSONL boundary, unresolved canonical-only engine limitation and pass/fail claim limits. Map all Issue #6 acceptance items to implementation/tests with boundary caveats. Report how many real samples and synthetic sequences, without calling synthetic sequences lab validation.
-- [ ] Focused fixture tests GREEN, full suite, pip check, wheel build/install in fresh local build/venv and tests with imports verified from installed wheel. Commit owned files only; no push/merge. Report exact verification outputs and source integrity.
+- [x] Integrate reviewed candidates with exact line endings pinned to LF in .gitattributes; preserve absence/null and timestamp values, ports, event kinds, outcomes and command structure except declared safe alias/redaction substitutions. Credentials become removed/redacted consistently at every duplicate location, never invented. Sanitization is fixture preparation only, never runtime behavior. Keep source raw bytes unchanged and verify before/after hashes.
+- [x] Test every derivative bytes/hash/source_ref, line range and public parser output against manifest expected values; test 5/6 share session_key and distinct event IDs, other input records are not invented as one session. Verify remaining absent username in derivative of 3.json remains null. Data/full_log duplicate mapped fields match aside from known numeric display normalization. Assert no password keys or auth credential fragments survive and URLs/identifiers use safe aliases. Do not run log commands/URLs.
+- [x] Document runnable Windows sample using manifest context, safe fields only, parser limits/null/error/evidence/session namespace, A vs native JSONL boundary, unresolved canonical-only engine limitation and pass/fail claim limits. Map all Issue #6 acceptance items to implementation/tests with boundary caveats. Report how many real samples and synthetic sequences, without calling synthetic sequences lab validation.
+- [x] Focused fixture tests GREEN, full suite, pip check, wheel build/install in fresh local build/venv and tests with imports verified from installed wheel. Commit owned files only; no push/merge. Report exact verification outputs and source integrity.
 
 ## Review and handoff
 
