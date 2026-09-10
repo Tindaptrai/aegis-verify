@@ -1,8 +1,13 @@
 # Issue #5 — Thiết kế pfSense filterlog fixture parser
 
-Ngày: 10/09/2026. Trạng thái: **bản thiết kế chờ người dùng duyệt**.
+Ngày: 10/09/2026. Trạng thái: **người dùng đã duyệt phạm vi IPv4 TCP/UDP,
+pass/block, offline; chuyển sang lập kế hoạch triển khai**.
 Chưa triển khai parser, chưa đóng Issue #5, chưa mở PR hoặc merge.
 Base: `370cd2a`; nhánh: `codex/issue-5-pfsense-fixture-parser`.
+
+Xác nhận tiếp theo của người dùng: làm profile giới hạn trước; xem xét mở rộng
+giao thức và kiểu syslog vào buổi sau. Đây không phải cam kết hỗ trợ mọi format
+trong Issue #5, cũng không phải tác vụ tự động được lên lịch.
 
 ## 1. Đọc nhanh: bạn cần hiểu và làm gì?
 
