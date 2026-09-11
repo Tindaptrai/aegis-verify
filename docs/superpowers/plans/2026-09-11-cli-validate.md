@@ -134,8 +134,8 @@ Own test_cli_acceptance.py, tests/fixtures/cli/synthetic-detected, docs/CLI_VALI
 - [x] Write guide in Vietnamese for new venv, sample command, input schema/context per source, file selection, every exit code, report privacy, skips/assurance, unsupported scenario gaps and safe output destination.
 - [x] Full test command: `.venv/Scripts/python.exe -m pytest backend/tests -q -p no:cacheprovider --basetemp build/issue8-final-<unique>` (create build directory first; each run uses a fresh name).
 - [x] Run pip check and git diff --check. Build wheel via `pip wheel . --no-deps --wheel-dir build/issue8-wheel`, install into separate venv, invoke module and console from outside checkout against the portable bundle, verify package __file__ is site-packages.
-- [ ] Request independent reviewer against approved spec/full diff; fix findings with regression tests and re-review. Record verified counts and remaining limitations in guide/handoff; commit only scoped files.
-- [ ] Stop for user local validation. Do not push, create PR, merge, delete worktree, or start Issue #9 without authorization.
+- [x] Request independent reviewer against approved spec/full diff; fix findings with regression tests and re-review. Record verified counts and remaining limitations in guide/handoff; commit only scoped files.
+- [x] Stop for user local validation. Do not push, create PR, merge, delete worktree, or start Issue #9 without authorization.
 
 ## Plan self-review
 
@@ -150,10 +150,26 @@ Spec sections 2/3 -> Tasks 1/3; registry/pipeline/skips -> Task 2; output/exit/p
   corrected and re-reviewed. Latest production commit: `1fd56a9`.
 - Task 4 implemented at `a284a3e`, with precise stale-attestation regression
   assertions at `98f43b9`; scoped review and re-review are clean. Whole-branch
-  review and final controller verification follow. Human validation remains
+  review and final controller verification are complete. Human validation remains
   pending; no push, PR, merge, or Issue #9 authorization.
 - Packaging registration for intake was moved forward into Task 1 to expose the
   package to editable-install tests; this changed sequencing only, not dependencies.
 - Controller reran the portable example: `Detected`, exit 0, two referenced IDs.
   Independent Python 3.12.1 wheel consumer imported from site-packages and produced
   equal module/console JSON and text; its dependency check passed.
+- Final review found malformed parser arrays/objects escaping input validation,
+  a Windows-only console filename in the parity test, and a trailing slash in the
+  README example. The unified fix at `853887f` adds nine regressions; scoped
+  re-review confirmed all three addressed with no new breakage or deferred findings.
+- Controller verification of the final code: **1781 passed, 1 skipped in 26.71s**
+  (FIFO unavailable on Windows), `pip check` and whole-branch `git diff --check`
+  clean. Production scenarios, connectors, canonical models and engine unchanged.
+- Rebuilt final wheel: `build/issue8-wheel-final-853887f/aegis_verify-0.1.0-py3-none-any.whl`,
+  SHA-256 `fd5935a832cd803fdd2a473da1752863fbee66dfebbbe652a283890163e99efa`.
+  Reinstalled in the isolated Python 3.12.1 consumer outside checkout; verified
+  site-packages import, identical module/console JSON and text, dependency check,
+  and safe rejection of both invalid parser container types in the installed code.
+- Python 3.11, POSIX execution, and actual lab validation remain unverified.
+  Synthetic witnesses validate the offline software path, not operational coverage.
+- Implementation handoff is complete locally. Preserve the branch/worktree for
+  human checks; push/PR/merge and Issue #9 remain separately authorized actions.
