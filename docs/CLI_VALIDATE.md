@@ -131,11 +131,16 @@ phải được review về deployment/evidence; warning tự nó không chứng
 
 ## Privacy và đích output an toàn
 
-Report không nhúng raw logs/config bodies, full command line hoặc absolute input
-paths. Tuy vậy run ID, source labels, relative paths, hashes, evidence refs,
-profile metadata và attestation reference vẫn có thể nhạy cảm. Review trước khi
+Report không nhúng raw logs hoặc absolute input paths. Từ Issue #9, JSON thêm
+`comparison_inputs` chứa snapshot scenario/profile/context đã validate để so sánh
+hai run; snapshot có thể chứa điều kiện command line trong profile, target bindings
+và thông tin attestation. Run ID, source labels, relative paths, hashes, evidence refs
+cũng có thể nhạy cảm. Review trước khi
 chia sẻ; giữ real exports riêng, sanitize theo [threat model](THREAT_MODEL.md).
 Không đưa credentials, certificates, tokens hay unsanitized evidence lên Git.
+
+Xem [hướng dẫn compare](CLI_COMPARE.md) cho compatibility policy, trạng thái
+`Regression Passed`, giới hạn report và lệnh PowerShell chạy thử.
 
 CLI chưa có `--output`. Shell redirection có thể ghi đè input trước khi CLI đọc:
 chỉ ghi vào một đích mới ngoài snapshot. Ví dụ tạo thư mục kết quả duy nhất:
