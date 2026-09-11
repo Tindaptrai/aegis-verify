@@ -1,6 +1,6 @@
 # Issue #7 — Validation Engine: hướng A, sẵn đường mở rộng B
 
-Trạng thái: đề xuất chi tiết chờ người dùng duyệt trước implementation.
+Trạng thái: người dùng đã duyệt thiết kế và cho phép implementation ngày 2026-09-11.
 Người dùng đã chốt hướng A; chưa phê duyệt các profile ground truth cụ thể.
 Mốc nền: main `836cd2d`, sau khi merge Cowrie A+B qua PR #21.
 
