@@ -1,0 +1,8 @@
+{
+  "run_id": "synthetic-portable-run",
+  "environment_id": "synthetic-lab",
+  "start": "2026-01-01T00:00:00Z",
+  "end": "2026-01-01T00:01:00Z",
+  "bindings": [{"name": "target", "value": "synthetic-host"}],
+  "declarations": []
+}

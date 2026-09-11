@@ -1,0 +1,18 @@
+id: SCN-999
+name: Synthetic portable CLI example
+version: 0.1.0
+status: draft
+description: Synthetic test-only software acceptance, not lab evidence.
+safety:
+  destructive: false
+  authorization_required: true
+  notes: Synthetic test-only input; no scenario action is executed.
+expected_sources: [wazuh]
+expected_outcome: detected
+assertions:
+  - id: SCN-999-A01
+    description: Synthetic activity exists.
+    source: wazuh
+  - id: SCN-999-A02
+    description: Distinct correlated synthetic alert exists.
+    source: wazuh
