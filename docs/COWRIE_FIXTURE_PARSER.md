@@ -237,9 +237,9 @@ result: một document trả một result hoặc raise.
 
 ## Evidence và session identity của A/B
 
-`raw_event_hash` là SHA-256 của toàn bộ bytes search-hit, kể BOM/newline.
-`raw_event_ref = source_ref + #L1-L<n>` với `n` là số dòng vật lý. Fixture dùng
-`source_ref = cowrie-` cộng derivative SHA-256, dài 71 ký tự.
+Với hướng A, `raw_event_hash` là SHA-256 của toàn bộ bytes search-hit, kể
+BOM/newline; `raw_event_ref = source_ref + #L1-L<n>` với `n` là số dòng vật lý.
+Fixture A dùng `source_ref = cowrie-` cộng derivative SHA-256, dài 71 ký tự.
 
 Với hướng A, event ID là prefix `cowrie:wazuh-evidence-v1:` cộng SHA-256 của
 compact JSON array (UTF-8, `ensure_ascii=True`):
