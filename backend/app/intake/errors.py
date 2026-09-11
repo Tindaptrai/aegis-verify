@@ -36,6 +36,9 @@ _FIELDS = frozenset(
         "assertions",
     }
 )
+_INTERPRETER_EXCEPTION_STATE = frozenset(
+    {"__traceback__", "__cause__", "__context__", "__suppress_context__", "__notes__"}
+)
 
 
 @dataclass(init=False)
@@ -50,9 +53,14 @@ class IntakeError(ValueError):
     hint: str
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name in self.__dataclass_fields__ or name == "args":
+        if name not in _INTERPRETER_EXCEPTION_STATE:
             raise FrozenInstanceError(f"cannot assign to field {name!r}")
         object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name not in _INTERPRETER_EXCEPTION_STATE:
+            raise FrozenInstanceError(f"cannot delete field {name!r}")
+        object.__delattr__(self, name)
 
     def __init__(
         self,

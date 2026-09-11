@@ -46,6 +46,26 @@ def test_intake_error_is_frozen():
         error.code = "input_io"
 
 
+def test_intake_error_blocks_deleting_diagnostic_fields():
+    from aegis_verify.intake.errors import IntakeError
+
+    error = IntakeError("invalid_json")
+
+    with pytest.raises(FrozenInstanceError):
+        del error.code
+    assert error.code == "invalid_json"
+
+
+def test_intake_error_blocks_arbitrary_attributes():
+    from aegis_verify.intake.errors import IntakeError
+
+    error = IntakeError("invalid_json")
+
+    with pytest.raises(FrozenInstanceError):
+        error.private_value = "not-closed"
+    assert not hasattr(error, "private_value")
+
+
 def test_intake_error_allows_python_to_attach_traceback_state():
     from aegis_verify.intake.errors import IntakeError
 
@@ -354,6 +374,65 @@ def test_read_local_normalizes_open_failure_without_path_or_os_message(tmp_path,
         io.read_local(selected, limit=16, stage="profile")
     assert caught.value.code == "input_io"
     assert "private" not in str(caught.value)
+
+
+def test_read_local_rejects_descriptor_for_a_different_file(tmp_path, monkeypatch):
+    from aegis_verify.intake.errors import IntakeError
+    from aegis_verify.intake import io
+
+    selected = tmp_path / "selected.json"
+    different = tmp_path / "different.json"
+    selected.write_bytes(b"selected")
+    different.write_bytes(b"different")
+    original_open = io.os.open
+
+    def open_different(_path, flags):
+        return original_open(different, flags)
+
+    monkeypatch.setattr(io.os, "open", open_different)
+    with pytest.raises(IntakeError) as caught:
+        io.read_local(selected, limit=32, stage="evidence")
+    assert caught.value.code == "input_io"
+
+
+def test_read_local_rejects_metadata_change_during_read(tmp_path, monkeypatch):
+    from aegis_verify.intake.errors import IntakeError
+    from aegis_verify.intake import io
+
+    selected = tmp_path / "selected.json"
+    selected.write_bytes(b"stable")
+    original_fdopen = io.os.fdopen
+
+    class TouchingStream:
+        def __init__(self, stream):
+            self.stream = stream
+
+        def __enter__(self):
+            self.stream.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.stream.__exit__(*args)
+
+        def read(self, size):
+            raw = self.stream.read(size)
+            before = selected.stat()
+            os.utime(
+                selected,
+                ns=(before.st_atime_ns, before.st_mtime_ns + 2_000_000_000),
+            )
+            return raw
+
+        def fileno(self):
+            return self.stream.fileno()
+
+    def touching_fdopen(*args, **kwargs):
+        return TouchingStream(original_fdopen(*args, **kwargs))
+
+    monkeypatch.setattr(io.os, "fdopen", touching_fdopen)
+    with pytest.raises(IntakeError) as caught:
+        io.read_local(selected, limit=32, stage="evidence")
+    assert caught.value.code == "input_io"
 
 
 def test_read_local_accepts_a_single_regular_hardlink_when_supported(tmp_path):
