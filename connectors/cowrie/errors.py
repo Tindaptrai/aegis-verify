@@ -11,6 +11,7 @@ _CODES = frozenset(
     duplicate_key invalid_number max_depth max_nodes invalid_root missing_source
     invalid_field missing_field unsupported_profile missing_event_time
     invalid_event_time invalid_context canonical_validation io_error
+    invalid_bom max_records total_input_too_large
     """.split()
 )
 _FIELDS = frozenset(
@@ -19,6 +20,19 @@ _FIELDS = frozenset(
         "environment_id",
         "sensor_id",
         "ingested_at",
+        "eventid",
+        "timestamp",
+        "src_ip",
+        "src_port",
+        "dst_ip",
+        "dst_port",
+        "protocol",
+        "session",
+        "sensor",
+        "uuid",
+        "arch",
+        "username",
+        "input",
         "_source",
         "_source.id",
         "_source.timestamp",

@@ -33,8 +33,7 @@ def source_time(value: object, path: str, *, required: bool = True) -> PreciseTi
         raise CowrieParseError("invalid_event_time", path) from None
 
 
-def map_cowrie_event(data: dict) -> tuple[dict, dict]:
-    prefix = "_source.data."
+def map_cowrie_event(data: dict, prefix: str = "_source.data.") -> tuple[dict, dict]:
     kind = required_text(data.get("eventid"), prefix + "eventid")
     if kind not in _KINDS:
         raise CowrieParseError("unsupported_profile", prefix + "eventid") from None

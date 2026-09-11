@@ -59,6 +59,26 @@ def evidence_id(
     return "cowrie:wazuh-evidence-v1:" + digest
 
 
+def native_evidence_id(
+    environment_id: str,
+    sensor_id: str,
+    source_ref: str,
+    record_index: int,
+    raw_event_hash: str,
+) -> str:
+    digest = _compact_hash(
+        [
+            "cowrie-native-evidence-v1",
+            environment_id,
+            sensor_id,
+            source_ref,
+            record_index,
+            raw_event_hash,
+        ]
+    )
+    return "cowrie:native-evidence-v1:" + digest
+
+
 def session_key(environment_id: str, sensor_id: str, session: str) -> str:
     digest = _compact_hash(["cowrie-session-v1", environment_id, sensor_id, session])
     return "cowrie:session-v1:" + digest
