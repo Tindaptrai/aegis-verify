@@ -270,11 +270,14 @@ Giới hạn V0:
 | Bindings | 100 |
 | Collection declarations | 100 |
 | Tổng candidate/pair comparisons | 1.000.000 |
-| Mỗi text/literal/binding value | 4 KiB UTF-8 |
+| Mỗi chuỗi trong evaluation profile/context (gồm predicate literal và binding value) | 4 KiB UTF-8 |
 
 Vượt giới hạn làm toàn bộ evaluation raise `resource_limit`; engine không trả
 partial verdict. List/tuple ở đúng giới hạn được chấp nhận nếu mọi invariant khác
-cũng hợp lệ; phần tử kế tiếp bị từ chối.
+cũng hợp lệ; phần tử kế tiếp bị từ chối. Giới hạn 4 KiB này không áp dụng cho
+chuỗi trong canonical event hoặc scenario manifest; các đầu vào đó giữ nguyên
+giới hạn schema riêng. Caller không được cắt ngắn evidence để đáp ứng budget của
+profile/context.
 
 ## Thời gian, correlation và nguyên tắc không suy đoán
 
