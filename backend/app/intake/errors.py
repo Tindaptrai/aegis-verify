@@ -12,6 +12,14 @@ _HINTS = {
     "resource_limit": "Reduce the input to the documented resource limits.",
     "invalid_path": "Select an unambiguous local regular file path.",
     "input_io": "Check that the selected local path exists and is readable.",
+    "invalid_manifest": "Review the bundle manifest fields and parser context.",
+    "unknown_parser": "Select one documented fixture parser key.",
+    "duplicate_source_ref": "Use a unique source_ref for every bundle file.",
+    "duplicate_file": "List each physical evidence file only once.",
+    "hash_mismatch": "Recompute the declared SHA-256 from the exact evidence bytes.",
+    "parser_error": "Review the evidence format and its declared parser context.",
+    "collection_conflict": "Review unsupported records or use unknown collection assurance.",
+    "invalid_collection_declaration": "Bind collection declarations to supported detection assertions.",
 }
 _STAGES = frozenset({"scenario", "inputs", "profile", "context", "evidence", "collection", "output"})
 _FIELDS = frozenset(
