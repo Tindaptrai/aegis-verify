@@ -1,0 +1,95 @@
+{
+  "manifest_version": "1.0",
+  "profile": "cowrie-jsonl-v1",
+  "sanitization_date": "2026-09-11",
+  "review_status": "controller_audited_pending_human_review",
+  "collection_start_utc": "2026-09-11T04:39:42Z",
+  "collection_end_utc": "2026-09-11T04:39:42Z",
+  "parser_context": {
+    "environment_id": "native-fixture-lab",
+    "sensor_id": "cowrie-native-fixture-01",
+    "ingested_at": "2026-09-11T04:39:42Z"
+  },
+  "file": "session-sequence.sanitized.jsonl",
+  "source_file": "cowrie.json.2026-04-16",
+  "source_sha256": "3e26949ef450518ca66bb492bba34fda0f6991e9b9137f5da90049589464836e",
+  "derivative_sha256": "846948ff724363676952c060fa5d63f6da7d5561fefecd951d67d591bf8eb762",
+  "source_ref": "cowrie-native-846948ff724363676952c060fa5d63f6da7d5561fefecd951d67d591bf8eb762",
+  "transformations": [
+    "Select source lines 8,11,12,13,15,16,17,19 in original order from one real session; omitted lines are not fabricated or merged.",
+    "Remove the listed fields, including all password and message fields; retain only explicitly reviewed context fields.",
+    "Alias IPs, session, sensor, UUID and usernames consistently within this native fixture; no reverse alias map is published.",
+    "Use a separate environment/sensor alias namespace from Wazuh A fixtures; no cross-fixture identity claim.",
+    "Preserve timestamps, ports/types, missing/null/empty distinctions, event kinds and original numeric value tokens verbatim.",
+    "Retain reviewed command strings whoami and exit as inert text; never execute them.",
+    "Serialize compact UTF-8 JSONL with LF endings; exact-byte evidence hashes refer to derivative physical lines."
+  ],
+  "removed_fields": [
+    "message",
+    "password"
+  ],
+  "limitations": [
+    "One real selected session is representative, not exhaustive or proof of forensic completeness.",
+    "client.size is intentionally unsupported and skipped; a skip does not validate its source-specific fields.",
+    "Session/authentication outcome remain provenance, unavailable to canonical-only engine assertions.",
+    "Original file and line hashes describe source bytes; derivative hashes describe sanitized bytes."
+  ],
+  "records": [
+    {
+      "derivative_line": 1,
+      "source_line": 8,
+      "source_line_sha256": "2247f723ac751a6b0d261b1d3cfdb537c9338592a4aa0782757d16f1fa8829bc",
+      "event_type": "cowrie.session.connect",
+      "expected_status": "parsed"
+    },
+    {
+      "derivative_line": 2,
+      "source_line": 11,
+      "source_line_sha256": "5f27d3d1efb0ebf80a9b7359917eb367c5169fa028d06838d0cbce100b26d6e5",
+      "event_type": "cowrie.login.failed",
+      "expected_status": "parsed"
+    },
+    {
+      "derivative_line": 3,
+      "source_line": 12,
+      "source_line_sha256": "d9e94b73007039c394424d2302abcc5cc713200e76366a750bde3931df21465f",
+      "event_type": "cowrie.login.success",
+      "expected_status": "parsed"
+    },
+    {
+      "derivative_line": 4,
+      "source_line": 13,
+      "source_line_sha256": "95f428e120d9429194a4e268044864fcc85915ab989226b82c578f248076fad5",
+      "event_type": "cowrie.client.size",
+      "expected_status": "skipped"
+    },
+    {
+      "derivative_line": 5,
+      "source_line": 15,
+      "source_line_sha256": "2bcef35f6676bb27e86298bdba801e6991e078cbbce656d04f5fe21437b528cc",
+      "event_type": "cowrie.session.params",
+      "expected_status": "parsed"
+    },
+    {
+      "derivative_line": 6,
+      "source_line": 16,
+      "source_line_sha256": "d4ddb739afa6391d81f3c1f0b1b3f0a679ba5958137611cfdc6f4ea1eee5934c",
+      "event_type": "cowrie.command.input",
+      "expected_status": "parsed"
+    },
+    {
+      "derivative_line": 7,
+      "source_line": 17,
+      "source_line_sha256": "b55ccca8b0e964f82c7b900ef3d988db9b649b06317828c1d0c1f8eff5c1bcf0",
+      "event_type": "cowrie.command.input",
+      "expected_status": "parsed"
+    },
+    {
+      "derivative_line": 8,
+      "source_line": 19,
+      "source_line_sha256": "3000c5fd76ba0959dcce3e2054f5df4136a0ce03c6dd342083ffdc6d790179fa",
+      "event_type": "cowrie.session.closed",
+      "expected_status": "parsed"
+    }
+  ]
+}

