@@ -4,6 +4,11 @@ from dataclasses import dataclass, FrozenInstanceError
 
 
 _HINTS = {
+    "invalid_arguments": "Use 'aegis validate --help' and provide each required option once.",
+    "invalid_scenario": "Provide one reviewed scenario YAML document.",
+    "invalid_profile": "Provide one valid evaluation profile JSON object.",
+    "invalid_context": "Provide one valid evaluation context JSON object.",
+    "environment_mismatch": "Use a bundle and evaluation context for the same environment.",
     "invalid_input": "Review the selected input and try again.",
     "invalid_json": "Provide one valid UTF-8 JSON object with unique keys.",
     "invalid_number": "Use bounded integer values; floating values are unsupported.",
@@ -20,6 +25,15 @@ _HINTS = {
     "parser_error": "Review the evidence format and its declared parser context.",
     "collection_conflict": "Review unsupported records or use unknown collection assurance.",
     "invalid_collection_declaration": "Bind collection declarations to supported detection assertions.",
+    "unsupported_version": "Use the documented schema versions for every selected input.",
+    "profile_binding": "Bind the selected profile to the exact reviewed scenario.",
+    "assertion_binding": "Bind one evaluation rule to every scenario assertion.",
+    "invalid_predicate": "Review the selected profile predicates and bindings.",
+    "invalid_correlation": "Review the selected profile correlation contract.",
+    "missing_binding": "Provide every target binding required by the selected profile.",
+    "duplicate_evidence_id": "Use evidence records with unique canonical event IDs.",
+    "internal_error": "Retry the command; if the error persists, request human review.",
+    "output_error": "Check the output destination and available output capacity.",
 }
 _STAGES = frozenset({"scenario", "inputs", "profile", "context", "evidence", "collection", "output"})
 _FIELDS = frozenset(
@@ -40,8 +54,15 @@ _FIELDS = frozenset(
         "source_utc_offset",
         "scenario",
         "profile",
+        "context_fingerprint",
+        "profile_fingerprint",
+        "scope_fingerprint",
+        "event_set_fingerprint",
         "declarations",
         "assertions",
+        "rules",
+        "bindings",
+        "events",
     }
 )
 _INTERPRETER_EXCEPTION_STATE = frozenset(
