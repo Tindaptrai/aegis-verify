@@ -295,3 +295,37 @@ def test_real_partial_detection_fix_keeps_remaining_gap(tmp_path):
     assert result['comparison']['status'] == 'Improved with remaining gaps'
     assert result['after']['final_status'] == 'False negative'
     assert result['comparison']['assertion_state_counts']['unchanged_fail'] == 1
+
+
+@pytest.mark.parametrize('mutation', ['missing_binding', 'wrong_operand_type', 'source_mismatch', 'missing_required_role'])
+def test_rehashed_metadata_still_obeys_engine_input_contracts(tmp_path, reports, mutation):
+    from aegis_verify.models.scenario import ScenarioManifest
+    from aegis_verify.validation import (
+        EvaluationContext, EvaluationProfile, fingerprint, scope_fingerprint,
+        scenario_fingerprint, profile_fingerprint, evaluate_scenario, ValidationEngineError,
+    )
+    bad = deepcopy(reports['pass'])
+    inputs = bad['comparison_inputs']
+    if mutation == 'missing_binding':
+        inputs['context']['bindings'] = []
+    elif mutation == 'wrong_operand_type':
+        inputs['context']['bindings'][0]['value'] = 123
+    elif mutation == 'source_mismatch':
+        inputs['profile']['rules'][0]['source_type'] = 'cowrie'
+    else:
+        inputs['scenario']['expected_outcome'] = 'prevented'
+        bad['evaluation']['final_status'] = 'Prevented'
+    manifest = ScenarioManifest.model_validate(inputs['scenario'])
+    inputs['profile']['scenario_fingerprint'] = scenario_fingerprint(manifest)
+    profile = EvaluationProfile.model_validate(inputs['profile'])
+    context = EvaluationContext.model_validate(inputs['context'])
+    bad['evaluation'].update(
+        scenario_fingerprint=scenario_fingerprint(manifest),
+        profile_fingerprint=profile_fingerprint(profile),
+        context_fingerprint=fingerprint(context), scope_fingerprint=scope_fingerprint(context),
+    )
+    # Independently establish that this metadata could not be an engine run.
+    with pytest.raises(ValidationEngineError):
+        evaluate_scenario(manifest, [], profile=profile, context=context)
+    with pytest.raises(IntakeError, match='invalid_comparison_input'):
+        compare(tmp_path, bad, bad)

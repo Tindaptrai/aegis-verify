@@ -9,6 +9,8 @@ from ..validation import (
     fingerprint, profile_fingerprint, scenario_fingerprint, scope_fingerprint,
 )
 from ..validation.results import aggregate_status, count_outcomes
+from ..validation.contracts import validate_rule_source
+from ..validation.predicates import resolve_operand
 
 
 def invalid(field="evaluation", *, code="invalid_comparison_input"):
@@ -21,6 +23,18 @@ def _assertions(evaluation, manifest, profile, context):
     expected = {item.id for item in manifest.assertions}
     if len(assertions) != len(evaluation.assertions) or set(assertions) != expected or set(rules) != expected:
         invalid("assertions")
+    required_role = "detection" if manifest.expected_outcome == "detected" else "prevention"
+    if not any(rule.role == required_role for rule in profile.rules):
+        invalid("profile")
+    bindings = {binding.name: binding.value for binding in context.bindings}
+    try:
+        for assertion in manifest.assertions:
+            rule = rules[assertion.id]
+            validate_rule_source(rule, assertion.source)
+            for predicate in rule.scope + rule.match:
+                resolve_operand(predicate, bindings)
+    except ValidationEngineError:
+        invalid("profile")
     if evaluation.counts != count_outcomes(evaluation.assertions):
         invalid("counts")
     if evaluation.final_status != aggregate_status(manifest.expected_outcome, tuple(a.outcome for a in evaluation.assertions)):

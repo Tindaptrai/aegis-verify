@@ -164,3 +164,8 @@ Kiểm chứng ngày 2026-09-11 trên Python 3.13.14/Windows: **1854 passed,
 `Unchanged pass` cùng evidence IDs nguyên vẹn. Wheel build thành công với build
 isolation; cách build không isolation không chạy được vì venv thiếu setuptools.
 Không thêm runtime dependency và không thay đổi venv để xử lý lỗi build này.
+
+Review cuối cùng ngày 2026-09-11 đã bổ sung kiểm tra binding/operand/source/role
+trong metadata dù fingerprints được tính lại. Kết quả cập nhật: **1858 passed,
+1 skipped**, gồm 77 test comparison; pip check, diff check và smoke từ wheel
+đều đạt. Xem [checkpoint bàn giao](ISSUE_9_HANDOFF.md) cho trạng thái và bước tiếp.
