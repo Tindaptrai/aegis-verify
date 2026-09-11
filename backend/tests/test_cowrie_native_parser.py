@@ -274,7 +274,6 @@ def test_invalid_native_event_selector_is_an_error(value):
         (b'{"eventid":"cowrie.client.size","x":"\\ud800"}\n', "invalid_unicode"),
         (b"\xff\n", "invalid_encoding"),
         (b"\xef\xbb\xbf{}\n", "invalid_bom"),
-        (b'{"eventid":"cowrie.client.size","x":"\xef\xbb\xbf"}\n', "invalid_bom"),
     ],
 )
 def test_late_native_errors_are_strict_sanitized_and_physical(tail, code):
@@ -287,6 +286,36 @@ def test_late_native_errors_are_strict_sanitized_and_physical(tail, code):
     assert diagnostic.line == diagnostic.record_index == 2
     assert "client.size" not in str(caught.value)
     assert caught.value.__suppress_context__
+
+
+@pytest.mark.parametrize("unescaped_first", [True, False])
+def test_embedded_unicode_bom_is_json_content_not_a_framing_marker(unescaped_first):
+    data = BASE | {"unknown": "\ufeff"}
+    unescaped = json.dumps(
+        data, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    escaped = json.dumps(
+        data, ensure_ascii=True, separators=(",", ":")
+    ).encode("utf-8") + b"\n"
+    lines = (unescaped, escaped) if unescaped_first else (escaped, unescaped)
+
+    records = parse(b"".join(lines))
+
+    assert [record.status for record in records] == ["parsed", "parsed"]
+    assert records[0].event.timestamp == records[1].event.timestamp
+    assert records[0].event.event_action == records[1].event.event_action == "login"
+    assert records[0].provenance.raw_event_hash == sha256(lines[0]).hexdigest()
+    assert records[1].provenance.raw_event_hash == sha256(lines[1]).hexdigest()
+    assert records[0].provenance.raw_event_hash != records[1].provenance.raw_event_hash
+
+
+def test_repeated_leading_bom_is_rejected_as_malformed_framing():
+    import aegis_verify.connectors.cowrie as cowrie
+
+    with pytest.raises(cowrie.CowrieParseError) as caught:
+        parse(b"\xef\xbb\xbf\xef\xbb\xbf" + encode())
+    assert caught.value.code == "invalid_bom"
+    assert caught.value.line == caught.value.record_index == 1
 
 
 def test_json_error_column_is_retained_but_line_is_physical_record():
@@ -418,6 +447,33 @@ def test_native_file_errors_are_sanitized_and_context_precedes_open(tmp_path):
     with pytest.raises(cowrie.CowrieParseError) as caught:
         tuple(cowrie.iter_cowrie_file(tmp_path / "SECRET", **(CONTEXT | {"sensor_id": "../bad"})))
     assert caught.value.code == "invalid_context"
+
+
+def test_native_file_open_value_error_is_still_a_sanitized_io_error():
+    import aegis_verify.connectors.cowrie as cowrie
+
+    with pytest.raises(cowrie.CowrieParseError) as caught:
+        tuple(cowrie.iter_cowrie_file("invalid\x00path", **CONTEXT))
+    assert caught.value.code == "io_error"
+    assert "invalid" not in str(caught.value)
+
+
+def test_native_file_iterator_does_not_relabel_internal_value_error(
+    monkeypatch, tmp_path
+):
+    import aegis_verify.connectors.cowrie.native as native
+
+    path = tmp_path / "native.jsonl"
+    path.write_bytes(encode())
+
+    def fail_invariant(raw, index, context):
+        raise ValueError("model invariant")
+
+    monkeypatch.setattr(native, "_line", fail_invariant)
+    iterator = native.iter_cowrie_file(path, **CONTEXT)
+    with pytest.raises(ValueError, match="model invariant") as caught:
+        next(iterator)
+    assert type(caught.value) is ValueError
 
 
 @pytest.mark.parametrize(

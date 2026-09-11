@@ -42,10 +42,9 @@ def _decode(raw: bytes) -> dict:
 
 
 def _line(raw: bytes, index: int, context: dict) -> CowrieNativeRecord:
-    first_bom = raw.find(_BOM)
-    if first_bom >= 0 and not (index == 1 and first_bom == 0):
-        raise CowrieParseError("invalid_bom") from None
-    if index == 1 and raw.startswith(_BOM) and raw.find(_BOM, len(_BOM)) >= 0:
+    if raw.startswith(_BOM) and (
+        index != 1 or raw.startswith(_BOM + _BOM)
+    ):
         raise CowrieParseError("invalid_bom") from None
 
     raw_hash = hash_raw_event(raw)
@@ -201,11 +200,11 @@ def iter_cowrie_file(
     if not isinstance(path, (str, Path)):
         raise CowrieParseError("io_error") from None
     try:
-        with open(path, "rb") as stream:
+        stream = open(path, "rb")
+    except (OSError, ValueError):
+        raise CowrieParseError("io_error") from None
+    try:
+        with stream:
             yield from _read_stream(stream, context)
     except OSError:
-        raise CowrieParseError("io_error") from None
-    except ValueError as error:
-        if isinstance(error, CowrieParseError):
-            raise
         raise CowrieParseError("io_error") from None
