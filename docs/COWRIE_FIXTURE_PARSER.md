@@ -11,6 +11,11 @@ hoàn tất và không có finding cần hành động. Việc thêm hướng B 
 chứng review A đó. Toàn bộ thay đổi A+B vẫn còn chờ human review và lab
 validation; chưa push, merge, đóng Issue #6 hoặc kết luận pass/fail security.
 
+Review kỹ thuật toàn nhánh A+B `664880d..5a15134` đã hoàn tất bằng Astra:
+không tìm thấy finding cần hành động. Hai lỗi native (BOM trong nội dung Unicode
+và gắn sai nhãn lỗi parser thành I/O) cùng một chỗ tài liệu A/B đã được sửa và
+review lại. Đây là technical readiness, không thay cho human/lab acceptance.
+
 ## Chạy trên Windows
 
 Mở PowerShell trong worktree đã có `.venv` editable:
@@ -308,12 +313,17 @@ Cowrie import từ `venv-final/Lib/site-packages`; cả hai public APIs callable
 Full suite từ wheel: **1334 passed in 5.86s**; `pip check` sạch. Đây là kiểm tra
 local/fixture, không thay cho human hoặc lab validation.
 
+## Bằng chứng kiểm tra hướng B và toàn nhánh
+
 Sau khi ghép code B và fixture hiện tại để kiểm trước review, controller đã cài
 wheel trong venv tách biệt; `python -I` xác nhận import Cowrie từ
 `site-packages`, full backend suite đạt **1440 passed in 5.62s** và `pip check`
 sạch. Wheel SHA-256 là
 `1e2621d2e98a2b8a49770fb493d090a325ca6eca1658b390b293da266ed6b438`.
-Final code/evidence review và human/lab gate vẫn còn chờ.
+Lượt đối chiếu editable của controller đạt **1440 passed in 5.54s**, `pip check`
+sạch. Cả 42 Python modules trong wheel khớp bytes source hiện tại. Ví dụ native
+trong hướng dẫn đã chạy đúng: 8 outcomes, 7 parsed và 1 skip ở dòng 4.
+Final technical review `664880d..5a15134` đã qua; human/lab gate vẫn còn chờ.
 
 ## Ranh giới kết luận và human gate
 
