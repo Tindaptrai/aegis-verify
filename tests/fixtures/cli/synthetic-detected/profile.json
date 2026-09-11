@@ -1,0 +1,32 @@
+{
+  "profile_schema_version": "0.1.0",
+  "profile_id": "synthetic-portable-profile",
+  "profile_version": "0.1.0",
+  "scenario_id": "SCN-999",
+  "scenario_version": "0.1.0",
+  "scenario_fingerprint": "ee412f24c50e8cbb2b34340ab4baf8dbd1fcaf2cffe0bccc677f625a7d524ce8",
+  "rules": [
+    {
+      "assertion_id": "SCN-999-A01",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "wazuh",
+      "scope": [{"field": "hostname", "op": "eq", "binding": "target"}],
+      "match": [{"field": "rule_id", "op": "eq", "value": "900001"}]
+    },
+    {
+      "assertion_id": "SCN-999-A02",
+      "role": "detection",
+      "capability": "supported",
+      "source_type": "wazuh",
+      "scope": [{"field": "hostname", "op": "eq", "binding": "target"}],
+      "match": [{"field": "rule_id", "op": "eq", "value": "900002"}],
+      "correlation": {
+        "anchor_assertion_id": "SCN-999-A01",
+        "join_pairs": [{"target_field": "hostname", "anchor_field": "hostname"}],
+        "min_delta_ns": 0,
+        "max_delta_ns": 2000000000
+      }
+    }
+  ]
+}

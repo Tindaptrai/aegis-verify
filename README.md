@@ -63,7 +63,7 @@ python -m venv .venv
 
 Requires Python >=3.11. Contract tests use artificial data; Wazuh parser tests also
 use one reviewed, sanitized user sample, not proof of an incident.
-The full validation CLI described below is still planned.
+The offline validation CLI is available on this branch; see the runnable example below.
 
 ## Current implementation: Wazuh fixture parser
 
@@ -99,16 +99,23 @@ gate. Live access is not implemented.
 
 ## First technical milestone
 
-The target interface is:
+The offline CLI evaluates explicit bundles through the real parsers and engine.
+Start with this synthetic test-only example:
 
 ```bash
 aegis validate \
-  --scenario scenarios/SCN-002-attempted-exfiltration.yaml \
-  --fixture tests/fixtures/inc002/
+  --scenario tests/fixtures/cli/synthetic-detected/scenario.yaml \
+  --fixture tests/fixtures/cli/synthetic-detected/ \
+  --format json
 ```
 
 A result is valid only when it references evidence IDs. Missing evidence is never
 inferred, and fields absent from source telemetry remain `null`.
+
+See [the Vietnamese CLI guide](docs/CLI_VALIDATE.md) for installation, bundle
+contracts, explicit profile/context selection, exit codes and privacy. The sample
+returns `Detected` with two distinct evidence IDs; it proves the offline software
+path only, not lab coverage. Human review and local/lab validation remain pending.
 
 ## Security and data handling
 
