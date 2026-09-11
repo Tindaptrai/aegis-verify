@@ -221,7 +221,7 @@ Mỗi assertion dùng `outcome` (`satisfied`, `missing_telemetry`, `false_negati
 | `reason_code` | Khi nào xuất hiện |
 | --- | --- |
 | `witness_found` | Có witness đầy đủ; target và anchor của correlation là hai event khác nhau. |
-| `activity_not_found_in_input` | Telemetry root không có witness hoặc candidate unknown. |
+| `activity_not_found_in_input` | Telemetry root không có witness và không còn candidate unknown. |
 | `missing_activity_anchor` | Target phụ thuộc vào telemetry root đang thiếu. |
 | `uncertain_activity_anchor` | Telemetry root chưa thể kết luận do field thiếu. |
 | `insufficient_fields` | Còn candidate có thể liên quan nhưng canonical field cần thiết là `null`. |

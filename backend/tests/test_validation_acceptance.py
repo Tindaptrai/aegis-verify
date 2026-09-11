@@ -368,3 +368,14 @@ def test_documented_synthetic_program_runs_with_the_documented_output(tmp_path):
         "False negative\n"
         "caller-attested\n"
     )
+
+
+def test_documented_activity_not_found_reason_requires_no_unknown_candidate():
+    document = GUIDE.read_text(encoding="utf-8")
+    row = next(
+        line
+        for line in document.splitlines()
+        if line.startswith("| `activity_not_found_in_input`")
+    )
+
+    assert "không có witness và không còn candidate unknown" in row
