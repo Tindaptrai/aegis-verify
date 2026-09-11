@@ -1,15 +1,29 @@
 # Cowrie connector
 
-Profile V0 hiện có là hướng A: đọc offline **một Wazuh search-hit JSON** chứa
-`_source.data` Cowrie qua `parse_cowrie_wazuh_document` hoặc
-`load_cowrie_wazuh_document`. Parser phát một `CanonicalEventV2` cùng provenance
-bất biến; không kết nối Wazuh/Cowrie và không chạy command hay URL trong log.
+Connector offline V0 hỗ trợ hai profile tách biệt:
 
-Profile nhận sáu loại event: `session.params`, `session.connect`,
-`session.closed`, `login.success`, `login.failed` và `command.input`. Mapping chỉ
-đọc `_source.data`; trường vắng giữ `null`, không fallback từ `full_log`.
+- **Hướng A — Wazuh:** đọc đúng một Wazuh search-hit JSON chứa
+  `_source.data` qua `parse_cowrie_wazuh_document` hoặc
+  `load_cowrie_wazuh_document`.
+- **Hướng B — native Cowrie:** đọc JSONL `cowrie.json` đã sanitize qua
+  `parse_cowrie_jsonl` (atomic tuple) hoặc `iter_cowrie_file` (iterator lazy).
 
-Đây không phải reader cho file `cowrie.json` JSONL native. Native JSONL offline
-là profile B chưa triển khai; live Cowrie/Wazuh access thuộc V1. Session và kết
-quả authentication được giữ trong provenance, chưa có trong canonical contract
-mà validation engine hiện tiêu thụ.
+Cả hai profile phát `CanonicalEventV2` và provenance bất biến, dùng chung mapping
+cho sáu loại event: `session.params`, `session.connect`, `session.closed`,
+`login.success`, `login.failed` và `command.input`. Trường nguồn vắng hoặc null
+giữ canonical `null`; parser không suy đoán hoặc bổ sung fact từ record cùng
+session. Native event ngoài sáu loại nhưng có `eventid` hợp lệ được trả về dưới
+dạng explicit skip.
+
+Fixture B thực tế đã audit chứa tám dòng từ cùng một source session: bảy parsed
+records bao phủ đủ sáu loại được hỗ trợ và một `cowrie.client.size` skip rõ ràng.
+Đây là coverage của mẫu offline, không phải bằng chứng forensic đầy đủ, kết luận
+scenario hoặc lab acceptance. Session và authentication outcome chỉ nằm trong
+provenance; validation engine hiện chỉ tiêu thụ canonical event nên chưa thể dùng
+hai fact đó làm assertion.
+
+Connector không kết nối live Cowrie/Wazuh, không chạy command hoặc tải URL trong
+log, và không tự sanitize input production tùy ý. Credential, command và dữ liệu
+định danh trong file đầu vào phải được xem là dữ liệu nhạy cảm bất hoạt; việc
+sanitize diễn ra trước parser theo quy trình intake đã review. Live access vẫn
+thuộc V1.

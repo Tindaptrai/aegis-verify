@@ -10,10 +10,12 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 > Canonical Event v2.0 lossless timestamps are merged via PR #16.
 > The fixture-only Wazuh Windows 4688 profile is merged via PR #17.
 > Suricata A (Wazuh-exported alert) is merged via PR #18.
-> This branch adds Cowrie direction A: offline Wazuh-exported search-hit parsing.
-> Nine reviewed derivatives cover all six supported Cowrie event types; only the
-> two command records are a real same-session pair.
-> This is not native Cowrie JSONL support and still requires human/lab validation.
+> This branch adds two offline Cowrie profiles. Direction A parses Wazuh-exported
+> search hits; nine reviewed derivatives cover all six supported event types, and
+> only its two command records are a real same-session pair. Direction B parses
+> native Cowrie JSONL; its audited real derivative has seven parsed records from
+> one session plus one explicit unsupported `client.size` skip. Both still require
+> human/lab validation.
 > The first 14-day milestone is a fixture-driven CLI;
 > the dashboard and GitHub Pages are intentionally deferred until the validation core
 > works end to end.
@@ -86,11 +88,14 @@ a lab action, evaluate log evidence or return detection/prevention results.
 including skip outcomes, exact line evidence and explicit sensor context.
 The B guide documents the four initial lab exports and the additional real MGMT flow sample.
 
-## Current implementation: Cowrie fixture parser
+## Current implementation: Cowrie fixture parsers
 
-[Cowrie direction A](docs/COWRIE_FIXTURE_PARSER.md) parses one offline
-Wazuh-exported Cowrie search-hit and emits a canonical v2 event plus immutable
-source provenance. Native Cowrie JSONL and live access are not implemented.
+[Cowrie directions A and B](docs/COWRIE_FIXTURE_PARSER.md) parse either one
+offline Wazuh-exported Cowrie search-hit or bounded native Cowrie JSONL. Both emit
+canonical v2 events plus immutable source provenance; B also returns explicit
+per-line skip outcomes. The [native intake record](docs/COWRIE_NATIVE_INTAKE.md)
+documents the audited real derivative, safe aggregates and remaining human/lab
+gate. Live access is not implemented.
 
 ## First technical milestone
 
