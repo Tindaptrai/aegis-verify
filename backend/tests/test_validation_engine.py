@@ -265,3 +265,71 @@ def test_unknown_anchor_join_field_is_referenced_as_unevaluable_evidence():
     assert assertion.reason_code == "insufficient_fields"
     assert assertion.evidence_ids == ("activity",)
     assert assertion.unevaluable_evidence_ids == ("activity", "detection")
+
+
+def uncertain_activity_inputs():
+    manifest, events, profile, context = inputs()
+    events[0] = events[0].model_copy(update={"process_id": 1})
+    events += [event(event_id="potential-activity", event_action=None, process_id=2, rule_id="different"),
+               target(process_id=2)]
+    profile = change_rule(profile, 1, correlation=profile.rules[1].correlation.model_copy(update={
+        "join_pairs": (api.JoinPair(target_field="process_id", anchor_field="process_id"),)}))
+    return manifest, events, profile, context
+
+
+@pytest.mark.parametrize("unknown_target", [False, True])
+def test_uncertain_activity_candidate_prevents_false_negative_even_with_satisfied_root(unknown_target):
+    manifest, events, profile, context = uncertain_activity_inputs()
+    if unknown_target:
+        events[2] = events[2].model_copy(update={"rule_id": None})
+    context = complete(profile, context, events)
+    result = evaluate(manifest, events, profile, context)
+    assert result.assertions[0].outcome == "satisfied"
+    assert result.assertions[0].unevaluable_evidence_ids == ("potential-activity",)
+    assert result.final_status == "Inconclusive"
+    assertion = result.assertions[1]
+    assert assertion.reason_code == "insufficient_fields"
+    assert assertion.evidence_ids == ("activity",)
+    assert assertion.witness_pairs == ()
+    assert assertion.unevaluable_evidence_ids == ("detection", "potential-activity")
+    assert tuple(entry.event_id for entry in result.evidence_index) == ("activity", "detection", "potential-activity")
+    assert all(entry.raw_event_ref == "synthetic/record:1" for entry in result.evidence_index)
+    assert all(entry.raw_event_hash == "a" * 64 for entry in result.evidence_index)
+    assert evaluate(manifest, tuple(reversed(events)), profile, context).model_dump_json() == result.model_dump_json()
+
+
+@pytest.mark.parametrize("known_false", ["join", "time", "scope"])
+def test_known_false_eliminates_uncertain_activity_pair(known_false):
+    manifest, events, profile, context = uncertain_activity_inputs()
+    changes = {"join": {"process_id": 3}, "time": {"timestamp": "2026-01-01T00:00:00Z"},
+               "scope": {"hostname": "different-host"}}[known_false]
+    events[1] = events[1].model_copy(update=changes)
+    context = complete(profile, context, events)
+    result = evaluate(manifest, events, profile, context)
+    assert result.final_status == "False negative"
+    assert result.assertions[1].reason_code == "expected_detection_absent"
+    assert result.assertions[1].unevaluable_evidence_ids == ()
+    assert result.assertions[1].evidence_ids == ("activity",)
+
+
+def test_positive_witness_wins_without_promoting_uncertain_activity_to_proof():
+    manifest, events, profile, context = uncertain_activity_inputs()
+    events.append(target(process_id=1).model_copy(update={"event_id": "known-detection"}))
+    context = complete(profile, context, events)
+    result = evaluate(manifest, events, profile, context)
+    assert result.final_status == "Detected"
+    assertion = result.assertions[1]
+    assert assertion.evidence_ids == ("activity", "known-detection")
+    assert assertion.witness_pairs == (api.WitnessPair(target_event_id="known-detection", anchor_event_id="activity"),)
+    assert assertion.unevaluable_evidence_ids == ("detection", "potential-activity")
+
+
+def test_uncertain_activity_candidate_cannot_correlate_to_itself():
+    manifest, events, profile, context = uncertain_activity_inputs()
+    events = events[:2]
+    events[1] = events[1].model_copy(update={"rule_id": "synthetic-reviewed-rule"})
+    context = complete(profile, context, events)
+    result = evaluate(manifest, events, profile, context)
+    assert result.final_status == "False negative"
+    assert result.assertions[1].unevaluable_evidence_ids == ()
+    assert result.assertions[1].witness_pairs == ()

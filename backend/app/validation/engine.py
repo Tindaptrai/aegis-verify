@@ -54,21 +54,25 @@ def _target(rule, anchor_result, events, by_id, context, bindings, declaration, 
                        unevaluable_evidence_ids=anchor_result.unevaluable_evidence_ids, **assurance)
     correlation = rule.correlation
     anchors = tuple(by_id[identifier] for identifier in anchor_result.evidence_ids)
+    # A satisfied root can still have other potential activities. Their unknown
+    # root predicates must participate in the conjunction for each target pair.
+    anchor_candidates = tuple((anchor, Truth.TRUE) for anchor in anchors) + tuple(
+        (by_id[identifier], Truth.UNKNOWN) for identifier in anchor_result.unevaluable_evidence_ids)
     pairs, unknown = [], set()
     for target, candidate_truth in _candidates(rule, events, context, bindings, budget):
-        for anchor in anchors:
+        for anchor, anchor_truth in anchor_candidates:
             if target.event_id == anchor.event_id:
                 continue
             budget.charge()
             delta = target.timestamp.epoch_nanoseconds - anchor.timestamp.epoch_nanoseconds
             if not correlation.min_delta_ns <= delta <= correlation.max_delta_ns:
                 continue
-            truth = all_of((candidate_truth, evaluate_joins(target, anchor, correlation.join_pairs)))
+            truth = all_of((candidate_truth, anchor_truth, evaluate_joins(target, anchor, correlation.join_pairs)))
             if truth is Truth.TRUE:
                 pairs.append(WitnessPair(target_event_id=target.event_id, anchor_event_id=anchor.event_id))
             elif truth is Truth.UNKNOWN:
                 unknown.add(target.event_id)
-                if any(getattr(anchor, pair.anchor_field) is None for pair in correlation.join_pairs):
+                if anchor_truth is Truth.UNKNOWN or any(getattr(anchor, pair.anchor_field) is None for pair in correlation.join_pairs):
                     unknown.add(anchor.event_id)
     if pairs:
         evidence = {identifier for pair in pairs for identifier in (pair.target_event_id, pair.anchor_event_id)}
