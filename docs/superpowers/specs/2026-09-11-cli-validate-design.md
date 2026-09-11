@@ -3,8 +3,8 @@
 Ngày: 2026-09-11. Nhánh: `codex/issue-8-cli-validate`.
 Base: `bcc2579` (PR #22 đã merge).
 
-Trạng thái: người dùng đã chốt hướng A + B giới hạn trong hội thoại. Bản chi
-tiết này chờ người dùng duyệt trước khi lập kế hoạch implementation và viết code.
+Trạng thái: người dùng đã duyệt hướng A + B giới hạn và bản chi tiết này qua
+tin nhắn "okee trien khai thoii". Được lập kế hoạch và triển khai Issue #8.
 Không có phê duyệt push, PR hoặc merge Issue #8 trong bước thiết kế này.
 
 ## 1. Mục tiêu và ranh giới
