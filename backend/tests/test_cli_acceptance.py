@@ -109,8 +109,12 @@ def test_synthetic_attested_absence_is_false_negative(portable):
     assert evaluation["assertions"][1]["evidence_ids"]
 
 
-@pytest.mark.parametrize("change", ["run", "window", "profile"])
-def test_stale_synthetic_attestation_is_rejected(portable, change):
+@pytest.mark.parametrize("change,expected_field", [
+    ("run", "scope_fingerprint"),
+    ("window", "scope_fingerprint"),
+    ("profile", "profile_fingerprint"),
+])
+def test_stale_synthetic_attestation_is_rejected(portable, change, expected_field):
     context = attest_synthetic_absence(portable)
     if change == "profile":
         profile = json.loads((portable / "profile.json").read_bytes())
@@ -123,7 +127,11 @@ def test_stale_synthetic_attestation_is_rejected(portable, change):
     result = command(portable)
     assert result.returncode == 2
     assert result.stdout == ""
-    assert json.loads(result.stderr)["kind"] == "error"
+    diagnostic = json.loads(result.stderr)
+    assert diagnostic["kind"] == "error"
+    assert diagnostic["error"]["code"] == "invalid_collection_declaration"
+    assert diagnostic["error"]["stage"] == "collection"
+    assert diagnostic["error"]["field"] == expected_field
 
 
 def test_empty_inventory_is_missing_telemetry(portable):
