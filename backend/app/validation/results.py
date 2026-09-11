@@ -3,7 +3,7 @@ import hashlib
 import json
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, Field, StrictInt, field_validator
+from pydantic import BaseModel, BeforeValidator, Field, StrictInt, StrictStr, field_validator
 
 from ..models.canonical_event_v2 import CanonicalEventV2
 from ..models.precise_timestamp import PreciseTimestamp
@@ -14,12 +14,17 @@ from .contracts import (MAX_EVENTS, AssertionRule, Binding, CollectionDeclaratio
 from .errors import ValidationEngineError
 
 
+# Evidence coordinates retain the canonical contract's text domain. The 4 KiB
+# operand budget applies to predicates/bindings, not existing evidence identity.
+EvidenceText = Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
+
+
 class WitnessPair(FrozenContract):
-    target_event_id: NonBlank
-    anchor_event_id: NonBlank
+    target_event_id: EvidenceText
+    anchor_event_id: EvidenceText
 
 
-EvidenceIds = Annotated[tuple[NonBlank, ...], BeforeValidator(ordered)]
+EvidenceIds = Annotated[tuple[EvidenceText, ...], BeforeValidator(ordered)]
 
 
 class AssertionResult(FrozenContract):
@@ -45,8 +50,8 @@ class AssertionResult(FrozenContract):
 
 
 class EvidenceEntry(FrozenContract):
-    event_id: NonBlank
-    raw_event_ref: NonBlank
+    event_id: EvidenceText
+    raw_event_ref: EvidenceText
     raw_event_hash: Digest
     canonical_schema_version: Literal["2.0"] = "2.0"
 
@@ -120,8 +125,11 @@ def revalidate_typed(value, model_type):
 
 
 def _hash_json(value):
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
-        ensure_ascii=True, allow_nan=False).encode("utf-8")).hexdigest()
+    try:
+        return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=True, allow_nan=False).encode("utf-8")).hexdigest()
+    except (ValueError, TypeError, OverflowError, RecursionError):
+        raise ValidationEngineError("invalid_input") from None
 
 
 def fingerprint(value):

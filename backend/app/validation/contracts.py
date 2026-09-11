@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import (AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field,
                       StrictBool, StrictInt, StrictStr, model_validator)
+from pydantic_core import PydanticCustomError
 
 from ..models.precise_timestamp import PreciseTimestamp
 from .errors import ValidationEngineError
@@ -181,12 +182,12 @@ class EvaluationProfile(FrozenContract):
     def anchors(self):
         by_id = {rule.assertion_id: rule for rule in self.rules}
         if len(by_id) != len(self.rules):
-            raise ValueError("duplicate assertion rule")
+            raise PydanticCustomError("assertion_binding", "duplicate assertion rule")
         for rule in self.rules:
             if rule.correlation is not None:
                 anchor = by_id.get(rule.correlation.anchor_assertion_id)
                 if anchor is None or anchor.role != "telemetry" or anchor.capability != "supported":
-                    raise ValueError("anchor must be a supported telemetry root")
+                    raise PydanticCustomError("invalid_correlation", "anchor must be a supported telemetry root")
         return self
 
 
