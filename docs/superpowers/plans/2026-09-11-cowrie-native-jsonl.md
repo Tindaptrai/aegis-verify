@@ -61,6 +61,7 @@ raw = stream.readline(MAX_BYTES + 1)
 **Files:**
 - Create: tests/fixtures/cowrie/native/session-sequence.sanitized.jsonl, manifest.json
 - Create: backend/tests/test_cowrie_native_fixtures.py
+- Create: .gitattributes with `tests/fixtures/cowrie/native/*.jsonl text eol=lf` only, preserving exact derivative bytes across Windows checkout.
 - Modify: docs/COWRIE_FIXTURE_PARSER.md, connectors/cowrie/README.md
 - Create: docs/COWRIE_NATIVE_INTAKE.md
 
