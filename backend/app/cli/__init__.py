@@ -1,6 +1,7 @@
 """Safe command dispatcher for offline evidence validation."""
 
 import argparse
+import os
 import sys
 
 from ..intake import IntakeError
@@ -16,7 +17,86 @@ class _HelpExit(Exception):
     pass
 
 
+class _OutputError(Exception):
+    pass
+
+
+class _NullStream:
+    def write(self, text):
+        return len(text)
+
+    def flush(self):
+        return None
+
+
+def _neutralize_failed_stream(name: str, stream) -> None:
+    """Prevent CPython from retrying a known-failed buffered stream at shutdown."""
+    try:
+        descriptor = stream.fileno()
+        if type(descriptor) is not int or descriptor < 0:
+            raise ValueError
+        null_descriptor = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(null_descriptor, descriptor)
+        finally:
+            if null_descriptor != descriptor:
+                os.close(null_descriptor)
+        try:
+            stream.flush()
+        except (OSError, UnicodeError, ValueError):
+            pass
+        return
+    except (OSError, TypeError, AttributeError, ValueError):
+        pass
+
+    try:
+        stream.close()
+    except (OSError, TypeError, AttributeError, ValueError):
+        pass
+    try:
+        replacement = open(os.devnull, "w", encoding="utf-8")
+    except (OSError, TypeError, ValueError):
+        replacement = _NullStream()
+    if getattr(sys, name, None) is stream:
+        setattr(sys, name, replacement)
+
+
+def _write_stream(name: str, text: str) -> bool:
+    stream = getattr(sys, name)
+    try:
+        written = stream.write(text)
+        if written != len(text):
+            raise OSError
+        stream.flush()
+        return True
+    except (OSError, UnicodeError, TypeError, AttributeError, ValueError):
+        _neutralize_failed_stream(name, stream)
+        return False
+
+
+def _emit_error(error: IntakeError, output_format: str) -> bool:
+    return _write_stream("stderr", render_error(error, output_format))
+
+
 class _SafeParser(argparse.ArgumentParser):
+    def _print_message(self, message, file=None):
+        if not message:
+            return
+        stream = sys.stdout if file is None else file
+        if stream is sys.stdout:
+            if not _write_stream("stdout", message):
+                raise _OutputError
+            return
+        if stream is sys.stderr:
+            if not _write_stream("stderr", message):
+                raise _OutputError
+            return
+        try:
+            stream.write(message)
+            stream.flush()
+        except (OSError, UnicodeError, TypeError, AttributeError, ValueError):
+            raise _OutputError from None
+
     def error(self, _message):
         raise _ArgumentError
 
@@ -66,14 +146,12 @@ def main(argv=None) -> int:
         options = _parser().parse_args(arguments)
     except _HelpExit:
         return 0
+    except _OutputError:
+        _emit_error(IntakeError("output_error", stage="output"), error_format)
+        return 4
     except _ArgumentError:
         error = IntakeError("invalid_arguments")
-        try:
-            sys.stderr.write(render_error(error, error_format))
-            sys.stderr.flush()
-        except (OSError, UnicodeError):
-            pass
-        return 2
+        return 2 if _emit_error(error, error_format) else 4
 
     try:
         report = evaluate_bundle(
@@ -84,33 +162,15 @@ def main(argv=None) -> int:
         )
         rendered = render_report(report, options.format)
     except IntakeError as error:
-        try:
-            sys.stderr.write(render_error(error, options.format))
-            sys.stderr.flush()
-        except (OSError, UnicodeError):
-            pass
-        return 2
+        return 2 if _emit_error(error, options.format) else 4
     except Exception:
         error = IntakeError("internal_error")
-        try:
-            sys.stderr.write(render_error(error, options.format))
-            sys.stderr.flush()
-        except (OSError, UnicodeError):
-            pass
+        _emit_error(error, options.format)
         return 4
 
-    try:
-        written = sys.stdout.write(rendered)
-        if written != len(rendered):
-            raise OSError
-        sys.stdout.flush()
-    except (OSError, UnicodeError):
+    if not _write_stream("stdout", rendered):
         error = IntakeError("output_error", stage="output")
-        try:
-            sys.stderr.write(render_error(error, options.format))
-            sys.stderr.flush()
-        except (OSError, UnicodeError):
-            pass
+        _emit_error(error, options.format)
         return 4
     return {
         "Detected": 0,

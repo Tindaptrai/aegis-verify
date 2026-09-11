@@ -635,3 +635,90 @@ def test_short_stdout_write_overrides_success_exit(tmp_path, monkeypatch, capsys
     diagnostic = capsys.readouterr()
     assert result == 4
     assert json.loads(diagnostic.err)["error"]["code"] == "output_error"
+
+
+def test_closed_stdout_pipe_exits_four_without_shutdown_exception(tmp_path):
+    scenario, fixture, _, _ = write_detected_case(tmp_path)
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "aegis_verify",
+            "validate",
+            "--scenario",
+            str(scenario),
+            "--fixture",
+            str(fixture),
+            "--format=json",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    process.stdout.close()
+    stderr = process.stderr.read().decode("utf-8", errors="replace")
+    returncode = process.wait(timeout=10)
+
+    assert returncode == 4
+    assert json.loads(stderr)["error"]["code"] == "output_error"
+    assert "Exception ignored" not in stderr
+    assert "Traceback" not in stderr
+
+
+def test_closed_help_stdout_pipe_is_output_error_without_shutdown_exception():
+    process = subprocess.Popen(
+        [sys.executable, "-m", "aegis_verify", "--help"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    process.stdout.close()
+    stderr = process.stderr.read().decode("utf-8", errors="replace")
+    returncode = process.wait(timeout=10)
+
+    assert returncode == 4
+    assert "output_error" in stderr
+    assert "Exception ignored" not in stderr
+    assert "Traceback" not in stderr
+
+
+def test_failed_error_stream_returns_four_and_is_shutdown_safe():
+    process = subprocess.Popen(
+        [sys.executable, "-m", "aegis_verify", "validate"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    assert process.stdout is not None
+    assert process.stderr is not None
+    process.stderr.close()
+    stdout = process.stdout.read().decode("utf-8", errors="replace")
+    returncode = process.wait(timeout=10)
+
+    assert returncode == 4
+    assert stdout == ""
+
+
+def test_library_help_and_diagnostic_stream_failures_return_four(monkeypatch, capsys):
+    import aegis_verify.cli as cli
+
+    class BrokenStream:
+        def write(self, _text):
+            raise OSError("SECRET-STREAM")
+
+        def flush(self):
+            raise OSError("SECRET-STREAM")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stdout", BrokenStream())
+        assert cli.main(["--help"]) == 4
+    help_error = capsys.readouterr()
+    assert "output_error" in help_error.err
+    assert "SECRET" not in help_error.err
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sys, "stderr", BrokenStream())
+        assert cli.main(["validate"]) == 4
+    diagnostic_error = capsys.readouterr()
+    assert diagnostic_error.out == diagnostic_error.err == ""
