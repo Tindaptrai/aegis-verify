@@ -63,6 +63,7 @@ raw = stream.readline(MAX_BYTES + 1)
 - Create: backend/tests/test_cowrie_native_fixtures.py
 - Create: .gitattributes with `tests/fixtures/cowrie/native/*.jsonl text eol=lf` only, preserving exact derivative bytes across Windows checkout.
 - Modify: docs/COWRIE_FIXTURE_PARSER.md, connectors/cowrie/README.md
+- Modify: README.md Cowrie status/API sections and tests/fixtures/cowrie/README.md to distinguish A from new native B (do not change unrelated project status).
 - Create: docs/COWRIE_NATIVE_INTAKE.md
 
 **Interfaces:**
