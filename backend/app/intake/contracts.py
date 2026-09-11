@@ -131,7 +131,7 @@ class BundleFile(BaseModel):
         if type(value) is not dict:
             return value
         parser = value.get("parser")
-        context_type = _CONTEXT_TYPES.get(parser)
+        context_type = _CONTEXT_TYPES.get(parser) if type(parser) is str else None
         if context_type is None:
             raise PydanticCustomError("unknown_parser", "unknown parser")
         try:

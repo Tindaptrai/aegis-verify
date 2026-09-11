@@ -5,10 +5,13 @@ All evidence created here is synthetic and test-only.
 
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
+import sysconfig
 
 import pytest
 
@@ -24,6 +27,54 @@ def run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
         text=True,
         check=False,
     )
+
+
+@pytest.mark.parametrize("parser", [[], {}, ["SECRET-PARSER"], {"SECRET-PARSER": "value"}])
+def test_non_string_parser_is_safe_input_error(tmp_path, parser):
+    scenario, fixture, _, _ = write_detected_case(tmp_path)
+    inputs_path = fixture / "inputs.json"
+    inputs = json.loads(inputs_path.read_bytes())
+    inputs["files"][0]["parser"] = parser
+    inputs_path.write_bytes(encode_json(inputs))
+
+    result = run_cli(
+        "validate", "--scenario", str(scenario), "--fixture", str(fixture), "--format=json"
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert json.loads(result.stderr) == {
+        "cli_report_version": "0.1.0",
+        "kind": "error",
+        "error": {
+            "code": "unknown_parser",
+            "stage": "inputs",
+            "file_index": 0,
+            "field": "parser",
+            "line": None,
+            "hint": "Select one documented fixture parser key.",
+        },
+    }
+    assert "SECRET-PARSER" not in result.stderr
+
+
+def test_readme_sample_arguments_produce_detected_report():
+    root = Path(__file__).resolve().parents[2]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    example = next(
+        block.removeprefix("bash\n")
+        for block in readme.split("```")[1::2]
+        if block.startswith("bash\naegis validate ")
+    )
+    command = shlex.split(example.replace("\\\n", " "))
+    result = subprocess.run(
+        [sys.executable, "-m", "aegis_verify", *command[1:]],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert json.loads(result.stdout)["evaluation"]["final_status"] == "Detected"
 
 
 SCENARIO = b"""\
@@ -594,7 +645,7 @@ def test_console_and_module_entry_points_are_equivalent(tmp_path):
         str(fixture),
         "--format=json",
     ]
-    console = Path(sys.executable).with_name("aegis.exe")
+    console = Path(sysconfig.get_path("scripts")) / ("aegis.exe" if os.name == "nt" else "aegis")
     assert console.is_file(), "editable install must register the aegis console script"
 
     module_result = run_cli(*command)

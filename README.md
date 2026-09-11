@@ -105,7 +105,7 @@ Start with this synthetic test-only example:
 ```bash
 aegis validate \
   --scenario tests/fixtures/cli/synthetic-detected/scenario.yaml \
-  --fixture tests/fixtures/cli/synthetic-detected/ \
+  --fixture tests/fixtures/cli/synthetic-detected \
   --format json
 ```
 

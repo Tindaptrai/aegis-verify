@@ -302,7 +302,8 @@ def test_pfsense_context_accepts_real_offset_domain_but_rejects_unknown_negative
     assert caught.value.field == "context"
 
 
-def test_unknown_parser_is_rejected_without_fallback(tmp_path):
+@pytest.mark.parametrize("parser", ["auto", [], {}, ["SECRET-PARSER"], {"SECRET-PARSER": "value"}])
+def test_unknown_parser_is_rejected_without_fallback(tmp_path, parser):
     from aegis_verify.intake import IntakeError
 
     entry, _ = _entry(
@@ -313,10 +314,11 @@ def test_unknown_parser_is_rejected_without_fallback(tmp_path):
         {"collection_mode": "direct"},
     )
     with pytest.raises(IntakeError) as caught:
-        _manifest([entry | {"parser": "auto"}])
+        _manifest([entry | {"parser": parser}])
     assert caught.value.code == "unknown_parser"
     assert caught.value.file_index == 0
     assert caught.value.field == "parser"
+    assert "SECRET-PARSER" not in str(caught.value)
 
 
 def test_source_refs_are_unique_before_any_evidence_is_opened(tmp_path):

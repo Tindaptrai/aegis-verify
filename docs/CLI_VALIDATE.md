@@ -162,8 +162,9 @@ Kiểm chứng đóng gói dùng `pip wheel . --no-deps`, cài wheel vào venv k
 cả console/module từ ngoài checkout; kiểm tra `aegis_verify.__file__` nằm trong
 `site-packages`. Bộ fixture không nằm trong wheel: sao chép bundle mẫu riêng.
 
-Kiểm chứng local ngày 2026-09-11: Python 3.13.14 đạt **1772 passed, 1 skipped**
-(FIFO không có trên Windows), gồm 14 acceptance tests CLI. `pip check` và
+Kiểm chứng local ngày 2026-09-11: Python 3.13.14 đạt **1781 passed, 1 skipped**
+(FIFO không có trên Windows), gồm 14 acceptance tests CLI và 9 regression cases
+bổ sung sau final review (parser sai kiểu và lệnh mẫu README). `pip check` và
 `git diff --check` đạt. Wheel cài riêng trên Python 3.12.1 chạy từ ngoài checkout,
 import `site-packages`, console/module cho JSON và text giống nhau, exit 0.
 Chưa kiểm chứng Python 3.11 hoặc lab thật.
