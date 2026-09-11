@@ -120,3 +120,22 @@ def test_binding_and_declaration_lists_accept_limit_reject_next(c):
         c.EvaluationContext(**context_data(declarations=declarations + [dict(assertion_id="extra")]))
     with pytest.raises(ValidationError):
         c.EvaluationContext(**context_data(declarations=declarations[:1] * 2))
+
+
+@pytest.mark.parametrize("field", ["rule_id", "signature_id"])
+@pytest.mark.parametrize("op", ["eq", "in"])
+@pytest.mark.parametrize("location", ["scope", "match"])
+def test_detection_ids_must_be_fixed_in_reviewed_profile(c, field, op, location):
+    data = rule_data(role="detection", correlation=dict(
+        anchor_assertion_id="SCN-999-A02",
+        join_pairs=[dict(target_field="hostname", anchor_field="hostname")],
+        min_delta_ns=0, max_delta_ns=1,
+    ))
+    existing = data.get(location, [])
+    data[location] = existing + [dict(field=field, op=op, binding="runtime_rule")]
+    with pytest.raises(ValidationError):
+        c.AssertionRule(**data)
+
+    operand = dict(value="reviewed-rule") if op == "eq" else dict(values=["reviewed-rule"])
+    data[location] = existing + [dict(field=field, op=op, **operand)]
+    assert c.AssertionRule(**data).role == "detection"

@@ -157,7 +157,11 @@ class AssertionRule(FrozenContract):
         if (self.role == "telemetry") != (self.correlation is None):
             raise ValueError("only detection and prevention require correlation")
         conditions = self.scope + self.match
-        if self.role == "detection" and not any(p.field in {"rule_id", "signature_id"} and p.op in {"eq", "in"} for p in conditions):
+        if self.role == "detection" and not any(
+            p.field in {"rule_id", "signature_id"} and p.op in {"eq", "in"}
+            and p.binding is None and (p.value is not None or p.values is not None)
+            for p in conditions
+        ):
             raise ValueError("detection requires reviewed rule or signature IDs")
         if self.role == "prevention" and not any(p.field == "event_action" and p.op == "eq" and p.value == "blocked" for p in conditions):
             raise ValueError("prevention requires explicit blocked action")
