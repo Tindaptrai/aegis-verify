@@ -477,6 +477,46 @@ def test_intake_resource_boundaries_stop_before_partial_result(
     assert caught.value.file_index == 0
 
 
+@pytest.mark.parametrize(
+    "limit_name,measurement,want_code",
+    [
+        ("MAX_FILE_BYTES", "bytes", "input_too_large"),
+        ("MAX_TOTAL_EVIDENCE_BYTES", "bytes", "resource_limit"),
+        ("MAX_PHYSICAL_LINES", "lines", "resource_limit"),
+        ("MAX_EVENTS", "events", "resource_limit"),
+    ],
+)
+def test_intake_resource_limits_accept_exact_boundary_and_reject_one_over(
+    tmp_path, monkeypatch, limit_name, measurement, want_code
+):
+    """Catch inclusive-limit regressions such as changing ``>`` to ``>=``."""
+    import aegis_verify.intake.loader as loader
+    from aegis_verify.intake import IntakeError
+
+    entry, raw = _entry(
+        tmp_path,
+        "wazuh/win4688.sanitized.json",
+        "wazuh-win4688-v2",
+        "exact-boundary-doc",
+        {"collection_mode": "direct"},
+    )
+    actual = {
+        "bytes": len(raw),
+        "lines": raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n")),
+        "events": 1,
+    }[measurement]
+
+    monkeypatch.setattr(loader, limit_name, actual)
+    result = loader.load_bundle(tmp_path, _manifest([entry]))
+    assert len(result.events) == 1
+
+    monkeypatch.setattr(loader, limit_name, actual - 1)
+    with pytest.raises(IntakeError) as caught:
+        loader.load_bundle(tmp_path, _manifest([entry]))
+    assert caught.value.code == want_code
+    assert caught.value.file_index == 0
+
+
 def _profile_and_context(*, declaration_id="detect", capability="supported", status="complete_for_scope"):
     from aegis_verify.validation import (
         AssertionRule,
