@@ -7,6 +7,7 @@ import sys
 from ..intake import IntakeError
 from .reporting import render_error, render_report
 from .service import evaluate_bundle
+from ..compare import compare_runs
 
 
 class _ArgumentError(Exception):
@@ -117,6 +118,11 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--profile")
     validate.add_argument("--context")
     validate.add_argument("--format", choices=("text", "json"), default="text")
+
+    compare = commands.add_parser("compare", allow_abbrev=False)
+    compare.add_argument("--before", required=True)
+    compare.add_argument("--after", required=True)
+    compare.add_argument("--format", choices=("text", "json"), default="text")
     return parser
 
 
@@ -131,7 +137,15 @@ def _selected_error_format(arguments: list[str]) -> str:
 
 
 def _duplicates(arguments: list[str]) -> bool:
-    for option in ("--scenario", "--fixture", "--profile", "--context", "--format"):
+    for option in (
+        "--scenario",
+        "--fixture",
+        "--profile",
+        "--context",
+        "--before",
+        "--after",
+        "--format",
+    ):
         if sum(item == option or item.startswith(option + "=") for item in arguments) > 1:
             return True
     return False
@@ -154,12 +168,15 @@ def main(argv=None) -> int:
         return 2 if _emit_error(error, error_format) else 4
 
     try:
-        report = evaluate_bundle(
-            options.scenario,
-            options.fixture,
-            profile=options.profile,
-            context=options.context,
-        )
+        if options.command == "validate":
+            report = evaluate_bundle(
+                options.scenario,
+                options.fixture,
+                profile=options.profile,
+                context=options.context,
+            )
+        else:
+            report = compare_runs(before=options.before, after=options.after)
         rendered = render_report(report, options.format)
     except IntakeError as error:
         return 2 if _emit_error(error, options.format) else 4
@@ -172,13 +189,15 @@ def main(argv=None) -> int:
         error = IntakeError("output_error", stage="output")
         _emit_error(error, options.format)
         return 4
-    return {
-        "Detected": 0,
-        "Prevented": 0,
-        "Missing telemetry": 1,
-        "False negative": 1,
-        "Inconclusive": 3,
-    }[report["evaluation"]["final_status"]]
+    if options.command != "compare":
+        return {
+            "Detected": 0,
+            "Prevented": 0,
+            "Missing telemetry": 1,
+            "False negative": 1,
+            "Inconclusive": 3,
+        }[report["evaluation"]["final_status"]]
+    return 0
 
 
 __all__ = ["main"]

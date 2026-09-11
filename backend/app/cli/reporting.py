@@ -64,6 +64,9 @@ def _json_report(report: dict) -> str:
 
 
 def _text_report(report: dict) -> str:
+    if report["kind"] == "comparison":
+        return _text_compare(report)
+
     scenario = report["scenario"]
     evaluation = report["evaluation"]
     counts = report["counts"]
@@ -96,6 +99,68 @@ def _text_report(report: dict) -> str:
             "Warnings: " + (", ".join(_safe_text(item) for item in warnings) or "none"),
         )
     )
+    return _bounded(("\n".join(lines), "\n"))
+
+
+def _text_compare(report: dict) -> str:
+    scenario = report["scenario"]
+    comparison = report["comparison"]
+    before = report["before"]
+    after = report["after"]
+
+    lines = [
+        f"Scenario: {_safe_text(scenario['id'])} - {_safe_text(scenario['name'])} ({_safe_text(scenario['version'])})",
+        f"Before run: {_safe_text(before['run_id'])} ({_safe_text(before['final_status'])})",
+        f"After run: {_safe_text(after['run_id'])} ({_safe_text(after['final_status'])})",
+        f"Comparison status: {_safe_text(comparison['status'])}",
+    ]
+    counts = comparison["assertion_state_counts"]
+    lines.append(
+        "Assertion states: "
+        + ", ".join(
+            f"{label}={_safe_text(value)}" for label, value in (
+                ("unchanged_pass", counts["unchanged_pass"]),
+                ("unchanged_fail", counts["unchanged_fail"]),
+                ("improvement", counts["improvement"]),
+                ("regression", counts["regression"]),
+                ("unchanged_unknown", counts["unchanged_unknown"]),
+                ("unknown_changed", counts["unknown_changed"]),
+                ("became_evaluable", counts["became_evaluable"]),
+                ("became_unevaluable", counts["became_unevaluable"]),
+            )
+        )
+    )
+    for item in comparison["assertions"]:
+        before_evidence_ids = ", ".join(_safe_text(i) for i in item["before"]["evidence_ids"]) if item["before"][
+            "evidence_ids"
+        ] else "none"
+        after_evidence_ids = ", ".join(_safe_text(i) for i in item["after"]["evidence_ids"]) if item["after"][
+            "evidence_ids"
+        ] else "none"
+        before_refs = ", ".join(
+            f"{_safe_text(entry['event_id'])}->{_safe_text(entry['raw_event_ref'])}"
+            for entry in item["before"]["evidence_refs"]
+        ) or "none"
+        after_refs = ", ".join(
+            f"{_safe_text(entry['event_id'])}->{_safe_text(entry['raw_event_ref'])}"
+            for entry in item["after"]["evidence_refs"]
+        ) or "none"
+        lines.extend(
+            (
+                f"Assertion: {_safe_text(item['assertion_id'])} {_safe_text(item['state'])}",
+                f"  Before: {_safe_text(item['before']['outcome'])} {_safe_text(item['before']['reason_code'])}",
+                f"  Before Evidence IDs: {before_evidence_ids}",
+                f"  After: {_safe_text(item['after']['outcome'])} {_safe_text(item['after']['reason_code'])}",
+                f"  After Evidence IDs: {after_evidence_ids}",
+                "  Before/After evidence refs:",
+                f"    before: {before_refs}",
+                f"    after: {after_refs}",
+                "  Added Evidence IDs: " + (", ".join(_safe_text(i) for i in item["evidence_changes"]["added"]) or "none"),
+                "  Removed Evidence IDs: " + (", ".join(_safe_text(i) for i in item["evidence_changes"]["removed"]) or "none"),
+                "  Before Unevaluable IDs: " + (", ".join(_safe_text(i) for i in item["before"]["unevaluable_evidence_ids"]) or "none"),
+                "  After Unevaluable IDs: " + (", ".join(_safe_text(i) for i in item["after"]["unevaluable_evidence_ids"]) or "none"),
+            )
+        )
     return _bounded(("\n".join(lines), "\n"))
 
 

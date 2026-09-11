@@ -34,8 +34,11 @@ _HINTS = {
     "duplicate_evidence_id": "Use evidence records with unique canonical event IDs.",
     "internal_error": "Retry the command; if the error persists, request human review.",
     "output_error": "Check the output destination and available output capacity.",
+    "comparison_incompatible": "Use the same reviewed scenario/profile, environment, target bindings and window duration; regenerate reports if metadata is stale.",
+    "comparison_missing_evidence_reference": "Regenerate both validation reports so evidence references stay consistent.",
+    "invalid_comparison_input": "Regenerate both JSON reports using the current aegis validate; retain comparison_inputs and do not edit verdicts or evidence links.",
 }
-_STAGES = frozenset({"scenario", "inputs", "profile", "context", "evidence", "collection", "output"})
+_STAGES = frozenset({"scenario", "inputs", "profile", "context", "evidence", "collection", "output", "comparison"})
 _FIELDS = frozenset(
     {
         "bundle_schema_version",
@@ -63,6 +66,23 @@ _FIELDS = frozenset(
         "rules",
         "bindings",
         "events",
+        "kind",
+        "evidence_ids",
+        "before",
+        "after",
+        "scenario_id",
+        "scenario_version",
+        "scenario_fingerprint",
+        "assertion_id",
+        "profile_id",
+        "profile_version",
+        "comparison_inputs",
+        "cli_report_version",
+        "evaluation",
+        "counts",
+        "final_status",
+        "witness_pairs",
+        "window_duration",
     }
 )
 _INTERPRETER_EXCEPTION_STATE = frozenset(

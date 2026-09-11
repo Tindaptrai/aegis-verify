@@ -113,6 +113,12 @@ def evaluate_bundle(scenario, fixture, *, profile=None, context=None) -> dict:
             "version": scenario_manifest.version,
         },
         "evaluation": evaluation.model_dump(mode="json"),
+        "comparison_inputs": {
+            "version": "0.1.0",
+            "scenario": scenario_manifest.model_dump(mode="json"),
+            "profile": selected_profile.model_dump(mode="json"),
+            "context": selected_context.model_dump(mode="json"),
+        },
         "intake": {
             "inventory": [dict(item) for item in intake.inventory],
             "ledger": ledger,
