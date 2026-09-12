@@ -1,0 +1,49 @@
+{
+  "profile_schema_version": "0.1.0",
+  "profile_id": "synthetic-windows-telemetry",
+  "profile_version": "0.1.0",
+  "scenario_id": "SCN-001",
+  "scenario_version": "0.1.0",
+  "scenario_fingerprint": "729c4430e65269773334873a27819afde363638dfc93efa5519f5e28bba2ec25",
+  "rules": [
+    {
+      "assertion_id": "SCN-001-A01",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "wazuh",
+      "scope": [
+        {"field": "hostname", "op": "eq", "binding": "target"},
+        {"field": "event_provider", "op": "eq", "value": "Microsoft-Windows-Sysmon"}
+      ],
+      "match": [{"field": "process_name", "op": "eq", "value": "C:\\Synthetic\\powershell.exe"}]
+    },
+    {
+      "assertion_id": "SCN-001-A02",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "wazuh",
+      "scope": [
+        {"field": "hostname", "op": "eq", "binding": "target"},
+        {"field": "event_provider", "op": "eq", "value": "Microsoft-Windows-PowerShell"}
+      ],
+      "match": [{"field": "file_path", "op": "eq", "value": "C:\\Synthetic\\example.ps1"}]
+    },
+    {
+      "assertion_id": "SCN-001-A03",
+      "role": "detection",
+      "capability": "supported",
+      "source_type": "wazuh",
+      "scope": [{"field": "hostname", "op": "eq", "binding": "target"}],
+      "match": [{"field": "rule_id", "op": "eq", "value": "synthetic-detection-only"}],
+      "correlation": {
+        "anchor_assertion_id": "SCN-001-A01",
+        "join_pairs": [
+          {"target_field": "hostname", "anchor_field": "hostname"},
+          {"target_field": "process_id", "anchor_field": "process_id"}
+        ],
+        "min_delta_ns": 0,
+        "max_delta_ns": 5000000000
+      }
+    }
+  ]
+}

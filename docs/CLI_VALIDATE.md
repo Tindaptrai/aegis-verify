@@ -46,6 +46,8 @@ lấy giờ hiện tại, không cho context khai báo lại environment/source_
 | Parser key | Input và context ngoài `ingested_at` |
 | --- | --- |
 | `wazuh-win4688-v2` | Một JSON search-hit/document Windows 4688; `collection_mode`: `direct`/`forwarded`/`unknown` |
+| `wazuh-sysmon1-v1` | Một Wazuh JSON search-hit Sysmon Event 1; cùng context `collection_mode` như 4688 |
+| `wazuh-powershell4104-v1` | Một Wazuh JSON search-hit PowerShell 4104, chỉ đoạn `1/1` có script text không rỗng; cùng context `collection_mode` |
 | `suricata-wazuh-alert-v1` | Một Wazuh-exported Suricata alert; `deployment_mode`: `ids`/`ips`/`unknown` |
 | `suricata-eve-jsonl-v1` | EVE JSONL alert/flow; `sensor_id`, `deployment_mode` |
 | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | BSD filterlog IPv4 TCP/UDP; `sensor_id`, `source_year`, `source_utc_offset` |
@@ -57,6 +59,10 @@ Chi tiết định dạng vẫn theo các guide [Wazuh](WAZUH_FIXTURE_PARSER.md)
 [Suricata A](SURICATA_WAZUH_ALERT.md), [Suricata B](SURICATA_EVE_JSONL.md),
 [Cowrie](COWRIE_FIXTURE_PARSER.md) và [pfSense](PFSENSE_FIXTURE_PARSER.md).
 Không hỗ trợ CSV, bulk-array wrapper, canonical JSONL import hay parser plugin động.
+
+Hai profile Windows mới được mô tả trong [Windows telemetry parsers](WINDOWS_TELEMETRY_PARSERS.md).
+PowerShell nhiều đoạn hoặc thiếu thông tin xác nhận `1/1` làm dừng bundle với
+`parser_error`, không bỏ qua để tạo báo cáo thành công một phần.
 
 Profile dùng [contract Validation Engine](VALIDATION_ENGINE.md) `EvaluationProfile`: ID/version, scenario binding và
 fingerprint, rules theo assertion ID, role/capability/source, scope/match và

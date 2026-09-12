@@ -1,0 +1,27 @@
+{
+  "_source": {
+    "id": "synthetic-powershell-record",
+    "agent": {"id": "901", "name": "synthetic-collector"},
+    "manager": {"name": "synthetic-manager"},
+    "timestamp": "2026-01-01T00:00:04Z",
+    "rule": {"id": "synthetic-script-telemetry-only", "level": 4},
+    "data": {"win": {
+      "system": {
+        "providerName": "Microsoft-Windows-PowerShell",
+        "channel": "Microsoft-Windows-PowerShell/Operational",
+        "eventID": "4104",
+        "systemTime": "2026-01-01T00:00:02.1234567Z",
+        "computer": "synthetic-endpoint",
+        "eventRecordID": "102",
+        "processID": "4242"
+      },
+      "eventdata": {
+        "path": "C:\\Synthetic\\example.ps1",
+        "scriptBlockId": "00000000-0000-0000-0000-000000000003",
+        "messageNumber": "1",
+        "messageTotal": "1",
+        "scriptBlockText": "# SYNTHETIC TEST ONLY - never executed\nWrite-Output 'synthetic marker'"
+      }
+    }}
+  }
+}

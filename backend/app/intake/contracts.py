@@ -97,6 +97,8 @@ ParserContext = (
 )
 ParserKey = Literal[
     "wazuh-win4688-v2",
+    "wazuh-sysmon1-v1",
+    "wazuh-powershell4104-v1",
     "suricata-wazuh-alert-v1",
     "suricata-eve-jsonl-v1",
     "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
@@ -106,6 +108,8 @@ ParserKey = Literal[
 
 _CONTEXT_TYPES = {
     "wazuh-win4688-v2": WazuhWin4688Context,
+    "wazuh-sysmon1-v1": WazuhWin4688Context,
+    "wazuh-powershell4104-v1": WazuhWin4688Context,
     "suricata-wazuh-alert-v1": SuricataWazuhContext,
     "suricata-eve-jsonl-v1": SuricataEveContext,
     "pfsense-filterlog-bsd-ipv4-tcp-udp-v1": PfSenseFilterlogContext,

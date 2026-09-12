@@ -1,0 +1,8 @@
+{
+  "run_id": "synthetic-windows-telemetry",
+  "environment_id": "synthetic-env",
+  "start": "2026-01-01T00:00:00Z",
+  "end": "2026-01-01T00:01:00Z",
+  "bindings": [{"name": "target", "value": "synthetic-endpoint"}],
+  "declarations": []
+}

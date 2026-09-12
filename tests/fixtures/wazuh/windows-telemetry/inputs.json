@@ -1,0 +1,20 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "synthetic-env",
+  "files": [
+    {
+      "path": "sysmon1.synthetic.json",
+      "source_ref": "synthetic-sysmon",
+      "parser": "wazuh-sysmon1-v1",
+      "sha256": "cf378798536fa2db11b700b79ae77067db1e33bd1f286e145d04d8bfc2b9a347",
+      "context": {"ingested_at": "2026-01-01T00:01:00Z", "collection_mode": "direct"}
+    },
+    {
+      "path": "powershell4104.synthetic.json",
+      "source_ref": "synthetic-powershell",
+      "parser": "wazuh-powershell4104-v1",
+      "sha256": "f1693573081e38494889383a615452a7244f177ee3575cfc195fb92ea04dafa7",
+      "context": {"ingested_at": "2026-01-01T00:01:00Z", "collection_mode": "direct"}
+    }
+  ]
+}
