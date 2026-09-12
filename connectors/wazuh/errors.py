@@ -9,7 +9,7 @@ _CODES = frozenset({
     'invalid_json', 'duplicate_key', 'invalid_number', 'max_depth', 'max_nodes',
     'invalid_root', 'missing_source', 'invalid_field', 'unsupported_profile',
     'missing_event_time', 'invalid_event_time', 'invalid_context',
-    'canonical_validation', 'io_error',
+    'canonical_validation', 'io_error', 'incomplete_script', 'unsupported_fragmentation',
 })
 _FIELDS = frozenset({
     'source_ref', 'environment_id', 'ingested_at', 'collection_mode',
@@ -18,9 +18,11 @@ _FIELDS = frozenset({
     '_source.rule.level', '_source.data', '_source.data.win',
     '_source.data.win.system', '_source.data.win.eventdata',
     *('_source.data.win.system.' + field for field in
-      ('systemTime', 'providerName', 'channel', 'eventID', 'computer')),
+      ('systemTime', 'providerName', 'channel', 'eventID', 'computer', 'processID', 'eventRecordID')),
     *('_source.data.win.eventdata.' + field for field in
-      ('subjectUserName', 'newProcessName', 'newProcessId', 'parentProcessName', 'commandLine')),
+      ('subjectUserName', 'newProcessName', 'newProcessId', 'parentProcessName', 'commandLine',
+       'processId', 'image', 'parentImage', 'user', 'processGuid', 'parentProcessGuid',
+       'parentProcessId', 'path', 'scriptBlockId', 'messageNumber', 'messageTotal', 'scriptBlockText')),
     *('canonical.' + field for field in CanonicalEventV2.model_fields),
 })
 
