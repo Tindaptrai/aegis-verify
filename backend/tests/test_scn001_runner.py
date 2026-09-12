@@ -208,6 +208,37 @@ foreach ($f in $functions) {{ . ([scriptblock]::Create($f.Extent.Text)) }}
                           capture_output=True, text=True, timeout=15)
 
 
+@pytest.mark.parametrize('directory_length,accepted', [(206, True), (207, False),
+                                                       (208, False), (218, False), (230, False)])
+def test_run_directory_reserves_space_for_output_filenames(ps, directory_length, accepted):
+    # Real existing parent, no directory/file creation by the runner or any child launch.
+    with tempfile.TemporaryDirectory(prefix='aegis-path-boundary-') as directory:
+        parent = Path(directory).resolve()
+        out = parent / ('r' * (directory_length - len(str(parent)) - 1))
+        assert len(str(out)) == directory_length
+        path = str(out).replace("'", "''")
+        result = invoke_functions(ps, ['Assert-AegisPath', 'Assert-AegisRunDirectory'], f"""
+try {{ Assert-AegisRunDirectory '{path}'; exit 0 }}
+catch {{ [Console]::Error.WriteLine($_.Exception.Message); exit 2 }}
+""")
+        assert result.returncode == (0 if accepted else 2), result.stderr
+        if not accepted:
+            assert 'AEGIS_INVALID_LOCAL_PATH' in result.stderr
+        assert not out.exists()
+        assert not list(parent.iterdir())
+
+
+def test_preflight_refuses_output_that_would_fail_after_child_start(ps, kit, tmp_path):
+    with tempfile.TemporaryDirectory(prefix='aegis-path-preflight-') as directory:
+        parent = Path(directory).resolve()
+        out = parent / ('r' * (208 - len(str(parent)) - 1))
+        result = invoke(ps, kit, tmp_path, RunDirectory=str(out))
+        assert result.returncode == 2
+        assert 'AEGIS_INVALID_LOCAL_PATH' in result.stderr
+        assert 'ready' not in result.stdout
+        assert not out.exists()
+
+
 @pytest.mark.parametrize('case', ['ok', 'nonzero', 'timeout', 'wrong-pid', 'extra-output', 'stderr'])
 def test_child_result_validation_without_launching(ps, case):
     code = 1 if case == 'nonzero' else 0

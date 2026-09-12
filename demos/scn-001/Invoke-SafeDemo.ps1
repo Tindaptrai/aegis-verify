@@ -51,6 +51,11 @@ function Get-AegisHash([byte[]]$Bytes) {
 
 function Assert-AegisRunDirectory([string]$Path) {
     Assert-AegisPath $Path
+    # Validate final paths before creating the directory or launching a child.
+    foreach ($name in @('execution-start.json', 'execution-launched.json',
+                        'execution.json', 'stdout.txt', 'stderr.txt')) {
+        Assert-AegisPath (Join-Path $Path $name)
+    }
     $cursor = $Path
     while ($cursor) {
         if (Test-Path -LiteralPath (Join-Path $cursor '.git')) { throw 'AEGIS_RUN_OUTPUT_IN_REPOSITORY' }

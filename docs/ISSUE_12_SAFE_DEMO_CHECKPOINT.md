@@ -1,6 +1,7 @@
 # Issue #12 — Checkpoint demo vô hại
 
-Ngày ghi nhận: 2026-09-12. Giao tiếp/lab commands trong task này dùng tiếng Việt.
+Ngày ghi nhận: 2026-09-12; cập nhật review/P3: 2026-09-13.
+Giao tiếp/lab commands trong task này dùng tiếng Việt.
 
 ## Repository
 
@@ -12,7 +13,8 @@ Ngày ghi nhận: 2026-09-12. Giao tiếp/lab commands trong task này dùng ti�
 - [Kế hoạch phần 1 — kit lab](superpowers/plans/2026-09-12-safe-demo-lab-kit.md).
 - Implementation phần 1: commit `92b412f` (generator, runner, 85 tests mới).
 - [Hướng dẫn kit tiếng Việt](../demos/scn-001/README.md).
-- Đã làm inline/tuần tự, không mở subagent. Chưa push/merge/đóng Issue #12.
+- Implementation làm inline/tuần tự; sau đó có subagent review độc lập theo
+  phê duyệt của người dùng. Chưa push/merge/đóng Issue #12.
 - Root checkout và dữ liệu chưa commit của người dùng không được reset/clean.
 
 ## Việc lab người dùng đã thực hiện và báo kết quả
@@ -78,8 +80,9 @@ firewall blocked. Chưa có A/B/C evaluation reports hay Regression Passed.
 
 ## Bước tiếp theo
 
-1. Human/reviewer độc lập xem kit trước khi cài rule hoặc chạy lab.
-2. Người dùng chạy đối chiếu tests theo README; không cần raw lab export để test kit.
+1. Review độc lập đã hoàn thành và P3 đã sửa; vẫn cần human review trước lab.
+2. Người dùng đã đối chiếu bản trước P3 (2094 passed, 1 skipped); có thể chạy
+   lại bản sửa theo lệnh bên dưới, không cần raw lab export để test kit.
 3. Xác minh parent rule thực tế cho PS4104, custom ID trống, alert threshold
    và tác động tích hợp trước cài demo. Không dùng Suricata rule IDs cho demo PS.
 4. Review kit rồi rehearsal trên Windows lab; không sửa policy/ground truth.
@@ -137,14 +140,55 @@ git diff --cached --check
 dùng chạy trên endpoint lab. Không chạy `-Execute`, Wazuh config/logtest demo
 mới hoặc cài rule trong lượt này.
 
-## Tự rà soát và giới hạn cần review độc lập
+## Review độc lập và bản sửa P3
+
+Người dùng báo kiểm tra bản trước P3: **2094 passed, 1 skipped in 82.11s**,
+`pip check` sạch và `git diff --check` không có output. Đây là kết quả người
+dùng cung cấp, khác với kiểm chứng mới của agent bên dưới.
+
+Reviewer độc lập đã xem `cac892f..9dc0898`: không phát hiện P1/P2, có một P3
+về giới hạn đường dẫn. RunDirectory dài 208 ký tự vượt qua guard cũ; tên
+`execution-start.json` vẫn vừa giới hạn 230 nhưng `execution-launched.json`
+vượt giới hạn, có thể làm run dừng sau khi child đã khởi chạy.
+
+Bản sửa kiểm tra đủ năm đường dẫn output trong `Assert-AegisRunDirectory`,
+trước tạo thư mục hoặc chạy child. Giới hạn hiện tại của RunDirectory là
+206 ký tự, suy ra từ giới hạn 230 của từng file và tên output dài nhất.
+Không đổi payload, thời gian chạy, rule, ground truth hoặc semantics evaluation.
+
+Kiểm chứng TDD ngày 2026-09-13:
+
+- RED trên code cũ: **5 failed, 1 passed, 38 deselected in 6.38s**.
+- GREEN kit/runner: **91 passed in 47.32s**.
+- Sáu test mới kiểm tra các độ dài 206/207/208/218/230 và preflight thực tế
+  từ chối đường dẫn trước khi kiểm tra telemetry hay tạo run directory.
+- Reviewer độc lập kiểm tra lại diff và AST: 206 được chấp nhận;
+  207/208/218/230 bị từ chối với `AEGIS_INVALID_LOCAL_PATH`. P3 đã giải quyết,
+  không thấy regression cần xử lý trong diff bản sửa.
+
+Lệnh kiểm chứng mới của agent trên bản sửa:
+
+```powershell
+cd 'I:\AEGIS-VERIFY\.worktrees\issue-12-safe-demo'
+& '.\.venv\Scripts\python.exe' -m pytest backend/tests -q -rs -p no:cacheprovider --basetemp ('build/pytest-p3-full-' + [guid]::NewGuid().ToString('N'))
+& '.\.venv\Scripts\python.exe' -m pip check
+git diff --check
+```
+
+Kết quả: **2100 passed, 1 skipped in 89.43s**; skip FIFO trên Windows tại
+`backend/tests/test_intake_io.py:452`. `pip check`: `No broken requirements
+found.`; diff check exit 0. Reviewer không chạy full pytest; các kết quả suite
+này do agent chính chạy. Không chạy `-Execute`, cài rule hoặc truy cập lab.
+Nếu đã tạo kit trước bản sửa, cần tạo kit mới để nhận runner đã sửa.
+
+## Tự rà soát và giới hạn sau review
 
 Tự rà soát đã bổ sung regression tests cho scalar fields bị thay bằng arrays
 (PowerShell comparison có thể im lặng cho qua), generator output ở checkout
 khác và readback mismatch. Không thay semantics engine để làm demo đạt.
 
-Chưa có review độc lập cho `92b412f`. Reviewer cần đọc AGENTS, design/plan,
-README và review `cac892f..92b412f` ở worktree trên, đặc biệt:
+Review độc lập đã đọc AGENTS, design/plan, README và kiểm tra các điểm sau;
+human review và lab validation vẫn cần thiết:
 
 1. Safety của payload/runner, no-overwrite/reparse, path/argument quoting,
    timeout/child lifecycle và partial manifests.
