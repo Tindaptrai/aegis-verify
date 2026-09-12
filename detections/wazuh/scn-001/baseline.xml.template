@@ -1,0 +1,15 @@
+<!-- AEGIS SAFE DEMO ONLY: install exactly one reviewed revision. -->
+<group name="aegis_safe_demo,">
+  <rule id="$rule_id" level="5">
+    <if_sid>$parent_sid</if_sid>
+    <field name="win.system.providerName" type="pcre2">\AMicrosoft-Windows-PowerShell\z</field>
+    <field name="win.system.channel" type="pcre2">\AMicrosoft-Windows-PowerShell/Operational\z</field>
+    <field name="win.system.eventID" type="pcre2">\A4104\z</field>
+    <field name="win.system.computer" type="pcre2">$host_pattern</field>
+    <field name="win.eventdata.messageNumber" type="pcre2">\A1\z</field>
+    <field name="win.eventdata.messageTotal" type="pcre2">\A1\z</field>
+    <field name="win.eventdata.path" type="pcre2">$path_pattern</field>
+    <description>AEGIS safe demo: filename baseline matched; not a malware verdict.</description>
+    <options>no_email_alert</options>
+  </rule>
+</group>
