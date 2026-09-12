@@ -1,5 +1,16 @@
 # Gap → Fix → Re-test Demo
 
+## Trạng thái triển khai Issue #12
+
+[Kit SCN-001 và hướng dẫn tiếng Việt](../demos/scn-001/README.md) hiện triển khai
+phần chuẩn bị offline/preflight/rehearsal. Hai payload cùng bytes, baseline
+theo filename và fixed theo toàn bộ nội dung đã review. Fixed này chịu được
+đổi tên, **không phải detector hành vi tổng quát**.
+
+Các mục A/B/C bên dưới mô tả mục tiêu/kỳ vọng, **không phải kết quả lab đã đạt**.
+Export/attestation và evaluation profile còn cần kế hoạch riêng. Manifest
+execution và synthetic logtest không thay canonical evidence hay kết luận CLI.
+
 ## Goal
 
 Demonstrate that AEGIS Verify can distinguish missing telemetry from a detection gap

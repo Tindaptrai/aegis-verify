@@ -1,6 +1,7 @@
 # Issue #12 — Thiết kế demo vô hại Gap → Fix → Re-test
 
-Ngày: 2026-09-12. Trạng thái: đề xuất, chờ duyệt bản viết trước triển khai.
+Ngày: 2026-09-12. Trạng thái: người dùng đã duyệt tiếp tục phần 1 — kit lab.
+Export/attestation và evaluation A/B/C vẫn cần kế hoạch riêng trước triển khai.
 
 Base đã xác minh: `bf4852979293a998e169b06d214486465678360e` (merge PR #25).
 Branch: `codex/issue-12-safe-demo`. Không thay đổi root checkout.
@@ -203,8 +204,8 @@ không thay Wazuh logtest hoặc execution test trên Windows lab.
 
 ## 10. Điểm dừng và bàn giao
 
-Bản thiết kế này cần người dùng duyệt trước implementation plan/code. Sau
-đó có thể viết kit và test synthetic ngay trên máy phát triển. **Cài rule và
+Người dùng đã duyệt triển khai kit và test synthetic trên máy phát triển.
+Phần export/evaluation chưa được thực hiện trong kế hoạch kit. **Cài rule và
 chạy lab chỉ sau preflight, review payload/rule và xác nhận của người dùng.**
 
 Thông tin cần người dùng cung cấp đầu tiên: phiên bản Wazuh manager, custom
