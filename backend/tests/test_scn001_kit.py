@@ -198,3 +198,126 @@ def test_output_in_another_checkout_refused(kit_module, tmp_path):
     with pytest.raises(ValueError, match='use_external_output_or_build'):
         kit_module.prepare_kit(**options(tmp_path, output_dir=checkout / 'kit'))
     assert not (checkout / 'kit').exists()
+
+
+NATIVE_PROFILE = 'wazuh-eventchannel-4.14.4-lf-v1'
+FLAT_SCRIPT = "Write-Output 'AEGIS_SAFE_DEMO_V1' Write-Output ('AEGIS_PID=' + $PID)"
+
+
+def native_rule(kit_module, revision):
+    return ET.fromstring(kit_module.render_rule(
+        revision=revision, rule_id=119901, parent_sid=91816,
+        target_host='SYNTHETIC.ENDPOINT',
+        baseline_path=r'C:\AEGIS Synthetic\lab_update.ps1',
+        field_profile=NATIVE_PROFILE)).find('rule')
+
+
+def literal_match(pattern, value):
+    # Only the generated anchored literal subset; NOT the Wazuh/PCRE2 engine.
+    return isinstance(value, str) and re.search(pattern.replace(r'\z', r'\Z'), value) is not None
+
+
+def test_native_profile_baseline_matches_only_doubled_field_path(kit_module):
+    rule = native_rule(kit_module, 'baseline')
+    pattern = rule.find("field[@name='win.eventdata.path']").text
+    assert literal_match(pattern, r'C:\\AEGIS Synthetic\\lab_update.ps1')
+    for path in (r'C:\AEGIS Synthetic\lab_update.ps1',
+                 r'C:\\AEGIS Synthetic\lab_update.ps1',
+                 r'C:\\AEGIS Synthetic\\maintenance_check.ps1',
+                 r'C:\\AEGIS Synthetic\\lab_updateXps1',
+                 r'C:\\AEGIS Synthetic\\lab_update.ps1' + '\n'):
+        assert not literal_match(pattern, path)
+
+
+def test_native_profile_fixed_matches_exact_lossy_representation_only(kit_module):
+    rule = native_rule(kit_module, 'fixed')
+    pattern = rule.find("field[@name='win.eventdata.scriptBlockText']").text
+    assert literal_match(pattern, FLAT_SCRIPT)
+    for text in (PAYLOAD.decode(), PAYLOAD.decode().replace('\n', '\r\n'),
+                 FLAT_SCRIPT + ' ', FLAT_SCRIPT + '\n', FLAT_SCRIPT + '\x00',
+                 ' ' + FLAT_SCRIPT, '# ' + FLAT_SCRIPT, '<# ' + FLAT_SCRIPT + ' #>',
+                 FLAT_SCRIPT.replace("' Write-Output", "'  Write-Output"),
+                 FLAT_SCRIPT + '; Get-Date', "Write-Output 'AEGIS_SAFE_DEMO_V1'",
+                 FLAT_SCRIPT.replace('$PID', '$OTHER')):
+        assert not literal_match(pattern, text)
+    assert 'decoded script representation' in rule.findtext('description')
+    assert rule.find("field[@name='win.eventdata.path']") is None
+
+
+@pytest.mark.parametrize('revision', ['baseline', 'fixed'])
+def test_native_profile_preserves_guards(kit_module, revision):
+    rule = native_rule(kit_module, revision)
+    assert rule.attrib == {'id': '119901', 'level': '5'}
+    assert rule.findtext('if_sid') == '91816'
+    assert rule.findtext('options') == 'no_email_alert'
+    expected = {
+        'win.system.providerName': 'Microsoft-Windows-PowerShell',
+        'win.system.channel': 'Microsoft-Windows-PowerShell/Operational',
+        'win.system.eventID': '4104', 'win.system.computer': 'SYNTHETIC.ENDPOINT',
+        'win.eventdata.messageNumber': '1', 'win.eventdata.messageTotal': '1',
+    }
+    for key, value in expected.items():
+        field = rule.find(f"field[@name='{key}']")
+        assert field.attrib['type'] == 'pcre2'
+        assert literal_match(field.text, value)
+        for bad in (None, '', value + '\n', value + '0', 'OTHER'):
+            assert not literal_match(field.text, bad)
+
+
+@pytest.mark.parametrize('profile', [None, True, [], {}, '', 'auto', 'wazuh-eventchannel-latest'])
+def test_unknown_field_profile_rejected_before_output(kit_module, tmp_path, profile):
+    with pytest.raises(ValueError, match='invalid_field_profile'):
+        kit_module.prepare_kit(**options(tmp_path, field_profile=profile))
+    assert not (tmp_path / 'kit').exists()
+    with pytest.raises(ValueError, match='invalid_field_profile'):
+        kit_module.render_rule(revision='fixed', rule_id=119901, parent_sid=91816,
+                               target_host='SYNTHETIC', baseline_path=r'C:\A\lab_update.ps1',
+                               field_profile=profile)
+
+
+def test_native_kit_records_profile_without_changing_payload_or_runner(kit_module, tmp_path):
+    manifest = kit_module.prepare_kit(**options(tmp_path, field_profile=NATIVE_PROFILE))
+    out = tmp_path / 'kit'
+    assert manifest['field_profile'] == NATIVE_PROFILE
+    assert manifest['kit_version'] == '0.1.0'  # Additive metadata, unchanged runner contract.
+    assert (out / 'lab_update.ps1').read_bytes() == PAYLOAD
+    assert (out / 'maintenance_check.ps1').read_bytes() == PAYLOAD
+    assert (out / 'Invoke-SafeDemo.ps1').read_bytes() == (ROOT / 'demos/scn-001/Invoke-SafeDemo.ps1').read_bytes()
+    assert json.loads((out / 'kit.json').read_bytes()) == manifest
+    for name, digest in manifest['artifact_sha256'].items():
+        assert hashlib.sha256((out / name).read_bytes()).hexdigest() == digest
+    catalog = json.loads((out / 'logtest-cases/catalog.json').read_bytes())
+    assert catalog['field_profile'] == NATIVE_PROFILE
+    assert catalog['synthetic_only'] is True
+    assert catalog['input_layer'] == 'decoded_fields_json_not_native_transport'
+    assert len(catalog['cases']) == 12
+    fixed = ET.fromstring((out / 'fixed.xml').read_bytes()).find('rule')
+    fields = {field.attrib['name']: field.text for field in fixed.findall('field')}
+    for case in catalog['cases']:
+        event = json.loads((out / case['file']).read_bytes())
+        assert event['aegis_synthetic_test_only'] is True
+        values = {f'win.{section}.{key}': value
+                  for section, data in event['win'].items() for key, value in data.items()}
+        matched = all(literal_match(pattern, values.get(key)) for key, pattern in fields.items())
+        assert matched == (case['name'] in ('original', 'renamed')), case['name']
+        if case['name'] == 'renamed':
+            assert values['win.eventdata.path'] == r'C:\\AEGIS Synthetic\\maintenance_check.ps1'
+            assert values['win.eventdata.scriptBlockText'] == FLAT_SCRIPT
+
+
+def test_explicit_legacy_profile_retains_default_rule_bytes(kit_module):
+    for revision in ('baseline', 'fixed'):
+        args = dict(revision=revision, rule_id=119901, parent_sid=91816,
+                    target_host='SYNTHETIC', baseline_path=r'C:\A\lab_update.ps1')
+        assert kit_module.render_rule(**args, field_profile='decoded-json-v1') == kit_module.render_rule(**args)
+
+
+def test_cli_accepts_explicit_native_profile(kit_module, tmp_path):
+    result = subprocess.run([sys.executable, str(SCRIPT), '--output-dir', str(tmp_path / 'kit'),
+                             '--lab-directory', r'C:\AEGIS Synthetic', '--target-host', 'SYNTHETIC',
+                             '--rule-id', '119901', '--parent-sid', '91816', '--occupied-ids', 'none',
+                             '--field-profile', NATIVE_PROFILE],
+                            capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)['status'] == 'prepared_not_executed'
+    assert json.loads((tmp_path / 'kit/kit.json').read_bytes())['field_profile'] == NATIVE_PROFILE

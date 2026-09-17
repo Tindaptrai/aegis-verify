@@ -9,7 +9,7 @@
     <field name="win.eventdata.messageNumber" type="pcre2">\A1\z</field>
     <field name="win.eventdata.messageTotal" type="pcre2">\A1\z</field>
     <field name="win.eventdata.scriptBlockText" type="pcre2">$script_pattern</field>
-    <description>AEGIS safe demo: reviewed script content matched; not a malware verdict.</description>
+    <description>AEGIS safe demo: $content_description; not a malware verdict.</description>
     <options>no_email_alert</options>
   </rule>
 </group>

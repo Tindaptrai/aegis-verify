@@ -58,6 +58,12 @@ thủ công; nếu thay cấu hình, tạo kit mới và review lại.
 
 ## 3. Tạo kit trên máy phát triển
 
+Chọn **field profile** trước: `decoded-json-v1` giữ hành vi synthetic cũ;
+`wazuh-eventchannel-4.14.4-lf-v1` dành cho biểu diễn EventChannel đã đối chiếu
+trên Wazuh 4.14.4 với payload ASCII/LF của kit. Không tự nhận diện phiên bản.
+Xem [giới hạn và kế hoạch kiểm thử profile](../../docs/SCN001_EVENTCHANNEL_PROFILE.md).
+Đây là profile **rule fields**, không phải profile đánh giá hoặc ground truth.
+
 Chỉ làm sau khi có các thông tin ở mục 2. Các câu hỏi dưới đây không yêu cầu
 mật khẩu/token. Dán nguyên block vào PowerShell, không dán ký hiệu prompt.
 
@@ -71,12 +77,14 @@ mật khẩu/token. Dán nguyên block vào PowerShell, không dán ký hiệu p
     $aegisRuleId = Read-Host 'Custom rule ID da xac minh con trong'
     $aegisParent = Read-Host 'Parent SID da xac minh bang ruleset/logtest'
     $aegisOccupied = Read-Host 'IDs dang dung, cach bang dau phay; none CHI khi da xac minh rong'
+    $aegisFieldProfile = Read-Host 'Field profile da review: decoded-json-v1 hoac wazuh-eventchannel-4.14.4-lf-v1'
     $aegisOutput = Join-Path (Join-Path $env:USERPROFILE 'Downloads') ('aegis-scn001-kit-' + [guid]::NewGuid().ToString('N'))
     $aegisArgs = @(
         (Join-Path $aegisRepo 'scripts\prepare_scn001_kit.py'),
         '--output-dir', $aegisOutput, '--lab-directory', $aegisLabDir,
         '--target-host', $aegisHost, '--rule-id', $aegisRuleId,
-        '--parent-sid', $aegisParent, '--occupied-ids', $aegisOccupied
+        '--parent-sid', $aegisParent, '--occupied-ids', $aegisOccupied,
+        '--field-profile', $aegisFieldProfile
     )
     & $aegisPython @aegisArgs
     if ($LASTEXITCODE -ne 0) { throw 'Dung: tao kit that bai, khong dung output do.' }
@@ -130,8 +138,11 @@ Hash nhập là khai báo của operator, runner không truy vấn manager để
 ## 5. Rule review/logtest — người vận hành trên manager
 
 Hai revision dùng **cùng ID**; không nạp cùng lúc. Baseline khớp đường dẫn tên
-gốc. Fixed khớp toàn bộ hai dòng script được duyệt, cho phép LF/CRLF và một
-newline cuối; không khớp marker đơn độc, comment-only hoặc nội dung thêm.
+gốc theo biểu diễn của field profile đã chọn. Với `decoded-json-v1`, fixed
+khớp hai dòng script, cho phép LF/CRLF và một newline cuối. Với profile
+`wazuh-eventchannel-4.14.4-lf-v1`, fixed khớp đúng chuỗi decoded đã flatten
+thành một dòng, không whitespace cuối. Cả hai không khớp marker đơn độc,
+comment-only hoặc nội dung thêm; xem giới hạn mất thông tin ở tài liệu profile.
 Fixed là **rule nội dung chịu được đổi tên**, không phải detector malware hay
 mô hình suy luận hành vi tổng quát. Không có kết luận `blocked` từ rule match.
 
@@ -291,5 +302,19 @@ do. Runtime success/timeout, PCRE2 và parent chain phải kiểm chứng riêng
 - [Thiết kế](../../docs/superpowers/specs/2026-09-12-safe-demo-design.md) và [checkpoint](../../docs/ISSUE_12_SAFE_DEMO_CHECKPOINT.md).
 
 Tiếp theo: review độc lập kit → parent/negative controls trên lab → rehearsal →
-thiết kế export/scope/attestation → khóa profile → A/B/C và compare bằng CLI
-hiện có. Chỉ đóng Issue #12 khi có evidence và human review, không chỉ test kit.
+thiết kế export/scope/attestation → khóa profile → A/B/C. Chỉ đóng Issue #12 khi
+có evidence và human review, không chỉ test kit.
+
+Bước đánh giá sau khi có evidence **không** dùng `aegis validate`/`aegis compare`
+trực tiếp trên bundle. Dùng API demo, vì nó ràng buộc run, study, snapshot và
+run binding lại với nhau:
+
+- `evaluate_demo_run(bundle, run_inputs=..., scenario=...)` cho run không có
+  attestation; thêm `context=`, `request=` và `approval=` cho run có attestation.
+  Truyền `context` một mình sẽ bị từ chối.
+- `compare_demo_runs(before=..., after=...)` cho bước so sánh, vì nó mang theo
+  run-binding của cả hai run.
+
+Chi tiết và các cách gọi bị từ chối:
+[SCN001_COLLECTION_REVIEW.md](../../docs/SCN001_COLLECTION_REVIEW.md) mục "Dùng
+context đã attested ở bước đánh giá".

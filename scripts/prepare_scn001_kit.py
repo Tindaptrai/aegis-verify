@@ -19,6 +19,13 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = b"Write-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $PID)\n"
 FILENAMES = ('lab_update.ps1', 'maintenance_check.ps1')
+LEGACY_PROFILE = 'decoded-json-v1'
+NATIVE_PROFILE = 'wazuh-eventchannel-4.14.4-lf-v1'
+
+
+def _field_profile(value):
+    if not isinstance(value, str) or value not in (LEGACY_PROFILE, NATIVE_PROFILE):
+        raise ValueError('invalid_field_profile')
 
 
 def _ids(rule_id, parent_sid):
@@ -68,7 +75,9 @@ def _no_links(path):
 
 
 def render_rule(*, revision: str, rule_id: int, parent_sid: int,
-                target_host: str, baseline_path: str) -> str:
+                target_host: str, baseline_path: str,
+                field_profile: str = LEGACY_PROFILE) -> str:
+    _field_profile(field_profile)
     _ids(rule_id, parent_sid)
     _host(target_host)
     if revision not in ('baseline', 'fixed'):
@@ -78,12 +87,22 @@ def render_rule(*, revision: str, rule_id: int, parent_sid: int,
     _directory(baseline_path[:-len('\\lab_update.ps1')])
     lines = PAYLOAD.decode('ascii').splitlines()
     script_pattern = r'\A' + r'\r?\n'.join(map(re.escape, lines)) + r'(?:\r?\n)?\z'
+    content_description = 'reviewed script content matched'
+    if field_profile == NATIVE_PROFILE:
+        # Pinned, lossy EventChannel representation of THIS ASCII/LF payload.
+        # Not a general Windows decoder or a reversible evidence normalization.
+        baseline_path = baseline_path.replace('\\', '\\\\')
+        script_pattern = _path_pattern(' '.join(lines))
+        content_description = 'decoded script representation matched'
     template = _asset(ROOT / 'detections/wazuh/scn-001' / f'{revision}.xml.template')
-    return Template(template.decode('utf-8')).substitute(
+    rendered = Template(template.decode('utf-8')).substitute(
         rule_id=str(rule_id), parent_sid=str(parent_sid),
         host_pattern=escape(_path_pattern(target_host)),
         path_pattern=escape(_path_pattern(baseline_path)),
-        script_pattern=escape(script_pattern))
+        script_pattern=escape(script_pattern), content_description=content_description)
+    if field_profile == NATIVE_PROFILE:
+        rendered = f'<!-- Field profile: {NATIVE_PROFILE}; lossy decoded fields, not source bytes. -->\n' + rendered
+    return rendered
 
 
 def _output_directory(output_dir):
@@ -112,7 +131,7 @@ def _output_directory(output_dir):
     return output_dir
 
 
-def _synthetic_cases(target_host, lab_directory):
+def _synthetic_cases(target_host, lab_directory, field_profile):
     """Parameterize a committed test fixture; never read or generate lab evidence."""
     base = json.loads(_asset(ROOT / 'tests/fixtures/demo/scn-001/rule-cases/base.synthetic.json'))
     base['win']['system']['computer'] = target_host
@@ -140,18 +159,29 @@ def _synthetic_cases(target_host, lab_directory):
                 event['win'][section].pop(key)
             else:
                 event['win'][section][key] = value
+        if field_profile == NATIVE_PROFILE:
+            # Model only our committed ASCII/LF controls at the dynamic-field
+            # layer. These JSON fixtures do NOT emulate the native transport.
+            data = event['win']['eventdata']
+            data['path'] = data['path'].replace('\\', '\\\\')
+            if 'scriptBlockText' in data:
+                data['scriptBlockText'] = data['scriptBlockText'].replace('\n', ' ').rstrip(' ')
         filename = f'logtest-cases/{name}.synthetic.json'
         artifacts[filename] = (json.dumps(event, ensure_ascii=True) + '\n').encode('utf-8')
         catalog.append(dict(name=name, file=filename, expected_baseline=expected_baseline,
                             expected_fixed=expected_fixed))
     artifacts['logtest-cases/catalog.json'] = json.dumps(dict(
-        synthetic_only=True, note='Expected demo ID, conditional on verified parent chain. Not lab evidence.',
+        synthetic_only=True, field_profile=field_profile,
+        input_layer='decoded_fields_json_not_native_transport',
+        note='Expected demo ID, conditional on verified parent chain. Not lab evidence.',
         cases=catalog), indent=2).encode('utf-8')
     return artifacts
 
 
 def prepare_kit(*, output_dir: Path, lab_directory: str, target_host: str,
-                rule_id: int, parent_sid: int, occupied_ids: frozenset[int]) -> dict:
+                rule_id: int, parent_sid: int, occupied_ids: frozenset[int],
+                field_profile: str = LEGACY_PROFILE) -> dict:
+    _field_profile(field_profile)
     _ids(rule_id, parent_sid)
     _host(target_host)
     _directory(lab_directory)
@@ -169,11 +199,13 @@ def prepare_kit(*, output_dir: Path, lab_directory: str, target_host: str,
     for revision in ('baseline', 'fixed'):
         artifacts[f'{revision}.xml'] = render_rule(
             revision=revision, rule_id=rule_id, parent_sid=parent_sid,
-            target_host=target_host, baseline_path=lab_directory + '\\' + FILENAMES[0]).encode('utf-8')
-    artifacts.update(_synthetic_cases(target_host, lab_directory))
+            target_host=target_host, baseline_path=lab_directory + '\\' + FILENAMES[0],
+            field_profile=field_profile).encode('utf-8')
+    artifacts.update(_synthetic_cases(target_host, lab_directory, field_profile))
     manifest = dict(kind='safe_demo_kit', kit_version='0.1.0', scenario_id='SCN-001',
                     scenario_version='0.1.0', target_host=target_host, lab_directory=lab_directory,
                     filenames=list(FILENAMES), rule_id=rule_id, parent_sid=parent_sid,
+                    field_profile=field_profile,
                     occupied_ids_declared=sorted(occupied_ids),
                     payload_sha256=hashlib.sha256(payload).hexdigest(),
                     artifact_sha256={name: hashlib.sha256(data).hexdigest() for name, data in artifacts.items()})
@@ -210,12 +242,16 @@ def main(argv=None):
     parser.add_argument('--parent-sid', type=int, required=True)
     parser.add_argument('--occupied-ids', required=True,
                         help='Comma-separated rule IDs from operator inventory; use none if verified empty.')
+    parser.add_argument('--field-profile', default=LEGACY_PROFILE,
+                        choices=(LEGACY_PROFILE, NATIVE_PROFILE),
+                        help='Explicit rule-field representation; no automatic source normalization.')
     args = parser.parse_args(argv)
     try:
         occupied = frozenset() if args.occupied_ids == 'none' else frozenset(map(int, args.occupied_ids.split(',')))
         result = prepare_kit(output_dir=Path(args.output_dir), lab_directory=args.lab_directory,
                              target_host=args.target_host, rule_id=args.rule_id,
-                             parent_sid=args.parent_sid, occupied_ids=occupied)
+                             parent_sid=args.parent_sid, occupied_ids=occupied,
+                             field_profile=args.field_profile)
     except (ValueError, OSError, UnicodeError):
         print('error: invalid kit input or local IO; verify inputs and inspect any incomplete output.', file=sys.stderr)
         return 2
