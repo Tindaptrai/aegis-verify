@@ -7,12 +7,19 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import uuid
 import tempfile
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / 'demos/scn-001/Invoke-SafeDemo.ps1'
+
+# Launching a real powershell.exe is slow, and slower again when the whole suite
+# runs in parallel with other processes. A tight budget turns load into a raw
+# TimeoutExpired that looks identical to a guard that failed to fire, so the
+# budget is generous on purpose. None of these tests assert on duration.
+RUNNER_TIMEOUT = 120
 
 
 @pytest.fixture
@@ -29,7 +36,7 @@ def test_runner_parses_without_executing(ps):
     # -Command argument handling differs from -File; put only a trusted repo path in the command.
     command = command.replace('$args[0]', "'" + str(RUNNER).replace("'", "''") + "'")
     result = subprocess.run([ps, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
-                            capture_output=True, text=True, timeout=15)
+                            capture_output=True, text=True, timeout=RUNNER_TIMEOUT)
     assert result.returncode == 0, result.stderr
 
 
@@ -55,7 +62,7 @@ def invoke(ps, kit, tmp_path, **changes):
     command = [ps, '-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(RUNNER)]
     for name, value in args.items():
         command.extend(['-' + name, value])
-    result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+    result = subprocess.run(command, capture_output=True, text=True, timeout=RUNNER_TIMEOUT)
     if 'PSSecurityException' in result.stderr or 'running scripts is disabled' in result.stderr:
         pytest.skip('PowerShell execution policy blocks script tests; no bypass used')
     assert not (tmp_path/'uncreated-run').exists()
@@ -79,7 +86,7 @@ def test_documented_native_hashtable_splat_preflight(ps, kit, tmp_path):
     exe, runner = str(ps).replace("'", "''"), str(RUNNER).replace("'", "''")
     command = f"$p=@{{{entries}}}; & '{exe}' -NoLogo -NoProfile -NonInteractive -File '{runner}' @p; exit $LASTEXITCODE"
     result = subprocess.run([ps, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command],
-                            capture_output=True, text=True, timeout=15)
+                            capture_output=True, text=True, timeout=RUNNER_TIMEOUT)
     if 'PSSecurityException' in result.stderr or 'running scripts is disabled' in result.stderr:
         pytest.skip('PowerShell policy blocks script tests; no bypass used')
     assert result.returncode == 2
@@ -144,11 +151,18 @@ def test_manifest_scalar_fields_cannot_be_arrays(ps, kit, tmp_path, field):
 
 
 def test_repo_output_refused_before_execution(ps, kit, tmp_path):
-    # This dev checkout is not an approved execution target. The output directory
-    # is intentionally within the repo and must fail before telemetry/launch.
-    result = invoke(ps, kit, tmp_path)
+    # This dev checkout is not an approved execution target. Name a path inside
+    # the repository explicitly: relying on tmp_path would only exercise the
+    # guard when pytest --basetemp happens to sit inside the repository, and on
+    # a host without the telemetry services the preflight would refuse later for
+    # an unrelated reason. The directory is never created.
+    target = ROOT / 'build' / ('repo-guard-' + uuid.uuid4().hex[:12])
+    assert (ROOT / '.git').exists(), 'ROOT must be a repository for this guard to apply'
+    assert not target.exists()
+    result = invoke(ps, kit, tmp_path, RunDirectory=str(target))
     assert result.returncode == 2
     assert 'AEGIS_RUN_OUTPUT_IN_REPOSITORY' in result.stderr
+    assert not target.exists()
 
 
 @pytest.mark.parametrize('run_id', ['', 'a b', '../run', 'x' * 65])
@@ -205,7 +219,7 @@ foreach ($f in $functions) {{ . ([scriptblock]::Create($f.Extent.Text)) }}
 {command}
 """
     return subprocess.run([ps, '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', source],
-                          capture_output=True, text=True, timeout=15)
+                          capture_output=True, text=True, timeout=RUNNER_TIMEOUT)
 
 
 @pytest.mark.parametrize('directory_length,accepted', [(206, True), (207, False),
