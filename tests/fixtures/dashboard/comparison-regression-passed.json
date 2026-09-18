@@ -1,0 +1,197 @@
+{
+  "after": {
+    "context": {
+      "bindings": [
+        {
+          "name": "target",
+          "value": "synthetic-host"
+        }
+      ],
+      "declarations": [],
+      "end": "2026-01-01T00:01:00Z",
+      "environment_id": "synthetic-lab",
+      "run_id": "synthetic-run-after-fix",
+      "start": "2026-01-01T00:00:00Z"
+    },
+    "context_fingerprint": "270ecbf9a414d15f6bf91be8189b5b588d909175ab41b398b904bb61a76210c8",
+    "event_set_fingerprint": "4a7c6b128bcfa44e3c58fbc0944a43c54371faafe5090c008209621eb2129c51",
+    "final_status": "Detected",
+    "profile_fingerprint": "92423828bcc0ff5515fd999356cf0ab657037b931cff6389029ee7423ab9f0f9",
+    "profile_id": "synthetic-dashboard-profile",
+    "profile_version": "0.1.0",
+    "run_id": "synthetic-run-after-fix",
+    "scope_fingerprint": "4f2b6d3dc87c7a6c01e3abefbc32be12911cad814595e1b2f8288fa5ff56bf69"
+  },
+  "before": {
+    "context": {
+      "bindings": [
+        {
+          "name": "target",
+          "value": "synthetic-host"
+        }
+      ],
+      "declarations": [
+        {
+          "assertion_id": "SCN-999-A02",
+          "clocks_adequate": true,
+          "confirmed_by": "synthetic-reviewer",
+          "coverage_end": "2026-01-01T00:01:00Z",
+          "coverage_start": "2026-01-01T00:00:00Z",
+          "event_set_fingerprint": "2eafc1a31dab17d2a3de39cc6f6f50ea745f91602c75a9f3e73db5c4510925f7",
+          "no_parse_errors_or_gaps": true,
+          "no_sampling_or_truncation": true,
+          "profile_fingerprint": "92423828bcc0ff5515fd999356cf0ab657037b931cff6389029ee7423ab9f0f9",
+          "reference": "synthetic-only/collection-attestation",
+          "scope_fingerprint": "86eb2d549acb21d630a66563c54c51e9b9b08f9c2d3c9a1c3200216ff107add0",
+          "status": "complete_for_scope"
+        }
+      ],
+      "end": "2026-01-01T00:01:00Z",
+      "environment_id": "synthetic-lab",
+      "run_id": "synthetic-run-before-gap",
+      "start": "2026-01-01T00:00:00Z"
+    },
+    "context_fingerprint": "6608e7d0ce2aa04853540b5050b6203bcdb45180a9d4bb46fbdde0e6793cf406",
+    "event_set_fingerprint": "2eafc1a31dab17d2a3de39cc6f6f50ea745f91602c75a9f3e73db5c4510925f7",
+    "final_status": "False negative",
+    "profile_fingerprint": "92423828bcc0ff5515fd999356cf0ab657037b931cff6389029ee7423ab9f0f9",
+    "profile_id": "synthetic-dashboard-profile",
+    "profile_version": "0.1.0",
+    "run_id": "synthetic-run-before-gap",
+    "scope_fingerprint": "86eb2d549acb21d630a66563c54c51e9b9b08f9c2d3c9a1c3200216ff107add0"
+  },
+  "cli_report_version": "0.1.0",
+  "comparison": {
+    "assertion_count": 2,
+    "assertion_state_counts": {
+      "became_evaluable": 0,
+      "became_unevaluable": 0,
+      "improvement": 1,
+      "regression": 0,
+      "unchanged_fail": 0,
+      "unchanged_pass": 1,
+      "unchanged_unknown": 0,
+      "unknown_changed": 0
+    },
+    "assertions": [
+      {
+        "after": {
+          "collection_assurance": "unknown",
+          "collection_reference": null,
+          "evidence_ids": [
+            "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0"
+          ],
+          "evidence_refs": [
+            {
+              "event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+              "raw_event_hash": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
+              "raw_event_ref": "synthetic-activity#record=1"
+            }
+          ],
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "unevaluable_evidence_ids": [],
+          "unevaluable_evidence_refs": [],
+          "witness_pairs": []
+        },
+        "assertion_id": "SCN-999-A01",
+        "before": {
+          "collection_assurance": "unknown",
+          "collection_reference": null,
+          "evidence_ids": [
+            "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0"
+          ],
+          "evidence_refs": [
+            {
+              "event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+              "raw_event_hash": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
+              "raw_event_ref": "synthetic-activity#record=1"
+            }
+          ],
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "unevaluable_evidence_ids": [],
+          "unevaluable_evidence_refs": [],
+          "witness_pairs": []
+        },
+        "evidence_changes": {
+          "added": [],
+          "removed": [],
+          "retained": [
+            "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0"
+          ]
+        },
+        "state": "unchanged_pass"
+      },
+      {
+        "after": {
+          "collection_assurance": "unknown",
+          "collection_reference": null,
+          "evidence_ids": [
+            "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1",
+            "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0"
+          ],
+          "evidence_refs": [
+            {
+              "event_id": "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1",
+              "raw_event_hash": "54033fd55717179d2dda7ccc8986f42566d6c0f0ea8cdcb1d4dbef3192a10f6a",
+              "raw_event_ref": "synthetic-alert#record=1"
+            },
+            {
+              "event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+              "raw_event_hash": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
+              "raw_event_ref": "synthetic-activity#record=1"
+            }
+          ],
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "unevaluable_evidence_ids": [],
+          "unevaluable_evidence_refs": [],
+          "witness_pairs": [
+            {
+              "anchor_event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+              "target_event_id": "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1"
+            }
+          ]
+        },
+        "assertion_id": "SCN-999-A02",
+        "before": {
+          "collection_assurance": "caller-attested",
+          "collection_reference": "synthetic-only/collection-attestation",
+          "evidence_ids": [
+            "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0"
+          ],
+          "evidence_refs": [
+            {
+              "event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+              "raw_event_hash": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
+              "raw_event_ref": "synthetic-activity#record=1"
+            }
+          ],
+          "outcome": "false_negative",
+          "reason_code": "expected_detection_absent",
+          "unevaluable_evidence_ids": [],
+          "unevaluable_evidence_refs": [],
+          "witness_pairs": []
+        },
+        "evidence_changes": {
+          "added": [
+            "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1"
+          ],
+          "removed": [],
+          "retained": [
+            "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0"
+          ]
+        },
+        "state": "improvement"
+      }
+    ],
+    "status": "Regression Passed"
+  },
+  "kind": "comparison",
+  "scenario": {
+    "id": "SCN-999",
+    "name": "Synthetic dashboard example",
+    "version": "0.1.0"
+  }
+}

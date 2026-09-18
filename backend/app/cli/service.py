@@ -67,6 +67,39 @@ def _engine_error(error: ValidationEngineError) -> IntakeError:
     return IntakeError(error.code, stage=stage, field=field)
 
 
+TIMELINE_VERSION = "0.1.0"
+_TIMELINE_FIELDS = (
+    "source_type", "event_provider", "hostname", "event_action", "rule_id", "signature_id",
+    "process_name", "raw_event_ref",
+)
+
+
+def evidence_timeline(events, evaluation) -> dict:
+    """Order the referenced evidence by its own timestamps; copy values, never fill them.
+
+    Only events the evaluation referenced (evidence or unevaluable candidates)
+    appear, in ascending event time with event ID as the tie-break. Every value
+    is the canonical field as parsed, so an absent field stays ``null``. The
+    dashboard renders this order and must not reorder or derive missing times.
+    """
+    referenced = {entry.event_id for entry in evaluation.evidence_index}
+    entries = []
+    for event in events:
+        if event.event_id not in referenced:
+            continue
+        values = {"event_id": event.event_id, "timestamp": event.timestamp.isoformat(),
+                  "ingested_at": event.ingested_at.isoformat()}
+        for field in _TIMELINE_FIELDS:
+            values[field] = getattr(event, field)
+        entries.append((event.timestamp.epoch_nanoseconds, event.event_id, values))
+    entries.sort(key=lambda item: (item[0], item[1]))
+    return {
+        "version": TIMELINE_VERSION,
+        "order": "timestamp_then_event_id",
+        "events": [item[2] for item in entries],
+    }
+
+
 def evaluate_bundle(scenario, fixture, *, profile=None, context=None) -> dict:
     """Evaluate one explicit local snapshot without fallback or inferred values."""
     scenario_manifest, scenario_raw = _scenario(scenario)
@@ -105,6 +138,7 @@ def evaluate_bundle(scenario, fixture, *, profile=None, context=None) -> dict:
         values["warnings"] = list(values["warnings"])
         ledger.append(values)
     return {
+        "timeline": evidence_timeline(intake.events, evaluation),
         "cli_report_version": CLI_REPORT_VERSION,
         "kind": "evaluation",
         "scenario": {

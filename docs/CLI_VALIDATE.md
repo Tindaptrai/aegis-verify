@@ -97,7 +97,11 @@ Vượt giới hạn hoặc file cuối hỏng làm lỗi toàn run, không tr�
 Text in scenario/run, từng assertion, reason, evidence IDs/unevaluable IDs,
 final status, counts, warnings và assurance. JSON có `cli_report_version`,
 `kind`, `scenario`, `evaluation` nguyên kết quả engine, `counts`, `intake`
-(inventory/ledger) và `input_fingerprints` của bytes cấu hình đã chọn.
+(inventory/ledger), `input_fingerprints` của bytes cấu hình đã chọn và, từ
+Issue #10, `timeline` (version `0.1.0`): các event được `evidence_index` tham
+chiếu, sắp theo `timestamp` rồi `event_id`, sao chép nguyên trường canonical
+(`null` giữ `null`) để [dashboard](DASHBOARD.md) hiển thị. `evaluation`,
+fingerprints và `compare` không đổi.
 Parsed count không phải proof count; kết luận phải tham chiếu evidence IDs.
 
 | Exit | Ý nghĩa |

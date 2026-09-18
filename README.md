@@ -35,7 +35,7 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 ```text
 docs/          Product, architecture, threat model, and demo documentation
 backend/       Future validation engine, CLI, API, and unit tests
-frontend/      Deferred MVP results dashboard
+frontend/      Read-only results dashboard (Vite + React), see docs/DASHBOARD.md
 connectors/    Fixture-first adapters for four telemetry sources
 scenarios/     Safe, repeatable scenario manifests
 detections/    Detection content owned by each source integration
@@ -116,6 +116,21 @@ See [the Vietnamese CLI guide](docs/CLI_VALIDATE.md) for installation, bundle
 contracts, explicit profile/context selection, exit codes and privacy. The sample
 returns `Detected` with two distinct evidence IDs; it proves the offline software
 path only, not lab coverage. Human review and local/lab validation remain pending.
+
+## Current implementation: results dashboard
+
+[The results dashboard](docs/DASHBOARD.md) is a read-only React page over the
+CLI's JSON reports, served by `aegis dashboard --reports <dir>` (standard-library
+HTTP on loopback, no new Python dependency). It shows scenario, run ID, final
+result, per-assertion outcomes with evidence IDs, the report's ordered evidence
+timeline and before/after comparisons, and renders loading, empty, malformed and
+backend-error states without reimplementing validation. Try it on the synthetic
+fixtures:
+
+```powershell
+cd frontend; npm install; npm run build; cd ..
+.\.venv\Scripts\python.exe -m aegis_verify dashboard --reports tests\fixtures\dashboard --static frontend\dist
+```
 
 ## Security and data handling
 

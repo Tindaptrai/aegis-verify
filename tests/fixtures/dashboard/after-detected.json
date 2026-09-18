@@ -1,0 +1,284 @@
+{
+  "cli_report_version": "0.1.0",
+  "comparison_inputs": {
+    "context": {
+      "bindings": [
+        {
+          "name": "target",
+          "value": "synthetic-host"
+        }
+      ],
+      "declarations": [],
+      "end": "2026-01-01T00:01:00Z",
+      "environment_id": "synthetic-lab",
+      "run_id": "synthetic-run-after-fix",
+      "start": "2026-01-01T00:00:00Z"
+    },
+    "profile": {
+      "profile_id": "synthetic-dashboard-profile",
+      "profile_schema_version": "0.1.0",
+      "profile_version": "0.1.0",
+      "rules": [
+        {
+          "assertion_id": "SCN-999-A01",
+          "capability": "supported",
+          "correlation": null,
+          "match": [
+            {
+              "binding": null,
+              "field": "rule_id",
+              "op": "eq",
+              "value": "900001",
+              "values": null
+            }
+          ],
+          "reason_code": null,
+          "role": "telemetry",
+          "scope": [
+            {
+              "binding": "target",
+              "field": "hostname",
+              "op": "eq",
+              "value": null,
+              "values": null
+            }
+          ],
+          "source_type": "wazuh"
+        },
+        {
+          "assertion_id": "SCN-999-A02",
+          "capability": "supported",
+          "correlation": {
+            "anchor_assertion_id": "SCN-999-A01",
+            "join_pairs": [
+              {
+                "anchor_field": "hostname",
+                "target_field": "hostname"
+              }
+            ],
+            "max_delta_ns": 2000000000,
+            "min_delta_ns": 0
+          },
+          "match": [
+            {
+              "binding": null,
+              "field": "rule_id",
+              "op": "eq",
+              "value": "900002",
+              "values": null
+            }
+          ],
+          "reason_code": null,
+          "role": "detection",
+          "scope": [
+            {
+              "binding": "target",
+              "field": "hostname",
+              "op": "eq",
+              "value": null,
+              "values": null
+            }
+          ],
+          "source_type": "wazuh"
+        }
+      ],
+      "scenario_fingerprint": "52b2eaff66d8f4ba027f2ffff2f3ca98b61f0dd3778e8418f652529d7ac66a59",
+      "scenario_id": "SCN-999",
+      "scenario_version": "0.1.0"
+    },
+    "scenario": {
+      "assertions": [
+        {
+          "description": "Synthetic activity exists.",
+          "id": "SCN-999-A01",
+          "source": "wazuh"
+        },
+        {
+          "description": "Distinct correlated synthetic alert exists.",
+          "id": "SCN-999-A02",
+          "source": "wazuh"
+        }
+      ],
+      "description": "Synthetic test-only scenario for the results dashboard; not lab evidence.",
+      "expected_outcome": "detected",
+      "expected_sources": [
+        "wazuh"
+      ],
+      "id": "SCN-999",
+      "name": "Synthetic dashboard example",
+      "safety": {
+        "authorization_required": true,
+        "destructive": false,
+        "notes": "Synthetic test-only input; no scenario action is executed."
+      },
+      "status": "draft",
+      "tags": null,
+      "version": "0.1.0"
+    },
+    "version": "0.1.0"
+  },
+  "counts": {
+    "parsed": 2,
+    "referenced": 2,
+    "skipped": 0
+  },
+  "evaluation": {
+    "assertions": [
+      {
+        "assertion_id": "SCN-999-A01",
+        "collection_assurance": "unknown",
+        "collection_reference": null,
+        "evidence_ids": [
+          "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0"
+        ],
+        "outcome": "satisfied",
+        "reason_code": "witness_found",
+        "role": "telemetry",
+        "unevaluable_evidence_ids": [],
+        "witness_pairs": []
+      },
+      {
+        "assertion_id": "SCN-999-A02",
+        "collection_assurance": "unknown",
+        "collection_reference": null,
+        "evidence_ids": [
+          "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1",
+          "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0"
+        ],
+        "outcome": "satisfied",
+        "reason_code": "witness_found",
+        "role": "detection",
+        "unevaluable_evidence_ids": [],
+        "witness_pairs": [
+          {
+            "anchor_event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+            "target_event_id": "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1"
+          }
+        ]
+      }
+    ],
+    "context_fingerprint": "270ecbf9a414d15f6bf91be8189b5b588d909175ab41b398b904bb61a76210c8",
+    "counts": {
+      "false_negative": 0,
+      "inconclusive": 0,
+      "missing_telemetry": 0,
+      "satisfied": 2
+    },
+    "engine_semantics_version": "0.1.0",
+    "event_set_fingerprint": "4a7c6b128bcfa44e3c58fbc0944a43c54371faafe5090c008209621eb2129c51",
+    "evidence_index": [
+      {
+        "canonical_schema_version": "2.0",
+        "event_id": "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1",
+        "raw_event_hash": "54033fd55717179d2dda7ccc8986f42566d6c0f0ea8cdcb1d4dbef3192a10f6a",
+        "raw_event_ref": "synthetic-alert#record=1"
+      },
+      {
+        "canonical_schema_version": "2.0",
+        "event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+        "raw_event_hash": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
+        "raw_event_ref": "synthetic-activity#record=1"
+      }
+    ],
+    "final_status": "Detected",
+    "profile_fingerprint": "92423828bcc0ff5515fd999356cf0ab657037b931cff6389029ee7423ab9f0f9",
+    "profile_id": "synthetic-dashboard-profile",
+    "profile_version": "0.1.0",
+    "result_schema_version": "0.1.0",
+    "run_id": "synthetic-run-after-fix",
+    "scenario_fingerprint": "52b2eaff66d8f4ba027f2ffff2f3ca98b61f0dd3778e8418f652529d7ac66a59",
+    "scenario_id": "SCN-999",
+    "scenario_version": "0.1.0",
+    "scope_fingerprint": "4f2b6d3dc87c7a6c01e3abefbc32be12911cad814595e1b2f8288fa5ff56bf69"
+  },
+  "input_fingerprints": {
+    "context": "e88aa8ecfe3d85f758c4fd8cfef3647cdf903fb4bb803c3505cfcd7f87576301",
+    "inputs": "167178d6b7cce33a5c95c819a37aa0f1155104d5e84cea02ca323f10a31ec896",
+    "profile": "9d2131f4058b9c1f196c7ed1a60c5bba144826409de9b33ca32327f92b5b560c",
+    "scenario": "cc3c09ce041412ff9fbaa5795d76b8c5b6a25ee38be17233386eba4f82fb547d"
+  },
+  "intake": {
+    "inventory": [
+      {
+        "context_fingerprint": "5f1ae0266dede76aab417eb8fe92c35c2c9af4e5253508bd09325c8c83ccc0f7",
+        "parser": "wazuh-win4688-v2",
+        "path": "activity.json",
+        "sha256": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
+        "source_ref": "synthetic-activity"
+      },
+      {
+        "context_fingerprint": "5f1ae0266dede76aab417eb8fe92c35c2c9af4e5253508bd09325c8c83ccc0f7",
+        "parser": "wazuh-win4688-v2",
+        "path": "alert.json",
+        "sha256": "54033fd55717179d2dda7ccc8986f42566d6c0f0ea8cdcb1d4dbef3192a10f6a",
+        "source_ref": "synthetic-alert"
+      }
+    ],
+    "ledger": [
+      {
+        "event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+        "line_end": 31,
+        "line_start": 1,
+        "parser": "wazuh-win4688-v2",
+        "raw_event_hash": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
+        "raw_event_ref": "synthetic-activity#record=1",
+        "reason": null,
+        "source_ref": "synthetic-activity",
+        "source_type": "wazuh",
+        "status": "parsed",
+        "warnings": []
+      },
+      {
+        "event_id": "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1",
+        "line_end": 31,
+        "line_start": 1,
+        "parser": "wazuh-win4688-v2",
+        "raw_event_hash": "54033fd55717179d2dda7ccc8986f42566d6c0f0ea8cdcb1d4dbef3192a10f6a",
+        "raw_event_ref": "synthetic-alert#record=1",
+        "reason": null,
+        "source_ref": "synthetic-alert",
+        "source_type": "wazuh",
+        "status": "parsed",
+        "warnings": []
+      }
+    ]
+  },
+  "kind": "evaluation",
+  "scenario": {
+    "id": "SCN-999",
+    "name": "Synthetic dashboard example",
+    "version": "0.1.0"
+  },
+  "timeline": {
+    "events": [
+      {
+        "event_action": null,
+        "event_id": "wazuh:evidence-v1:ef4a2003086cd90c4390c6b438de153d11c9213b3d1b4735e72f6183940db2f0",
+        "event_provider": "Microsoft-Windows-Security-Auditing",
+        "hostname": "synthetic-host",
+        "ingested_at": "2026-01-01T00:00:03Z",
+        "process_name": "synthetic.exe",
+        "raw_event_ref": "synthetic-activity#record=1",
+        "rule_id": "900001",
+        "signature_id": null,
+        "source_type": "wazuh",
+        "timestamp": "2026-01-01T00:00:01Z"
+      },
+      {
+        "event_action": null,
+        "event_id": "wazuh:evidence-v1:184b1b6daadb25a9c4cddd96064c88bdb95b63925a4a18b2640f6157ea1eaab1",
+        "event_provider": "Microsoft-Windows-Security-Auditing",
+        "hostname": "synthetic-host",
+        "ingested_at": "2026-01-01T00:00:03Z",
+        "process_name": "synthetic.exe",
+        "raw_event_ref": "synthetic-alert#record=1",
+        "rule_id": "900002",
+        "signature_id": null,
+        "source_type": "wazuh",
+        "timestamp": "2026-01-01T00:00:02Z"
+      }
+    ],
+    "order": "timestamp_then_event_id",
+    "version": "0.1.0"
+  }
+}
