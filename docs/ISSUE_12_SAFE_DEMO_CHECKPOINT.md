@@ -4560,3 +4560,91 @@ Hai lần khởi động đầu bị API 429 trước khi làm gì; lần thứ 
 Reviewer không kiểm được từ worktree: trạng thái manager/rollback (giờ có artifact ở `evidence-v2-raw/`), và các duyệt trong chat (payload, controls, chữ ký) — chỉ có trong checkpoint.
 
 Sẵn sàng commit: 21 file sửa + 2 file mới. Chưa push/merge/đóng issue.
+
+## BÀN GIAO COMPACT — 2026-09-18 (đọc mục này trước sau khi compact)
+
+### Hướng dẫn tiếp tục
+
+1. Đọc `AGENTS.md`, rồi mục này, rồi các mục checkpoint từ "Bước tiếp Issue #12: đề xuất behavioral rule fix" trở xuống.
+2. Kiểm trạng thái thực tế trước khi làm gì: `git status`, `git log -3`, hash 118001/117001 và PID analysisd trên manager, suite.
+3. **Không** chạy lại lab (A/B/C v2 và controls đã có evidence), **không** xin lại quyền đã duyệt bên dưới, **không** ký approval mới.
+4. Bước tiếp theo: chủ dự án review PR description (`scratchpad/pr/PR_ISSUE_12.md`) và quyết định các AC còn partially.
+5. **Chưa push, merge hay đóng Issue #12** cho tới khi chủ dự án nói rõ.
+
+### Trạng thái repo
+
+| Mục | Giá trị |
+| --- | --- |
+| Worktree | `I:\AEGIS-VERIFY\.worktrees\issue-12-safe-demo` |
+| Branch | `codex/issue-12-safe-demo`, ahead so với `origin/main`, **chưa push** |
+| Commit Issue #12 | **`e603efb`** — 23 file: behavioral revision, payload/kit 0.2.0, contracts (`Pins.behavioral`, `rule_id exists`, `_roles`, grace, `multiple_companions`), adapter identity, tests, docs, checklist |
+| Working tree | sạch sau commit bàn giao này (`git status`) |
+| Tests | `pytest backend/tests`: **2580 passed, 1 skipped**; `pip check` sạch; wheel `aegis_verify-0.1.0` dựng được và chứa module đã sửa |
+| Suite tooling | chạy với `-p no:cacheprovider --basetemp <scratchpad>/pt-*` |
+
+### Kết quả A/B/C v2 (scenario SCN-001 0.1.0, profile fingerprint `4f140927…` cả ba)
+
+| Run | run_id | child | Payload 4104 → rule | evaluate_demo_run |
+| --- | --- | --- | --- | --- |
+| A | `scn001v2-a-20260918T0523Z` | 6692 | recID 11513 → 118001 baseline v2 | Detected |
+| B | `scn001v2-b-20260918T0525Z` | 7036 | recID 12313 → 91816 (không 118001) | **False negative**, caller-attested |
+| C | `scn001v2-c-20260918T0537Z` | 5584 | recID 13166 → **118001 behavioral** | Detected |
+
+Compare B→C: **Regression Passed** (2 unchanged_pass, 1 improvement). Run binding cả ba: `unknown` (`native_review_missing`; B thêm `companion_after_exit`).
+
+### Controls đã chạy LIVE qua agent thật (run `scn001v2-controls-20260918T060503Z`, behavioral nạp)
+
+| Script | sha256 | pid | 4104 recID | Rule |
+| --- | --- | --- | --- | --- |
+| env-only | `9cc01be3…` | 1788 | 13736 | 91816 |
+| pid-only (payload cũ) | `0226fc3c…` | 7964 | 13752 | 91816 |
+| reworded | `a813f41e…` | 6332 | 13769 | **118001** |
+
+Thống nhất số liệu: **5/15** case catalog đã qua engine thật (`original`, `renamed` qua Run A/B/C; `env-only`, `pid-only`, `reworded` qua controls); **10/15** chỉ có pytest Python `re` (không phải PCRE2): marker-only, comment-only, unrelated, wrong-host/provider/channel/event-id, missing-text, fragmented, missing-counter.
+
+### Hashes
+
+| Mục | Giá trị |
+| --- | --- |
+| study v2 | `d3889018bee85c2cbf9e3cd3045fa4674536d4e4ebfc4d6b470d5151cfa6c6ff` |
+| request B v2 | `65b50de1ac2e5454849e101421bc2e51ddd6b1f25e134ddd91ec66f88fddf7ca` |
+| approval B v2 | `b941d40bb962b1dcd20c4374443e2604f4eb1964df039789ee7f9d305b75ddde` — `confirmed_by` Nguyen Le Trong Tin, `reviewed_at` 2026-09-18T06:24:42Z |
+| payload 0.2.0 | `e8a5ebee1cb2dc303035bf7f31a55fc97092966ad5626fb61d23cdb662e45f21` |
+| baseline v2 / fixed / behavioral | `8dcb4020…` / `420a0cfe…` / `351ddc13ad4a0807…` |
+| snapshots A/B/C | `b8f8a35b…` / `540285ca…` / `a348cbbc…` |
+
+### Artifacts private (ngoài Git) — scratchpad phiên này
+
+`C:\Users\KUROH~1.DES\AppData\Local\Temp\claude\I--AEGIS-VERIFY\727e3635-7f3e-4258-95ff-194c08c71f4d\scratchpad\`:
+`runs-v2/{A,B,C}/`, `snapshots-v2/`, `report-v2-{A,B,C}.json`, `comparison-v2-B-to-C.json`, `collection-request-B-v2.json`, `collection-approval-B-v2.json`, `context-B-v2-attested.json`, `controls-v2/`, `kit-lab-118001-v2/`, `evidence-v2-raw/` (probe logtest, manager-B-v2, endpoint-B-v2), `pr/PR_ISSUE_12.md`, driver `lab_eval_v2.py`. Thí nghiệm v1 (content matching): `official/`, `baseline/`, `attested-defective/`, `runs/`, `snapshots/`. Evidence thô có IP/hostname lab → **không đưa vào Git**.
+
+Trên endpoint: `C:\AEGIS-Lab\{SCN001,SCN001-v2,runs,runs-v2,controls-v2}` **chưa xoá** (đã sao chép về scratchpad; xoá là quyết định chủ dự án). Trên manager: staging `~/aegis-v2/`, backup `~/aegis-rule-backup-v2/` (pre-lab, baseline v2, behavioral).
+
+### Rollback — đã xác minh 06:25:03Z
+
+118001 = `0ddd7bc0…` (pre-lab, parent 91816), 117001 = `6b5b8615…` (chưa bao giờ đụng), analysisd PID 99794 khởi động sau lần ghi file, 15891 rule, không lỗi nạp rule. Restart do chủ dự án chạy (root); agent không có sudo.
+
+### Quyền đã duyệt (không xin lại)
+
+- Phương án B (payload làm giàu + behavioral revision, parent 91802); profile `rule_id exists`; adapter identity theo eventRecordID
+- Run binding: `_roles`, cross-check không bỏ qua theo count; companion grace 1 s theo hướng tối thiểu; `multiple_companions`
+- Chạy ba control lành tính qua agent thật; giữ Run C v2, không chạy lại
+- Approval B v2 với `confirmed_by` Nguyen Le Trong Tin cho đúng request `65b50de1…`; rollback 118001, giữ 117001; commit sau review
+
+### AC còn partially / giới hạn (theo reviewer độc lập, 2026-09-18)
+
+| Mục | Trạng thái |
+| --- | --- |
+| AC 1 payload approved | partially — duyệt payload mới chỉ có trong chat/checkpoint, không artifact ký |
+| AC 4 revisions version-controlled | template đã trong commit `e603efb`; pin kit/study chỉ ở evidence private |
+| AC 6 sanitize | hostname lab đã gỡ khỏi checkpoint; evidence thô có IP giữ private; `demos/scn-001/README.md` còn `KUROH~1` từ trước (HEAD cũ) |
+| Rule behavioral khớp cả runner | script block preflight của `Invoke-SafeDemo.ps1` (đọc `[Environment]::MachineName` + `$PID`) nổ 118001 (C recID 12921); chỉ bị loại khỏi verdict nhờ scope path của A03. Đã công bố trong `SCN001_RUN_BINDING.md` và PR; thu hẹp rule hay chấp nhận: **chờ chủ dự án** |
+| Run binding | `caller_reviewed` không thể đạt trên run thật (mọi run có companion); không EVTX native review; caller-attested ≠ lab-verified |
+| Logtest | `wazuh-logtest` (CLI lẫn socket) trên 4.14.4 không tái tạo decoder `windows_eventchannel` — probe 10/10 ra `json`; bằng chứng engine thật đến từ đường agent |
+
+### Quyết định còn chờ chủ dự án
+
+1. Review PR description; push/merge/đóng Issue #12 hay chưa.
+2. Rule behavioral khớp runner: thu hẹp (follow-up) hay chấp nhận có công bố.
+3. Artifact duyệt payload (AC 1) và cách lưu pin kit/study (AC 4) — có đưa bản sanitized vào repo không.
+4. Xoá `C:\AEGIS-Lab` và staging/backup trên manager sau khi xác nhận evidence đã lưu đủ.
