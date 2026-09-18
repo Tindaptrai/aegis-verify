@@ -1,0 +1,23 @@
+{
+  "aegis_synthetic_test_only": true,
+  "win": {
+    "system": {
+      "providerName": "Microsoft-Windows-PowerShell",
+      "channel": "Microsoft-Windows-PowerShell/Operational",
+      "eventID": "4104",
+      "systemTime": "2026-01-01T00:00:01.1234567Z",
+      "computer": "SYNTHETIC-ENDPOINT",
+      "eventRecordID": "100",
+      "processID": "4242",
+      "level": "5",
+      "severityValue": "VERBOSE"
+    },
+    "eventdata": {
+      "path": "C:\\AEGIS-Synthetic\\lab_update.ps1",
+      "scriptBlockId": "00000000-0000-0000-0000-000000000012",
+      "messageNumber": "1",
+      "messageTotal": "1",
+      "scriptBlockText": "$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }\nWrite-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $facts.Pid)\n"
+    }
+  }
+}

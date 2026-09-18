@@ -1,0 +1,32 @@
+{
+  "_source": {
+    "id": "synthetic-representation-doubled",
+    "agent": {"id": "901", "name": "synthetic-collector"},
+    "manager": {"name": "synthetic-manager"},
+    "timestamp": "2026-01-01T00:00:03Z",
+    "rule": {"id": "synthetic-telemetry-only", "level": 3},
+    "data": {"win": {
+      "system": {
+        "providerName": "Microsoft-Windows-Sysmon",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "eventID": "1",
+        "systemTime": "2026-01-01T00:00:01.123456789Z",
+        "computer": "synthetic-endpoint",
+        "eventRecordID": "202",
+        "processID": "4"
+      },
+      "eventdata": {
+        "processId": "4242",
+        "image": "C:\\\\Synthetic\\\\powershell.exe",
+        "parentImage": "C:\\\\Synthetic\\\\launcher.exe",
+        "commandLine": "synthetic-powershell -File \\\"C:\\\\Synthetic\\\\AEGIS\\\\lab_update.ps1\\\"",
+        "user": "SYNTHETIC\\\\operator",
+        "processGuid": "{00000000-0000-0000-0000-000000000001}",
+        "parentProcessGuid": "{00000000-0000-0000-0000-000000000002}",
+        "parentProcessId": "4000",
+        "hashes": "SHA256=synthetic-placeholder-not-a-real-image-hash",
+        "utcTime": "2026-01-01 00:00:01.120"
+      }
+    }}
+  }
+}

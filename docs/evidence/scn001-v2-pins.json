@@ -1,0 +1,729 @@
+{
+  "kind": "scn001_v2_pins_manifest",
+  "version": "0.1.0",
+  "generated_from": "private lab artifacts of 2026-09-18 (not published)",
+  "sanitization": {
+    "hostname_replaced_with": "<lab-endpoint>",
+    "account_omitted": true,
+    "raw_evidence_published": false
+  },
+  "scenario": {
+    "id": "SCN-001",
+    "version": "0.1.0",
+    "sha256": "18df07e0b5e03c344a8306194db8466d985b65950e0cbf1f3a28ef5af7a01feb"
+  },
+  "study": {
+    "study_id": "aegis-lab-scn001-v2-20260918",
+    "sha256": "d3889018bee85c2cbf9e3cd3045fa4674536d4e4ebfc4d6b470d5151cfa6c6ff",
+    "pins": {
+      "baseline": "8dcb4020f9d1422c3b370ff987d42c2d2f7c1b532bf4a627259233816549a5d3",
+      "behavioral": "351ddc13ad4a0807e31d6a66b8a9c10426d008ea2d04f40f7873c825fda4629a",
+      "fixed": "420a0cfe4a162d15e3c23d8a8ea7cbf31c014023c55964886340ae85a7795466",
+      "kit": "6811fce418d72315805132d22f8948303e0dc361e73b47111eec98d52460b156",
+      "payload": "e8a5ebee1cb2dc303035bf7f31a55fc97092966ad5626fb61d23cdb662e45f21",
+      "profile": "08a8fc0b83a400fc22f0394ea9c2986f43753ede05b9554452fa53ee264aa29d",
+      "runner": "49e5f9759e402be06fb3b44e2e403ab1bed2443c48c7d5e61960e54135f0a82d",
+      "scenario": "18df07e0b5e03c344a8306194db8466d985b65950e0cbf1f3a28ef5af7a01feb"
+    },
+    "note": "study.json embeds the lab hostname and account; its hash is reproducible only from the private file"
+  },
+  "kit": {
+    "kit_version": "0.2.0",
+    "rule_id": 118001,
+    "parent_sid": 91802,
+    "field_profile": "wazuh-eventchannel-4.14.4-lf-v1",
+    "lab_directory": "C:\\AEGIS-Lab\\SCN001-v2",
+    "filenames": [
+      "lab_update.ps1",
+      "maintenance_check.ps1"
+    ],
+    "occupied_ids_declared": [
+      117001
+    ],
+    "kit_json_sha256": "6811fce418d72315805132d22f8948303e0dc361e73b47111eec98d52460b156",
+    "artifact_sha256": {
+      "lab_update.ps1": "e8a5ebee1cb2dc303035bf7f31a55fc97092966ad5626fb61d23cdb662e45f21",
+      "maintenance_check.ps1": "e8a5ebee1cb2dc303035bf7f31a55fc97092966ad5626fb61d23cdb662e45f21",
+      "Invoke-SafeDemo.ps1": "49e5f9759e402be06fb3b44e2e403ab1bed2443c48c7d5e61960e54135f0a82d",
+      "baseline.xml": "8dcb4020f9d1422c3b370ff987d42c2d2f7c1b532bf4a627259233816549a5d3",
+      "fixed.xml": "420a0cfe4a162d15e3c23d8a8ea7cbf31c014023c55964886340ae85a7795466",
+      "behavioral.xml": "351ddc13ad4a0807e31d6a66b8a9c10426d008ea2d04f40f7873c825fda4629a",
+      "logtest-cases/original.synthetic.json": "17d32f3977664a19d8ddc1f35ebb820ba66c3a4f3591204d108eef739b8990de",
+      "logtest-cases/renamed.synthetic.json": "18bd812baf63d1ff1a85311ed645717d00a4bc0c4bc2154aac1466f330b1aa20",
+      "logtest-cases/reworded.synthetic.json": "dad21a1579c74f4ab7446aa0509dba7b74a2ae7338288476a26bbd7156fb85ba",
+      "logtest-cases/env-only.synthetic.json": "0381ffce4fed6aeb07947ee5fc41705ee6a51fa12aba26f42a4b3977c3f44adb",
+      "logtest-cases/pid-only.synthetic.json": "8383565197db5b79f26d11f5ec1611885fd0a67a272f7218f53a8899e91fc78b",
+      "logtest-cases/marker-only.synthetic.json": "a6984c039f7527a5683f3b3164c08250125f4a755460380b5e4bdba359dcb2fb",
+      "logtest-cases/comment-only.synthetic.json": "f578c2fc85d1836a841848a73d498cde264c04d2fce357b1df77831211772383",
+      "logtest-cases/unrelated.synthetic.json": "65d4df93a2e397e5d59fd300867f2be312fc714b65daf587a04da68a9967e916",
+      "logtest-cases/wrong-host.synthetic.json": "8c9b754fc5e020dff77b9e348fa3cf8eb035ef2b69debd3a80ba21d4deb431e9",
+      "logtest-cases/wrong-provider.synthetic.json": "8315e4b72521ff9bf8838fb02935e7ac3267ebdd50d7ea9db6ca50a04a322428",
+      "logtest-cases/wrong-channel.synthetic.json": "d7ee3115fa65610d42d8b10806ca3e8daf270fdd0b9849a307de126c84c7f35d",
+      "logtest-cases/wrong-event-id.synthetic.json": "b9c194685f3f75a0297cfc1538240c1c192f50ac68a8e9d4d509f3d05623f931",
+      "logtest-cases/missing-text.synthetic.json": "ec2f504fd40fb9bd92859768fd49c20c3808e62b1bbba951d2491f2bc9ebe2a4",
+      "logtest-cases/fragmented.synthetic.json": "9507358311d0d088b16c7101b4e18cab0f83f4ea50b1ad539f110a473de118e4",
+      "logtest-cases/missing-counter.synthetic.json": "8ff3035df6e416a596293a761075de57304fc2b05f057961e0c3458eeb09698b",
+      "logtest-cases/catalog.json": "b73f8889da4375291ff00a97bed6d0a611aaed6100a3ef84512127213aedf3d8"
+    }
+  },
+  "repo_files_sha256": {
+    "demos/scn-001/payload.ps1": "e8a5ebee1cb2dc303035bf7f31a55fc97092966ad5626fb61d23cdb662e45f21",
+    "demos/scn-001/Invoke-SafeDemo.ps1": "49e5f9759e402be06fb3b44e2e403ab1bed2443c48c7d5e61960e54135f0a82d",
+    "detections/wazuh/scn-001/baseline.xml.template": "551c4cc7273344ff1570039e24afd71944093b3548bff33c4f066382a6e995f2",
+    "detections/wazuh/scn-001/fixed.xml.template": "ca9311d0de8b8864c2b54a3fef3cce33b2f2108363d25c483e29ea70491905df",
+    "detections/wazuh/scn-001/behavioral.xml.template": "562cbcfb8e604cf392ffd3aef8c5b33f4fb5597cd2bed606c2ccb61702b9b3ac",
+    "scripts/prepare_scn001_kit.py": "f1ebe779e4dcd0676315215ed99c99979a442e42399db31b7774e4fcc696c9d6"
+  },
+  "runs": {
+    "A": {
+      "run_id": "scn001v2-a-20260918T0523Z",
+      "run_label": "A",
+      "applied_rule_revision": "baseline",
+      "applied_rule_sha256": "8dcb4020f9d1422c3b370ff987d42c2d2f7c1b532bf4a627259233816549a5d3",
+      "payload_file": "lab_update.ps1",
+      "payload_sha256": "e8a5ebee1cb2dc303035bf7f31a55fc97092966ad5626fb61d23cdb662e45f21",
+      "runner_pid": 6984,
+      "child_pid": 6692,
+      "launch_utc": "2026-09-18T05:23:27.0073000+00:00",
+      "exit_observed_utc": "2026-09-18T05:23:27.2569035+00:00",
+      "window_start_utc": "2026-09-18T05:23:16.9048205Z",
+      "window_end_utc": "2026-09-18T05:25:16.9048205Z",
+      "exit_code": 0,
+      "final_status": "Detected",
+      "profile_fingerprint": "4f140927e428b790909d0cc95766276de34c4db37b3be81762aad55784a749dc",
+      "event_set_fingerprint": "b858b16f9f45f2beb163c9bfa0b432a6a717e4e68489c86cdf7add340bb3e6a0",
+      "run_binding_status": "unknown",
+      "run_binding_reasons": [
+        "companion_record_unmatched",
+        "native_review_missing"
+      ],
+      "collection_review": null,
+      "snapshot_sha256": "b8f8a35b2e1a6b674331306eeb2cd173fab3b37206120859d24b19947af65f90",
+      "snapshot_records": 65,
+      "report_sha256": "44cd23fe0d1d5c3e608345aca1ee4a590b13ef2e0d2898f32aadf1e6bdbeea87",
+      "assertions": [
+        {
+          "assertion_id": "SCN-001-A01",
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "collection_assurance": "unknown",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:cb628209f87cd662c5edff80b57c2c8ec8eeb9ffdea31f16867ac265b13eec50",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-25#record=1",
+              "raw_event_hash": "fbd8507eb5963bcc4f72145a6c40fa1d23fe7fa39ec53c52a1c743b652f9fc6b",
+              "windows_record_id": "8280",
+              "windows_event_id": "1",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            }
+          ],
+          "unevaluable": []
+        },
+        {
+          "assertion_id": "SCN-001-A02",
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "collection_assurance": "unknown",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:e27edf62190ee90df2ad0c285392f5d5514c9c7e8f9d6ed892f023dbd4038892",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-22#record=1",
+              "raw_event_hash": "881817abeb35b63955909a26bddac427ff264f2ed4ae07663fcd4424c74bb792",
+              "windows_record_id": "11513",
+              "windows_event_id": "4104",
+              "fired_rule": "118001",
+              "fired_level": 5,
+              "script": "lab_update.ps1"
+            }
+          ],
+          "unevaluable": [
+            {
+              "evidence_id": "wazuh:evidence-v1:238a8c1b430fa70ce34e9536fdd4a692b06e90c41af4ab4f4e6835d7ffbf8564",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-23#record=1",
+              "raw_event_hash": "cca4db760402da2a9b19533e5df1342538b14a588cd7fd4fe6447588587df744",
+              "windows_record_id": "11517",
+              "windows_event_id": "4104",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            }
+          ]
+        },
+        {
+          "assertion_id": "SCN-001-A03",
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "collection_assurance": "unknown",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:cb628209f87cd662c5edff80b57c2c8ec8eeb9ffdea31f16867ac265b13eec50",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-25#record=1",
+              "raw_event_hash": "fbd8507eb5963bcc4f72145a6c40fa1d23fe7fa39ec53c52a1c743b652f9fc6b",
+              "windows_record_id": "8280",
+              "windows_event_id": "1",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            },
+            {
+              "evidence_id": "wazuh:evidence-v1:e27edf62190ee90df2ad0c285392f5d5514c9c7e8f9d6ed892f023dbd4038892",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-22#record=1",
+              "raw_event_hash": "881817abeb35b63955909a26bddac427ff264f2ed4ae07663fcd4424c74bb792",
+              "windows_record_id": "11513",
+              "windows_event_id": "4104",
+              "fired_rule": "118001",
+              "fired_level": 5,
+              "script": "lab_update.ps1"
+            }
+          ],
+          "unevaluable": []
+        }
+      ],
+      "powershell_4104_alerts": [
+        {
+          "windows_record_id": "11268",
+          "script": "Invoke-SafeDemo.ps1",
+          "fired_rule": "91815",
+          "fired_level": 4
+        },
+        {
+          "windows_record_id": "11413",
+          "script": "Invoke-SafeDemo.ps1",
+          "fired_rule": "91816",
+          "fired_level": 4
+        },
+        {
+          "windows_record_id": "11513",
+          "script": "lab_update.ps1",
+          "fired_rule": "118001",
+          "fired_level": 5
+        },
+        {
+          "windows_record_id": "12068",
+          "script": "Invoke-SafeDemo.ps1",
+          "fired_rule": "91815",
+          "fired_level": 4
+        },
+        {
+          "windows_record_id": "12213",
+          "script": "Invoke-SafeDemo.ps1",
+          "fired_rule": "91816",
+          "fired_level": 4
+        },
+        {
+          "windows_record_id": "12313",
+          "script": "maintenance_check.ps1",
+          "fired_rule": "91816",
+          "fired_level": 4
+        }
+      ]
+    },
+    "B": {
+      "run_id": "scn001v2-b-20260918T0525Z",
+      "run_label": "B",
+      "applied_rule_revision": "baseline",
+      "applied_rule_sha256": "8dcb4020f9d1422c3b370ff987d42c2d2f7c1b532bf4a627259233816549a5d3",
+      "payload_file": "maintenance_check.ps1",
+      "payload_sha256": "e8a5ebee1cb2dc303035bf7f31a55fc97092966ad5626fb61d23cdb662e45f21",
+      "runner_pid": 2184,
+      "child_pid": 7036,
+      "launch_utc": "2026-09-18T05:25:45.5188750+00:00",
+      "exit_observed_utc": "2026-09-18T05:25:45.7455098+00:00",
+      "window_start_utc": "2026-09-18T05:25:35.4238238Z",
+      "window_end_utc": "2026-09-18T05:27:35.4238238Z",
+      "exit_code": 0,
+      "final_status": "False negative",
+      "profile_fingerprint": "4f140927e428b790909d0cc95766276de34c4db37b3be81762aad55784a749dc",
+      "event_set_fingerprint": "c5867e5bd1775006becca119d9310cb428ea74a6b5f5ac14e6a12e5b7735d8df",
+      "run_binding_status": "unknown",
+      "run_binding_reasons": [
+        "companion_after_exit",
+        "companion_record_unmatched",
+        "native_review_missing"
+      ],
+      "collection_review": {
+        "request_sha256": "65b50de1ac2e5454849e101421bc2e51ddd6b1f25e134ddd91ec66f88fddf7ca",
+        "approval_sha256": "b941d40bb962b1dcd20c4374443e2604f4eb1964df039789ee7f9d305b75ddde",
+        "assurance": "caller-attested"
+      },
+      "snapshot_sha256": "540285ca8ace32b3de86038f1d902367f2ad44e2ae665d9b46b4dd553ffed4b1",
+      "snapshot_records": 38,
+      "report_sha256": "030f86b94242af47175b52bb5a6dcbe2e60b2213e37844a567fb2887b277e8f3",
+      "assertions": [
+        {
+          "assertion_id": "SCN-001-A01",
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "collection_assurance": "unknown",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:fdd7bce3d6fdfb7ad64a1423da1e57270312c20adfe11bad5c0d5b063b1f095d",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-20#record=1",
+              "raw_event_hash": "b0d00bff300d584bca0f68b426652fa8a826f928b9d4a91c2389cda7fd60ded6",
+              "windows_record_id": "8296",
+              "windows_event_id": "1",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            }
+          ],
+          "unevaluable": []
+        },
+        {
+          "assertion_id": "SCN-001-A02",
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "collection_assurance": "unknown",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:578425204af90cd3b587d35c7222f1ae1bb0005676595939e810a61bf42216b1",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-17#record=1",
+              "raw_event_hash": "f2c789860b81dd90e771a83ea76b114e105e1610865507bd88b0d89699ea2b04",
+              "windows_record_id": "12313",
+              "windows_event_id": "4104",
+              "fired_rule": "91816",
+              "fired_level": 4,
+              "script": "maintenance_check.ps1"
+            }
+          ],
+          "unevaluable": [
+            {
+              "evidence_id": "wazuh:evidence-v1:7466d55aab803abb5534891917ad32d25c96eca73fdb1892cf2acaa06772979b",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-18#record=1",
+              "raw_event_hash": "36c2ed169ff1c24ad1ede1f1151b0b87b9af0efa7e422df85b2cddf2b432fbf7",
+              "windows_record_id": "12317",
+              "windows_event_id": "4104",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            }
+          ]
+        },
+        {
+          "assertion_id": "SCN-001-A03",
+          "outcome": "false_negative",
+          "reason_code": "expected_detection_absent",
+          "collection_assurance": "caller-attested",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:fdd7bce3d6fdfb7ad64a1423da1e57270312c20adfe11bad5c0d5b063b1f095d",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-20#record=1",
+              "raw_event_hash": "b0d00bff300d584bca0f68b426652fa8a826f928b9d4a91c2389cda7fd60ded6",
+              "windows_record_id": "8296",
+              "windows_event_id": "1",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            }
+          ],
+          "unevaluable": []
+        }
+      ],
+      "powershell_4104_alerts": [
+        {
+          "windows_record_id": "12068",
+          "script": "Invoke-SafeDemo.ps1",
+          "fired_rule": "91815",
+          "fired_level": 4
+        },
+        {
+          "windows_record_id": "12213",
+          "script": "Invoke-SafeDemo.ps1",
+          "fired_rule": "91816",
+          "fired_level": 4
+        },
+        {
+          "windows_record_id": "12313",
+          "script": "maintenance_check.ps1",
+          "fired_rule": "91816",
+          "fired_level": 4
+        }
+      ]
+    },
+    "C": {
+      "run_id": "scn001v2-c-20260918T0537Z",
+      "run_label": "C",
+      "applied_rule_revision": "behavioral",
+      "applied_rule_sha256": "351ddc13ad4a0807e31d6a66b8a9c10426d008ea2d04f40f7873c825fda4629a",
+      "payload_file": "maintenance_check.ps1",
+      "payload_sha256": "e8a5ebee1cb2dc303035bf7f31a55fc97092966ad5626fb61d23cdb662e45f21",
+      "runner_pid": 1104,
+      "child_pid": 5584,
+      "launch_utc": "2026-09-18T05:37:55.2120975+00:00",
+      "exit_observed_utc": "2026-09-18T05:37:55.5253756+00:00",
+      "window_start_utc": "2026-09-18T05:37:45.1150593Z",
+      "window_end_utc": "2026-09-18T05:39:45.1150593Z",
+      "exit_code": 0,
+      "final_status": "Detected",
+      "profile_fingerprint": "4f140927e428b790909d0cc95766276de34c4db37b3be81762aad55784a749dc",
+      "event_set_fingerprint": "3dfbc5e7466fb792733b5d26c7e1be7a39745d21edab602563cbbeddc1484b58",
+      "run_binding_status": "unknown",
+      "run_binding_reasons": [
+        "companion_record_unmatched",
+        "native_review_missing"
+      ],
+      "collection_review": null,
+      "snapshot_sha256": "a348cbbc631aeb995a00c9ef957d129fd51a87432fcb78048ffaf4420863a691",
+      "snapshot_records": 31,
+      "report_sha256": "e21eb2d0da8038005cc4df32c1d51423158043572d2980ee37e246502c30749f",
+      "assertions": [
+        {
+          "assertion_id": "SCN-001-A01",
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "collection_assurance": "unknown",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-20#record=1",
+              "raw_event_hash": "f10b2eb2d91cef5e5a34d0f91bbd2121c6d55be9d9ff331099ffb075f3f11e9c",
+              "windows_record_id": "8385",
+              "windows_event_id": "1",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            }
+          ],
+          "unevaluable": []
+        },
+        {
+          "assertion_id": "SCN-001-A02",
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "collection_assurance": "unknown",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-17#record=1",
+              "raw_event_hash": "b9aab95d42b75de5e9604cf9eba0e3dcc04ba22e805f406da86161a8f688942d",
+              "windows_record_id": "13166",
+              "windows_event_id": "4104",
+              "fired_rule": "118001",
+              "fired_level": 5,
+              "script": "maintenance_check.ps1"
+            }
+          ],
+          "unevaluable": [
+            {
+              "evidence_id": "wazuh:evidence-v1:1b9ef39c1bf2460e28294f7d74cb57f2f58954f77aa097a409d769ffd4593f76",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-18#record=1",
+              "raw_event_hash": "b6af77bfe88bf369ae46a209bdf2a8f59753c4e7c035855f6bc6dd0f1e7f005e",
+              "windows_record_id": "13170",
+              "windows_event_id": "4104",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            }
+          ]
+        },
+        {
+          "assertion_id": "SCN-001-A03",
+          "outcome": "satisfied",
+          "reason_code": "witness_found",
+          "collection_assurance": "unknown",
+          "evidence": [
+            {
+              "evidence_id": "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-17#record=1",
+              "raw_event_hash": "b9aab95d42b75de5e9604cf9eba0e3dcc04ba22e805f406da86161a8f688942d",
+              "windows_record_id": "13166",
+              "windows_event_id": "4104",
+              "fired_rule": "118001",
+              "fired_level": 5,
+              "script": "maintenance_check.ps1"
+            },
+            {
+              "evidence_id": "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe",
+              "raw_event_ref": "wazuh-archives-agent012-part1-line-20#record=1",
+              "raw_event_hash": "f10b2eb2d91cef5e5a34d0f91bbd2121c6d55be9d9ff331099ffb075f3f11e9c",
+              "windows_record_id": "8385",
+              "windows_event_id": "1",
+              "fired_rule": null,
+              "fired_level": null,
+              "script": null
+            }
+          ],
+          "unevaluable": []
+        }
+      ],
+      "powershell_4104_alerts": [
+        {
+          "windows_record_id": "12921",
+          "script": "Invoke-SafeDemo.ps1",
+          "fired_rule": "118001",
+          "fired_level": 5
+        },
+        {
+          "windows_record_id": "13066",
+          "script": "Invoke-SafeDemo.ps1",
+          "fired_rule": "91816",
+          "fired_level": 4
+        },
+        {
+          "windows_record_id": "13166",
+          "script": "maintenance_check.ps1",
+          "fired_rule": "118001",
+          "fired_level": 5
+        }
+      ]
+    }
+  },
+  "comparison": {
+    "before": "scn001v2-b-20260918T0525Z",
+    "after": "scn001v2-c-20260918T0537Z",
+    "comparison": {
+      "assertion_count": 3,
+      "assertion_state_counts": {
+        "unchanged_pass": 2,
+        "unchanged_fail": 0,
+        "improvement": 1,
+        "regression": 0,
+        "unchanged_unknown": 0,
+        "unknown_changed": 0,
+        "became_evaluable": 0,
+        "became_unevaluable": 0
+      },
+      "status": "Regression Passed",
+      "assertions": [
+        {
+          "assertion_id": "SCN-001-A01",
+          "state": "unchanged_pass",
+          "evidence_changes": {
+            "added": [
+              "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe"
+            ],
+            "removed": [
+              "wazuh:evidence-v1:fdd7bce3d6fdfb7ad64a1423da1e57270312c20adfe11bad5c0d5b063b1f095d"
+            ],
+            "retained": []
+          },
+          "before": {
+            "witness_pairs": [],
+            "outcome": "satisfied",
+            "reason_code": "witness_found",
+            "evidence_ids": [
+              "wazuh:evidence-v1:fdd7bce3d6fdfb7ad64a1423da1e57270312c20adfe11bad5c0d5b063b1f095d"
+            ],
+            "evidence_refs": [
+              {
+                "event_id": "wazuh:evidence-v1:fdd7bce3d6fdfb7ad64a1423da1e57270312c20adfe11bad5c0d5b063b1f095d",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-20#record=1",
+                "raw_event_hash": "b0d00bff300d584bca0f68b426652fa8a826f928b9d4a91c2389cda7fd60ded6"
+              }
+            ],
+            "unevaluable_evidence_ids": [],
+            "unevaluable_evidence_refs": [],
+            "collection_assurance": "unknown",
+            "collection_reference": null
+          },
+          "after": {
+            "witness_pairs": [],
+            "outcome": "satisfied",
+            "reason_code": "witness_found",
+            "evidence_ids": [
+              "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe"
+            ],
+            "evidence_refs": [
+              {
+                "event_id": "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-20#record=1",
+                "raw_event_hash": "f10b2eb2d91cef5e5a34d0f91bbd2121c6d55be9d9ff331099ffb075f3f11e9c"
+              }
+            ],
+            "unevaluable_evidence_ids": [],
+            "unevaluable_evidence_refs": [],
+            "collection_assurance": "unknown",
+            "collection_reference": null
+          }
+        },
+        {
+          "assertion_id": "SCN-001-A02",
+          "state": "unchanged_pass",
+          "evidence_changes": {
+            "added": [
+              "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a"
+            ],
+            "removed": [
+              "wazuh:evidence-v1:578425204af90cd3b587d35c7222f1ae1bb0005676595939e810a61bf42216b1"
+            ],
+            "retained": []
+          },
+          "before": {
+            "witness_pairs": [],
+            "outcome": "satisfied",
+            "reason_code": "witness_found",
+            "evidence_ids": [
+              "wazuh:evidence-v1:578425204af90cd3b587d35c7222f1ae1bb0005676595939e810a61bf42216b1"
+            ],
+            "evidence_refs": [
+              {
+                "event_id": "wazuh:evidence-v1:578425204af90cd3b587d35c7222f1ae1bb0005676595939e810a61bf42216b1",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-17#record=1",
+                "raw_event_hash": "f2c789860b81dd90e771a83ea76b114e105e1610865507bd88b0d89699ea2b04"
+              }
+            ],
+            "unevaluable_evidence_ids": [
+              "wazuh:evidence-v1:7466d55aab803abb5534891917ad32d25c96eca73fdb1892cf2acaa06772979b"
+            ],
+            "unevaluable_evidence_refs": [
+              {
+                "event_id": "wazuh:evidence-v1:7466d55aab803abb5534891917ad32d25c96eca73fdb1892cf2acaa06772979b",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-18#record=1",
+                "raw_event_hash": "36c2ed169ff1c24ad1ede1f1151b0b87b9af0efa7e422df85b2cddf2b432fbf7"
+              }
+            ],
+            "collection_assurance": "unknown",
+            "collection_reference": null
+          },
+          "after": {
+            "witness_pairs": [],
+            "outcome": "satisfied",
+            "reason_code": "witness_found",
+            "evidence_ids": [
+              "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a"
+            ],
+            "evidence_refs": [
+              {
+                "event_id": "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-17#record=1",
+                "raw_event_hash": "b9aab95d42b75de5e9604cf9eba0e3dcc04ba22e805f406da86161a8f688942d"
+              }
+            ],
+            "unevaluable_evidence_ids": [
+              "wazuh:evidence-v1:1b9ef39c1bf2460e28294f7d74cb57f2f58954f77aa097a409d769ffd4593f76"
+            ],
+            "unevaluable_evidence_refs": [
+              {
+                "event_id": "wazuh:evidence-v1:1b9ef39c1bf2460e28294f7d74cb57f2f58954f77aa097a409d769ffd4593f76",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-18#record=1",
+                "raw_event_hash": "b6af77bfe88bf369ae46a209bdf2a8f59753c4e7c035855f6bc6dd0f1e7f005e"
+              }
+            ],
+            "collection_assurance": "unknown",
+            "collection_reference": null
+          }
+        },
+        {
+          "assertion_id": "SCN-001-A03",
+          "state": "improvement",
+          "evidence_changes": {
+            "added": [
+              "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a",
+              "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe"
+            ],
+            "removed": [
+              "wazuh:evidence-v1:fdd7bce3d6fdfb7ad64a1423da1e57270312c20adfe11bad5c0d5b063b1f095d"
+            ],
+            "retained": []
+          },
+          "before": {
+            "witness_pairs": [],
+            "outcome": "false_negative",
+            "reason_code": "expected_detection_absent",
+            "evidence_ids": [
+              "wazuh:evidence-v1:fdd7bce3d6fdfb7ad64a1423da1e57270312c20adfe11bad5c0d5b063b1f095d"
+            ],
+            "evidence_refs": [
+              {
+                "event_id": "wazuh:evidence-v1:fdd7bce3d6fdfb7ad64a1423da1e57270312c20adfe11bad5c0d5b063b1f095d",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-20#record=1",
+                "raw_event_hash": "b0d00bff300d584bca0f68b426652fa8a826f928b9d4a91c2389cda7fd60ded6"
+              }
+            ],
+            "unevaluable_evidence_ids": [],
+            "unevaluable_evidence_refs": [],
+            "collection_assurance": "caller-attested",
+            "collection_reference": "docs/ISSUE_12_SAFE_DEMO_CHECKPOINT.md (2026-09-18): sections \"Bo v2: Run B attestation\", \"Companion grace\", \"Approval cuoi v2\""
+          },
+          "after": {
+            "witness_pairs": [
+              {
+                "target_event_id": "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a",
+                "anchor_event_id": "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe"
+              }
+            ],
+            "outcome": "satisfied",
+            "reason_code": "witness_found",
+            "evidence_ids": [
+              "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a",
+              "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe"
+            ],
+            "evidence_refs": [
+              {
+                "event_id": "wazuh:evidence-v1:a9a3cde01d2ea263a6b76be8b9ee0d08ea8f02bb7bc8022c6b0127f61f274a8a",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-17#record=1",
+                "raw_event_hash": "b9aab95d42b75de5e9604cf9eba0e3dcc04ba22e805f406da86161a8f688942d"
+              },
+              {
+                "event_id": "wazuh:evidence-v1:f2398bb098d015809139543ff923de70bb141a6108b7b25972180537eb4a0cfe",
+                "raw_event_ref": "wazuh-archives-agent012-part1-line-20#record=1",
+                "raw_event_hash": "f10b2eb2d91cef5e5a34d0f91bbd2121c6d55be9d9ff331099ffb075f3f11e9c"
+              }
+            ],
+            "unevaluable_evidence_ids": [],
+            "unevaluable_evidence_refs": [],
+            "collection_assurance": "unknown",
+            "collection_reference": null
+          }
+        }
+      ]
+    },
+    "sha256": "8c2a718ad225f15eea1d5650a663b3c9859d9efb66dcc62b0596f7c5745bb816"
+  },
+  "collection_review_B": {
+    "request_sha256": "65b50de1ac2e5454849e101421bc2e51ddd6b1f25e134ddd91ec66f88fddf7ca",
+    "approval_sha256": "b941d40bb962b1dcd20c4374443e2604f4eb1964df039789ee7f9d305b75ddde",
+    "context_sha256": "c31d030494f0776f24ca0faf8af7d6b135071b6fba16e9ef18f0b6ae09434f14",
+    "confirmed_by": "Nguyen Le Trong Tin",
+    "reviewed_at": "2026-09-18T06:24:42Z",
+    "collected_at": "2026-09-18T05:32:44Z",
+    "coverage_start": "2026-09-18T05:25:35.4238238Z",
+    "coverage_end": "2026-09-18T05:27:35.4238238Z",
+    "flags": {
+      "no_sampling_or_truncation": true,
+      "no_parse_errors_or_gaps": true,
+      "clocks_adequate": true
+    }
+  },
+  "live_controls": {
+    "run_id": "scn001v2-controls-20260918T060503Z",
+    "rule_loaded": "behavioral",
+    "rule_sha256": "351ddc13ad4a0807e31d6a66b8a9c10426d008ea2d04f40f7873c825fda4629a",
+    "scripts": {
+      "env-only.ps1": {
+        "sha256": "9cc01be3df0dfe31aa97792020645abba84f34b4f846c0140ed31b6bce8cfb37",
+        "text": "Write-Output $env:COMPUTERNAME\n"
+      },
+      "pid-only.ps1": {
+        "sha256": "0226fc3c28de6589d50bc2f7c17a49c5d5a546ed9cd42efad1f6c87f8071bd69",
+        "text": "Write-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $PID)\n"
+      },
+      "reworded.ps1": {
+        "sha256": "a813f41e7d6dc58f26ccdce1479361a3a7b75bc79a459f14b24203c21e659107",
+        "text": "$m = [Environment]::MachineName; $u = [Environment]::UserName\n\"AEGIS_SAFE_DEMO_V1\"\n\"AEGIS_PID=\" + [System.Diagnostics.Process]::GetCurrentProcess().Id\n"
+      }
+    },
+    "observations": [
+      {
+        "script": "env-only.ps1",
+        "windows_record_id": "13736",
+        "fired_rule": "91816",
+        "fired_level": 4
+      },
+      {
+        "script": "pid-only.ps1",
+        "windows_record_id": "13752",
+        "fired_rule": "91816",
+        "fired_level": 4
+      },
+      {
+        "script": "reworded.ps1",
+        "windows_record_id": "13769",
+        "fired_rule": "118001",
+        "fired_level": 5
+      }
+    ]
+  }
+}
