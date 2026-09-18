@@ -86,6 +86,37 @@ def _record(body, bom_removed):
     return body, record, wrapped
 
 
+def _event_identity(record):
+    """Identify the Windows event a record carries, when it carries one.
+
+    The manager-assigned ``id`` is not a per-record identifier in every manager
+    file. ``archives.json`` issues one id per write batch, so records flushed
+    together share it: measured against Wazuh 4.14.4, a single archive id covered
+    30 records carrying 30 different events. ``eventRecordID`` is assigned by the
+    Windows log itself, so it identifies the event rather than the write.
+
+    It is only unique within one channel on one host, which is why the provider
+    and channel travel with it. The agent stays in the caller's key, since two
+    hosts number their own logs independently.
+
+    Malformed metadata is not judged here. ``classify`` runs on every record
+    straight after this and rejects anything it cannot place, so returning None
+    costs nothing and leaves that diagnostic where it belongs.
+    """
+    data = record.get('data')
+    win = data.get('win') if type(data) is dict else None
+    system = win.get('system') if type(win) is dict else None
+    if type(system) is not dict:
+        return None
+    event_record_id = system.get('eventRecordID')
+    if not valid_text(event_record_id):
+        return None
+    provider, channel = system.get('providerName'), system.get('channel')
+    if any(value is not None and not valid_text(value) for value in (provider, channel)):
+        return None
+    return (provider, channel, event_record_id)
+
+
 def _identity(record):
     record_id = record.get('id')
     if record_id is not None and not valid_text(record_id):
@@ -96,6 +127,14 @@ def _identity(record):
     name = manager.get('name') if manager else None
     if name is not None and not valid_text(name):
         raise ManagerSnapshotError('invalid_record')
+    # Prefer the event's own identity. Falling back to the archive id keeps the
+    # previous rule for everything that carries no Windows event, where it is
+    # still the only identifier available.
+    agent = record.get('agent')
+    agent_id = agent.get('id') if type(agent) is dict else None
+    event = _event_identity(record) if valid_text(agent_id) else None
+    if event is not None:
+        return (name, agent_id) + event
     return (name, record_id) if record_id is not None else None
 
 

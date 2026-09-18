@@ -15,12 +15,17 @@ chạy A/B/C chính thức hoặc kết luận `Regression Passed` từ kit này
 Không cần Python trên Windows lab. Không chạy payload trên manager. Kit không
 SSH, không gọi API SIEM, không đọc mật khẩu hoặc tự cấu hình hệ thống.
 
-Payload chỉ có hai lệnh:
+Payload (kit 0.2.0) đọc ba giá trị định danh lành tính rồi in marker và PID:
 
 ```powershell
+$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }
 Write-Output 'AEGIS_SAFE_DEMO_V1'
-Write-Output ('AEGIS_PID=' + $PID)
+Write-Output ('AEGIS_PID=' + $facts.Pid)
 ```
+
+Hai hành vi quan sát được — đọc định danh máy/người dùng và đọc định danh tiến
+trình trong cùng một script block — là thứ revision `behavioral` khớp. Stdout
+giữ nguyên hợp đồng `AEGIS_SAFE_DEMO_V1` / `AEGIS_PID=<pid>`.
 
 Hai tên `lab_update.ps1` và `maintenance_check.ps1` có cùng bytes ASCII/LF và
 SHA-256. Không thêm comment, BOM hoặc sửa bằng editor giữa hai lượt. Payload
@@ -93,8 +98,8 @@ mật khẩu/token. Dán nguyên block vào PowerShell, không dán ký hiệu p
 }
 ```
 
-Output gồm hai payload, runner, `baseline.xml`, `fixed.xml`, `kit.json` và
-`logtest-cases/`. Manifest được ghi cuối; thiếu manifest là kit chưa hoàn thành.
+Output gồm hai payload, runner, `baseline.xml`, `fixed.xml`, `behavioral.xml`,
+`kit.json` và `logtest-cases/` (15 case, ba cột kỳ vọng). Manifest được ghi cuối; thiếu manifest là kit chưa hoàn thành.
 Lỗi không tự xóa thư mục dang dở. Không chạy lại vào cùng output.
 
 Review payload, runner và hai rule trước khi chuyển file bằng phương thức
@@ -111,7 +116,7 @@ execution policy, không dùng Bypass, không tự nâng quyền để vượt l
 ```powershell
 $aegisKitDir = Read-Host 'Duong dan kit tren Windows lab'
 $aegisExpectedHost = Read-Host 'Hostname lab da duyet, dung chu hoa-thuong'
-$aegisAppliedRevision = Read-Host 'Revision da duoc operator review: baseline hoac fixed'
+$aegisAppliedRevision = Read-Host 'Revision da duoc operator review: baseline, fixed hoac behavioral'
 $aegisAppliedHash = Read-Host 'SHA256 lowercase cua rule revision da doi chieu tren manager'
 $aegisRunId = 'rehearsal-' + [guid]::NewGuid().ToString('N')
 $aegisRunDir = Join-Path (Join-Path $env:USERPROFILE 'Downloads') $aegisRunId
@@ -137,7 +142,7 @@ Hash nhập là khai báo của operator, runner không truy vấn manager để
 
 ## 5. Rule review/logtest — người vận hành trên manager
 
-Hai revision dùng **cùng ID**; không nạp cùng lúc. Baseline khớp đường dẫn tên
+Ba revision dùng **cùng ID**; không nạp cùng lúc. Baseline khớp đường dẫn tên
 gốc theo biểu diễn của field profile đã chọn. Với `decoded-json-v1`, fixed
 khớp hai dòng script, cho phép LF/CRLF và một newline cuối. Với profile
 `wazuh-eventchannel-4.14.4-lf-v1`, fixed khớp đúng chuỗi decoded đã flatten
@@ -145,6 +150,17 @@ thành một dòng, không whitespace cuối. Cả hai không khớp marker đơ
 comment-only hoặc nội dung thêm; xem giới hạn mất thông tin ở tài liệu profile.
 Fixed là **rule nội dung chịu được đổi tên**, không phải detector malware hay
 mô hình suy luận hành vi tổng quát. Không có kết luận `blocked` từ rule match.
+
+`behavioral` là revision Run C áp dụng. Pattern của nó **không dẫn xuất từ
+payload**: hai lookahead pcre2 đòi trong một script block có (a) đọc định danh
+máy/người dùng (`$env:COMPUTERNAME|USERNAME|USERDOMAIN`,
+`[Environment]::MachineName|UserName|UserDomainName`, `GetEnvironmentVariable`)
+và (b) đọc định danh tiến trình (`$PID`, `GetCurrentProcess().Id`), không phân
+biệt hoa thường. Nó chịu được đổi tên file và viết lại script; không khớp
+env-only, pid-only (payload cũ), marker-only. Giới hạn nêu rõ: mã bị comment
+vẫn match (`comment-only` trong catalog). Parent khuyến nghị là **91802** (level
+0, chỉ đòi `ScriptBlockId`) để mọi control đều tới được rule; dưới 91816 thì
+control không chứa `$env:/$PID` không bao giờ được đánh giá.
 
 Lệnh đọc trạng thái ban đầu trên Linux:
 
@@ -233,7 +249,8 @@ Write-Host ('REHEARSAL_EXIT=' + $LASTEXITCODE)
 ```
 
 Rehearsal chọn `maintenance_check.ps1`. A chọn tên gốc, B/C chọn tên mới;
-A/B chỉ nhận baseline, C chỉ nhận fixed. API đã có guards này để dùng về sau,
+A/B chỉ nhận baseline, C chỉ nhận `behavioral` (từ kit 0.2.0; `fixed` vẫn được
+ship và pin để tái lập thí nghiệm content-matching). API đã có guards này để dùng về sau,
 không có nghĩa đã sẵn sàng cho A/B/C evaluation chính thức.
 
 Runner đợi khoảng 10 giây từ đầu window rồi tạo đúng một child PowerShell,

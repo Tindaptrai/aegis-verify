@@ -17,8 +17,26 @@ from xml.sax.saxutils import escape
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PAYLOAD = b"Write-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $PID)\n"
+PAYLOAD = b"$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }\nWrite-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $facts.Pid)\n"
 FILENAMES = ('lab_update.ps1', 'maintenance_check.ps1')
+REVISIONS = ('baseline', 'fixed', 'behavioral')
+KIT_VERSION = '0.2.0'
+# The behavioral revision is written from the two behaviors the scenario shows
+# in one script block, never from the payload text: an environment or machine
+# identity read, and a process identity read. Any wording of either counts, so
+# renaming the file or rephrasing the script does not escape it, while a script
+# that does only one of the two is left to the parent rules. It is deliberately
+# not derived from PAYLOAD so the rule cannot quietly become content matching.
+BEHAVIOR_PATTERN = (
+    r'(?is)'
+    r'(?=.*(?:\$env:(?:COMPUTERNAME|USERNAME|USERDOMAIN)\b'
+    r'|\[Environment\]::(?:MachineName|UserName|UserDomainName)\b'
+    r'|GetEnvironmentVariable))'
+    r'(?=.*(?:\$PID\b|GetCurrentProcess\(\)\.Id\b))')
+# A second wording of the same two behaviors, used only as a synthetic control.
+REWORDED = ("$m = [Environment]::MachineName; $u = [Environment]::UserName\n"
+            "\"AEGIS_SAFE_DEMO_V1\"\n"
+            "\"AEGIS_PID=\" + [System.Diagnostics.Process]::GetCurrentProcess().Id\n")
 LEGACY_PROFILE = 'decoded-json-v1'
 NATIVE_PROFILE = 'wazuh-eventchannel-4.14.4-lf-v1'
 
@@ -80,7 +98,7 @@ def render_rule(*, revision: str, rule_id: int, parent_sid: int,
     _field_profile(field_profile)
     _ids(rule_id, parent_sid)
     _host(target_host)
-    if revision not in ('baseline', 'fixed'):
+    if revision not in REVISIONS:
         raise ValueError('invalid_revision')
     if not isinstance(baseline_path, str) or not baseline_path.endswith('\\lab_update.ps1'):
         raise ValueError('invalid_baseline_path')
@@ -99,7 +117,8 @@ def render_rule(*, revision: str, rule_id: int, parent_sid: int,
         rule_id=str(rule_id), parent_sid=str(parent_sid),
         host_pattern=escape(_path_pattern(target_host)),
         path_pattern=escape(_path_pattern(baseline_path)),
-        script_pattern=escape(script_pattern), content_description=content_description)
+        script_pattern=escape(script_pattern), content_description=content_description,
+        behavior_pattern=escape(BEHAVIOR_PATTERN))
     if field_profile == NATIVE_PROFILE:
         rendered = f'<!-- Field profile: {NATIVE_PROFILE}; lossy decoded fields, not source bytes. -->\n' + rendered
     return rendered
@@ -136,22 +155,35 @@ def _synthetic_cases(target_host, lab_directory, field_profile):
     base = json.loads(_asset(ROOT / 'tests/fixtures/demo/scn-001/rule-cases/base.synthetic.json'))
     base['win']['system']['computer'] = target_host
     base['win']['eventdata']['path'] = lab_directory + '\\' + FILENAMES[0]
+    # The 'original' case is the reviewed payload by definition, so take it from
+    # PAYLOAD rather than trusting the fixture file to have been kept in step.
+    base['win']['eventdata']['scriptBlockText'] = PAYLOAD.decode('ascii')
+    # Columns: name, field, value, expected_baseline, expected_fixed, expected_behavioral.
+    # 'parent_dependent' marks a baseline expectation that turns on whether the
+    # operator's parent rule lets the record reach the demo rule at all.
+    old_payload = "Write-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $PID)\n"
     cases = [
-        ('original', None, None, 'demo_match', 'demo_match'),
-        ('renamed', 'eventdata.path', lab_directory + '\\' + FILENAMES[1], 'not_demo', 'demo_match'),
-        ('marker-only', 'eventdata.scriptBlockText', "Write-Output 'AEGIS_SAFE_DEMO_V1'", 'parent_dependent', 'not_demo'),
-        ('comment-only', 'eventdata.scriptBlockText', '<#\n' + PAYLOAD.decode() + '#>', 'parent_dependent', 'not_demo'),
-        ('unrelated', 'eventdata.scriptBlockText', "Write-Output 'unrelated synthetic control'", 'parent_dependent', 'not_demo'),
-        ('wrong-host', 'system.computer', 'SYNTHETIC-OTHER-' + target_host, 'not_demo', 'not_demo'),
-        ('wrong-provider', 'system.providerName', 'SYNTHETIC-OTHER', 'not_demo', 'not_demo'),
-        ('wrong-channel', 'system.channel', 'SYNTHETIC-OTHER', 'not_demo', 'not_demo'),
-        ('wrong-event-id', 'system.eventID', '4103', 'not_demo', 'not_demo'),
-        ('missing-text', 'eventdata.scriptBlockText', None, 'parent_dependent', 'not_demo'),
-        ('fragmented', 'eventdata.messageTotal', '2', 'not_demo', 'not_demo'),
-        ('missing-counter', 'eventdata.messageNumber', None, 'not_demo', 'not_demo'),
+        ('original', None, None, 'demo_match', 'demo_match', 'demo_match'),
+        ('renamed', 'eventdata.path', lab_directory + '\\' + FILENAMES[1], 'not_demo', 'demo_match', 'demo_match'),
+        # Same two behaviors, different wording: only a behavioral rule keeps up.
+        ('reworded', 'eventdata.scriptBlockText', REWORDED, 'demo_match', 'not_demo', 'demo_match'),
+        # One behavior alone is a benign look-alike and must not match.
+        ('env-only', 'eventdata.scriptBlockText', 'Write-Output $env:COMPUTERNAME\n', 'demo_match', 'not_demo', 'not_demo'),
+        ('pid-only', 'eventdata.scriptBlockText', old_payload, 'demo_match', 'not_demo', 'not_demo'),
+        ('marker-only', 'eventdata.scriptBlockText', "Write-Output 'AEGIS_SAFE_DEMO_V1'", 'parent_dependent', 'not_demo', 'not_demo'),
+        # A text rule cannot tell commented-out code from live code. Stated, not hidden.
+        ('comment-only', 'eventdata.scriptBlockText', '<#\n' + PAYLOAD.decode() + '#>', 'parent_dependent', 'not_demo', 'demo_match'),
+        ('unrelated', 'eventdata.scriptBlockText', "Write-Output 'unrelated synthetic control'", 'parent_dependent', 'not_demo', 'not_demo'),
+        ('wrong-host', 'system.computer', 'SYNTHETIC-OTHER-' + target_host, 'not_demo', 'not_demo', 'not_demo'),
+        ('wrong-provider', 'system.providerName', 'SYNTHETIC-OTHER', 'not_demo', 'not_demo', 'not_demo'),
+        ('wrong-channel', 'system.channel', 'SYNTHETIC-OTHER', 'not_demo', 'not_demo', 'not_demo'),
+        ('wrong-event-id', 'system.eventID', '4103', 'not_demo', 'not_demo', 'not_demo'),
+        ('missing-text', 'eventdata.scriptBlockText', None, 'parent_dependent', 'not_demo', 'not_demo'),
+        ('fragmented', 'eventdata.messageTotal', '2', 'not_demo', 'not_demo', 'not_demo'),
+        ('missing-counter', 'eventdata.messageNumber', None, 'not_demo', 'not_demo', 'not_demo'),
     ]
     artifacts, catalog = {}, []
-    for name, field, value, expected_baseline, expected_fixed in cases:
+    for name, field, value, expected_baseline, expected_fixed, expected_behavioral in cases:
         event = copy.deepcopy(base)
         if field:
             section, key = field.split('.')
@@ -169,7 +201,7 @@ def _synthetic_cases(target_host, lab_directory, field_profile):
         filename = f'logtest-cases/{name}.synthetic.json'
         artifacts[filename] = (json.dumps(event, ensure_ascii=True) + '\n').encode('utf-8')
         catalog.append(dict(name=name, file=filename, expected_baseline=expected_baseline,
-                            expected_fixed=expected_fixed))
+                            expected_fixed=expected_fixed, expected_behavioral=expected_behavioral))
     artifacts['logtest-cases/catalog.json'] = json.dumps(dict(
         synthetic_only=True, field_profile=field_profile,
         input_layer='decoded_fields_json_not_native_transport',
@@ -196,13 +228,13 @@ def prepare_kit(*, output_dir: Path, lab_directory: str, target_host: str,
         raise ValueError('reviewed_payload_changed')
     artifacts = {name: payload for name in FILENAMES}
     artifacts['Invoke-SafeDemo.ps1'] = _asset(ROOT / 'demos/scn-001/Invoke-SafeDemo.ps1')
-    for revision in ('baseline', 'fixed'):
+    for revision in REVISIONS:
         artifacts[f'{revision}.xml'] = render_rule(
             revision=revision, rule_id=rule_id, parent_sid=parent_sid,
             target_host=target_host, baseline_path=lab_directory + '\\' + FILENAMES[0],
             field_profile=field_profile).encode('utf-8')
     artifacts.update(_synthetic_cases(target_host, lab_directory, field_profile))
-    manifest = dict(kind='safe_demo_kit', kit_version='0.1.0', scenario_id='SCN-001',
+    manifest = dict(kind='safe_demo_kit', kit_version=KIT_VERSION, scenario_id='SCN-001',
                     scenario_version='0.1.0', target_host=target_host, lab_directory=lab_directory,
                     filenames=list(FILENAMES), rule_id=rule_id, parent_sid=parent_sid,
                     field_profile=field_profile,

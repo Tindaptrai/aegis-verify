@@ -3,9 +3,12 @@
 ## Trạng thái triển khai Issue #12
 
 [Kit SCN-001 và hướng dẫn tiếng Việt](../demos/scn-001/README.md) hiện triển khai
-phần chuẩn bị offline/preflight/rehearsal. Hai payload cùng bytes, baseline
-theo filename và fixed theo toàn bộ nội dung đã review. Fixed này chịu được
-đổi tên, **không phải detector hành vi tổng quát**.
+phần chuẩn bị offline/preflight/rehearsal và, từ kit 0.2.0, revision
+`behavioral`. Hai payload cùng bytes; `baseline` theo filename; `fixed` theo toàn
+bộ nội dung đã review (chịu được đổi tên, **không phải** detector hành vi);
+`behavioral` theo hai hành vi quan sát được trong một script block, chịu được cả
+đổi tên lẫn viết lại. Checklist vận hành lặp lại được:
+[SCN001_OPERATOR_CHECKLIST.md](SCN001_OPERATOR_CHECKLIST.md).
 
 Các mục A/B/C bên dưới mô tả mục tiêu/kỳ vọng, **không phải kết quả lab đã đạt**.
 Export/attestation và evaluation profile còn cần kế hoạch riêng. Manifest
@@ -46,10 +49,12 @@ the expected Wazuh detection did not.
 
 ## Rule fix
 
-Replace the fragile filename match with reviewed behavioral conditions such as the
-PowerShell process, relevant command-line characteristics, and correlated process and
-network evidence. Exact conditions belong in version-controlled detection content and
-must be tested against benign cases.
+Replace the fragile filename match with reviewed behavioral conditions. The shipped
+`behavioral` revision (`detections/wazuh/scn-001/behavioral.xml.template`) keys on the
+two behaviors the payload actually performs in one script block — an environment or
+machine-identity read and a process-identity read — in any wording, and is tested
+against benign cases (env-only, pid-only, marker-only) plus a reworded equivalent.
+Its known limit is stated in the kit catalog: commented-out code still matches.
 
 ## Run C — Re-test
 

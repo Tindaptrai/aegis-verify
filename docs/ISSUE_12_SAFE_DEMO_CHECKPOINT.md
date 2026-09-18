@@ -1861,3 +1861,2702 @@ Chưa đo và **không kết luận**: ký tự non-ASCII, ký tự điều khi�
 Wazuh khác, decoder khác, channel khác, và các source field ngoài
 `data.win.eventdata` của hai loại bản ghi này. `is_wire_text` từ chối non-ASCII
 thay vì đoán; không có phát biểu nào về việc Wazuh có hay không phát `\uXXXX`.
+
+## 2026-09-17 — Checkpoint trước khi nén ngữ cảnh
+
+Mục này để người tiếp quản đọc **sau khi context bị nén**. Đọc `AGENTS.md`
+và mục này trước khi làm bất cứ việc gì. **Không chạy lại các lượt đã thực
+hiện**; kiểm trạng thái thật trước, vì số liệu trong tài liệu là ảnh chụp.
+
+### Repository
+
+- Worktree: `I:\AEGIS-VERIFY\.worktrees\issue-12-safe-demo`
+- Branch: `codex/issue-12-safe-demo`, **ahead 15** so với `origin/main`
+- HEAD: `9acaff3` — `docs(demo): record offline evidence checkpoint and daily summary`
+- Base của 10 commit lượt này: `fb05d3c`
+- Chưa push, chưa merge, chưa đóng Issue #12
+- Checkout chính `I:\AEGIS-VERIFY` ở branch `codex/issue-12-demo-prep`,
+  giữ nguyên bản demo-prep trùng và các file untracked của chủ dự án
+
+### Checks cuối
+
+| Check | Kết quả |
+| --- | --- |
+| Full suite từ tree đã commit | 2538 passed, 1 skipped, exit 0 |
+| `test_scn001_demo_evaluation.py` sau bản pin chuỗi rule | 36 passed |
+| `pip check` | No broken requirements found |
+| `git diff --check` | sạch |
+| `scenarios/` | không đổi |
+| Wheel từ ngoài checkout | 15 E2E passed với code trong site-packages |
+
+Sau HEAD có thêm thay đổi **chưa commit**: `report['demo_run']` ghim
+`rule_id`/`parent_sid`/revision, và `compare_demo_runs` từ chối khi rule_id
+hoặc parent_sid khác nhau giữa hai run, kèm 4 test. Chạy lại full suite
+trước khi commit phần này.
+
+### Findings còn mở
+
+| # | Nội dung | Trạng thái |
+| --- | --- | --- |
+| 5 | Kit dựng regex bằng thay thế backslash, study dùng JSON escape | Đã xác minh hội tụ trên bindings lab hiện tại; hai cài đặt vẫn song song |
+| 8 | `aegis compare` bỏ qua `run_binding` | Mở; demo chưa có subcommand CLI |
+| 11 | Tautology một phần trong test representation | Mở, đã ghi nhận |
+| 12 | Guard `field_profile` chưa với tới được | Mở, có chủ đích |
+| — | Binding giả `caller_reviewed` giữ cờ True vẫn được chấp nhận | Mở; cờ cảnh báo đi kèm |
+| — | `run_binding` chỉ phủ A01/A02, không ràng buộc bản ghi alert A03 | Mở, reviewer nêu |
+| — | `scriptBlockText` **không** theo `wire_text`: agent làm phẳng CR/LF thành space trước lớp escaping | Mở; hai mô hình biểu diễn cùng tồn tại, chưa ghi ở một chỗ |
+| AC | Behavioral rule fix của Run C | **Chưa đạt**; lượt đầu dùng exact content matching |
+
+### Quyền lab đã được chủ dự án duyệt
+
+- Windows target và Wazuh manager qua Windows OpenSSH với key đã hoạt động
+- Thư mục demo Windows `C:\AEGIS-Lab\SCN001`
+- Tạo thư mục demo, copy payload đã review
+- Nạp/thay/gỡ **đúng một** file rule demo riêng, restart manager có chủ đích
+  sau config test, với backup ngoài thư mục rules, ghi hash, rollback chuẩn bị trước
+- Rule ID 118001 nếu kiểm lại vẫn trống; parent 91802 nếu ruleset xác nhận
+- Chuẩn bị revision payload hành vi chỉ đọc trạng thái máy và ghi stdout,
+  trình chủ dự án review một lần trước khi chạy
+
+**Không được phép:** đổi decoder 60000, tắt TLS/firewall, cấp sudo toàn quyền,
+sửa rule/config ngoài demo, tự tạo approval mang tên chủ dự án, ghi password
+hoặc private key vào chat/script/log, push/merge, đóng issue.
+
+Agent không nhập password ở bất kỳ đâu. Mọi thao tác cần root trên manager
+phải do chủ dự án chạy.
+
+### Trạng thái lab lúc chốt mục này
+
+| Mục | Giá trị |
+| --- | --- |
+| Manager service | active; 1514/1515 đang nghe; PID file tươi |
+| Agent 012 | online từ 2026-09-17T16:03:46Z; telemetry đang tới |
+| Bản ghi mới nhất quan sát được | 16:08Z, eventID 1/5/4688, computer LAB-ENDPOINT-01 |
+| Hostname canonical | `LAB-ENDPOINT-01` (`win.system.computer`) |
+| Agent ID | `012` |
+| Executable | `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe` |
+| Thư mục demo trên target | **chưa tạo** |
+| Sysmon | 15.22 Running |
+
+**Cảnh báo về log:** `archives.json` có một khối NUL ở dòng 7678 (16:03:42Z)
+do lần tắt máy bẩn lúc 20:25 +07. `jq` dừng tại đó và `grep` coi file là
+binary. Phải dùng `grep -a` và lọc từng dòng. Một lần đọc sai vì bỏ qua
+stderr đã khiến agent kết luận nhầm là "không có telemetry"; đừng lặp lại.
+
+### Rule đang nạp trên manager
+
+File duy nhất của demo: `/var/ossec/etc/rules/117001-aegis-safe-demo.xml`,
+`root:wazuh 640`, mtime 2026-09-14 19:17.
+
+- `rule id="117001" level="5"`, `if_sid 91816`
+- Neo `win.system.computer` vào `LAB-ENDPOINT-01`
+- Neo `win.eventdata.path` vào **thư mục cũ**
+  `C:\\\\Users\\\\<user>\\\\Downloads\\\\AEGIS-SafeDemo-NativeV1\\\\lab_update.ps1`,
+  anchored `\A ... \z`
+
+ID custom đang nạp trong dải 100000–120000: 100001, 100200–100203,
+100300–100304, 110300–110303, 110500–110503, 117001. **118001 còn trống**,
+kiểm lại lần hai vẫn trống.
+
+### Ba phương án cho xung đột 117001
+
+| PA | Nội dung | Ảnh hưởng tới demo 118001 |
+| --- | --- | --- |
+| (a) | Dùng lại chính file 117001, thay nội dung | Không có rule demo thứ hai nên không thể che nhau. Nhưng là **sửa 117001**, trái ràng buộc của chủ dự án, và mất bản ghi lịch sử của rule đã rehearsal |
+| (b) | Gỡ 117001, nạp 118001 | Sạch về ID, không che nhau. Nhưng **đụng rule ngoài phạm vi** và phải rollback lại 117001 khi xong |
+| (c) | Giữ 117001, nạp thêm 118001 | **An toàn ở lab này**: path pattern của 117001 neo cứng vào thư mục cũ, còn demo mới chạy ở `C:\AEGIS-Lab\SCN001`, nên 117001 không thể khớp event của demo mới. Rollback chỉ là gỡ đúng file 118001 |
+
+**Phương án được chọn: (c)**, khớp ưu tiên của chủ dự án là giữ nguyên 117001
+và dùng 118001. Căn cứ là nội dung thật của 117001 đã đọc, không phải suy đoán.
+
+Điều kiện đi kèm: không chạy payload cũ từ thư mục cũ trong lúc demo, vì khi
+đó 117001 sẽ khớp và tạo alert gây nhiễu cho việc đọc kết quả.
+
+### Vì sao parent 91816 chứ không phải 91802
+
+Chuỗi thật trong `ruleset/rules/0915-win-powershell_rules.xml`:
+
+```text
+91801  if_sid 60000, 60010  + channel Microsoft-Windows-PowerShell/Operational
+91802  if_sid 91801         + win.eventdata.ScriptBlockId =~ .+
+91816  if_sid 91802         + scriptBlockText =~ ($env:TEMP|$env:USERNAME|
+                                $env:COMPUTERNAME|$env:USERDOMAIN|$PID)
+```
+
+Agent từng đề xuất 91802 cho độc lập nội dung. **Đề xuất đó sai.** Wazuh đánh
+giá các con của một rule đã khớp và lấy **con khớp đầu tiên rồi dừng**;
+`etc/rules` nạp **sau** `ruleset/rules`, nên một rule custom là con của 91802
+sẽ xếp sau 91816. Payload chứa `$PID`, đúng một nhánh của 91816, nên 91816
+khớp trước và rule demo không bao giờ được đánh giá. Cả A, B và C sẽ không
+sinh alert demo nào.
+
+Bằng chứng trên chính manager này: rehearsal thật kết thúc ở **rule 91816,
+level 4**. 91816 là hook đã được chứng minh; 91802 thì chưa.
+
+### Phụ thuộc nội dung script ảnh hưởng controls thế nào
+
+91816 khớp theo nội dung, nên nó **lọc trước** các control chỉ đổi
+`scriptBlockText`. Bốn control `marker-only`, `comment-only`, `unrelated`,
+`missing-text` vì thế phụ thuộc parent, đúng như catalog của kit ghi.
+
+| control | baseline @91816 | baseline @91802 | fixed |
+| --- | --- | --- | --- |
+| original | khớp | khớp | khớp |
+| renamed | không | không | khớp |
+| marker-only | **không** (thiếu `$PID`/`$env:`) | khớp | không |
+| comment-only | khớp | khớp | không |
+| unrelated | **không** | khớp | không |
+| missing-text | **không** | khớp | không |
+| wrong-host/-provider/-channel/-event-id, fragmented, missing-counter | không | không | không |
+
+Điểm cần biết: dưới 91802, `unrelated` — vốn nằm cạnh `wrong-host` như một
+negative control — sẽ **khớp** baseline. Đúng ngữ nghĩa cho rule theo tên file,
+nhưng khác hẳn thứ đã rehearsal, và mọi alert đó là level 5 trong khi
+integration không lọc theo rule. Đây là lý do thứ hai để giữ 91816.
+
+Hệ quả cho việc kiểm chứng: 91801 đòi `if_sid 60000, 60010`, tức rule của
+decoder `windows_eventchannel`, được chọn theo **log location** chứ không theo
+hình dạng field. Nên JSON decoded synthetic đưa qua `wazuh-logtest` **không**
+chạy được chuỗi này trên manager chưa sửa. Muốn kiểm trên manager lab phải
+dùng input định dạng EventChannel native, nguồn rẻ nhất là replay nguyên văn
+dòng raw của bản ghi rehearsal trong `archives.log`. **Không** đổi decoder 60000.
+
+### Backup và rollback
+
+Chưa có thay đổi nào trên manager hay target, nên **chưa cần rollback**.
+
+Khi nạp 118001, quy trình bắt buộc:
+
+1. `mktemp -d` ngoài `etc/rules`, `umask 077`; lưu bản sao 117001 hiện tại và
+   ghi SHA-256 của nó, dù lượt này không sửa 117001
+2. Ghi SHA-256 của file 118001 trước và sau khi copy
+3. Config test và toàn bộ logtest **trước** khi restart; lỗi thì dừng, không restart
+4. Restart có chủ đích, xác nhận service active và agent kết nối lại
+5. Khi chuyển baseline sang fixed cho Run C: chụp và hash bản đang nạp, xác
+   minh đúng baseline đã cài, rồi mới thay đúng file 118001
+6. Rollback: gỡ **đúng** file 118001 sau khi đối chiếu hash, config test,
+   restart có chủ đích. Không phục hồi toàn bộ cấu hình. Không đụng 117001
+7. Trên target: xoá `C:\AEGIS-Lab\SCN001` và khôi phục Execution Policy
+   `CurrentUser` về trạng thái ban đầu (`RemoteSigned` lúc khảo sát)
+
+### Bước đang chạy
+
+Đang chờ chủ dự án chọn phương án xử lý 117001. Agent **không** được sửa hoặc
+gỡ 117001, và **không** tiến hành A/B/C trước khi có lựa chọn đó.
+
+Việc chuẩn bị độc lập được phép làm tiếp: sinh kit trên máy phát triển với
+parent 91816 vào thư mục tạm ngoài repository, đối chiếu regex với giá trị
+decoded đã đo, dựng input EventChannel native cho logtest, và soạn đề xuất
+payload/rule hành vi để chủ dự án review một lần.
+
+Chưa tạo thư mục trên target, chưa copy payload, chưa nạp rule, chưa chạy
+payload, chưa restart service, chưa push/merge, chưa đóng issue.
+
+## 2026-09-17 — Chuẩn bị lab: rule đã cài, logtest không xác minh được chuỗi
+
+### Phiên bản code dùng chạy lab
+
+HEAD `9acaff3` **cộng** các thay đổi chưa commit: `report['demo_run']` ghim
+`rule_id`/`parent_sid`/revision, `compare_demo_runs` từ chối khi `rule_id`
+hoặc `parent_sid` khác nhau giữa hai run, và 4 test kèm theo.
+
+| Phiên bản | Full suite |
+| --- | --- |
+| HEAD `9acaff3` (đã commit) | 2538 passed, 1 skipped |
+| **Working tree dùng chạy lab** | **2542 passed, 1 skipped**, exit 0, 307s |
+
+Không được trình 2538 như kết quả của code mới. Con số của code chạy lab là 2542.
+
+### Quyết định đã chốt
+
+- Phương án **(c)**: giữ nguyên 117001, nạp thêm 118001. Căn cứ: path pattern
+  của 117001 neo cứng vào thư mục cũ nên không thể khớp event của demo mới.
+- Parent **91816**, không phải 91802. Lý do ở mục trước.
+- Không chạy payload cũ từ thư mục cũ trong lúc demo.
+
+### Kit đã sinh
+
+Thư mục tạm ngoài repository. Bindings: host `LAB-ENDPOINT-01`, lab directory
+`C:\AEGIS-Lab\SCN001`, rule 118001, parent 91816, field profile
+`wazuh-eventchannel-4.14.4-lf-v1`.
+
+| Artifact | SHA-256 (32 ký tự đầu) |
+| --- | --- |
+| `lab_update.ps1` | `0226fc3c28de6589d50bc2f7c17a49c5` |
+| `maintenance_check.ps1` | `0226fc3c28de6589d50bc2f7c17a49c5` |
+| `baseline.xml` | `0ddd7bc0b228af94cc1a72f86641ecb9` |
+| `fixed.xml` | `8186e0eef33a71f0c5aba0b3ee6bf1b5` |
+| `kit.json` | `72fae40e9ff96c37de6dd83ee5e122de` |
+
+Hai payload cùng hash, đúng thiết kế: chỉ khác tên file.
+
+### Thay đổi đã thực hiện trên manager
+
+Backup: `/tmp/aegis-rule-backup.REDACTED`, tạo bằng `mktemp -d` với `umask 077`,
+chứa bản sao 117001, danh sách thư mục rules và hash trước khi thay đổi:
+
+```text
+6b5b8615...  117001-aegis-safe-demo.xml
+48b061a2...  local_rules.xml
+```
+
+Đã cài **đúng một file mới**: `/var/ossec/etc/rules/118001-aegis-safe-demo.xml`,
+SHA-256 `0ddd7bc0b228af94cc1a72f86641ecb9...`, khớp `baseline.xml` của kit.
+**117001 không bị đụng**, hash vẫn `6b5b8615...`.
+
+Một lỗi đã tự phát hiện và sửa: file tạo ra ban đầu là `soc:soc 640`, trong khi
+analysisd chạy dưới user `wazuh` nên sẽ **không đọc được**. Đã `chgrp wazuh`,
+mode 640, hash không đổi. 117001 là `root:wazuh 640` nên đây là đúng chính sách.
+
+Kiểm tra trước khi xin restart, vì lần trước manager chết khi khởi động:
+XML well-formed; cấu trúc **giống hệt** 117001 đã rehearsal (cùng level 5,
+`if_sid 91816`, 7 field, cùng kiểu pcre2); không trùng rule ID trong `etc/rules`.
+
+**Rule chưa vào bộ nhớ.** analysisd chỉ nạp khi restart, và restart cần root.
+
+### Logtest KHÔNG xác minh được chuỗi trên manager này
+
+Đã chạy 12 control bằng input **EventChannel native**, lấy nguyên văn envelope
+từ `archives.log` của bản ghi rehearsal rồi thay đúng một trường mỗi ca.
+Kết quả: **cả 12 đều không khớp rule nào**, Phase 3 rỗng, với mọi giá trị `-l`.
+
+Nguyên nhân đã đo, không suy đoán:
+
+| Nguồn | Decoder |
+| --- | --- |
+| Bản ghi 4104 thật trong archives | `windows_eventchannel` (197/200 bản ghi agent AGENT-01) |
+| Cùng payload đó qua `wazuh-logtest` | `json` |
+
+Decoder `json` có `<prematch>^{\s*"</prematch>` trong
+`ruleset/decoders/0006-json_decoders.xml`, nạp rất sớm nên chiếm payload.
+`windows_eventchannel` không phải decoder XML mà là decoder built-in của
+analysisd; logtest không đi qua đường đó. Rule 60000/60010 vì thế không kích
+hoạt, 91801 không kích hoạt, cả chuỗi đứng im.
+
+Đây đúng là lý do lượt clone trước phải đổi decoder 60000 sang `json`. Việc đó
+**bị cấm** trong lượt này, nên không có đường nào để logtest chạy chuỗi thật.
+
+Thêm một đính chính: `wazuh-logtest` là client nối vào analysisd **đang chạy**,
+nên nó dùng ruleset trong bộ nhớ — chưa có 118001. Kể cả khi decoder đúng,
+phép thử đó vẫn chưa nói được gì về 118001 trước khi restart.
+
+**Không control nào được tuyên bố là đạt.** Chúng vẫn chưa được xác minh trên
+manager này. Hai control quan trọng nhất, `original` và `renamed`, sẽ được
+xác minh bởi chính Run A và Run B với telemetry thật.
+
+### Phân biệt parent filtering và điều kiện của rule demo
+
+Hai thứ tách bạch, không được gộp khi đọc kết quả:
+
+- **91816** lọc theo **nội dung script**: chỉ cho qua khi `scriptBlockText`
+  chứa `$PID` hoặc một biến `$env:` trong danh sách. Đây là bộ lọc của ruleset
+  có sẵn, không phải của demo.
+- **118001 baseline** khớp `win.eventdata.path` cộng các guard host, provider,
+  channel, eventID 4104, `messageNumber`/`messageTotal` bằng 1.
+
+**Baseline là rule theo tên file, không phải behavioral detection.** Không được
+mô tả nó là phát hiện theo hành vi trong bất kỳ báo cáo nào.
+
+### Việc cần chủ dự án chạy
+
+`wazuh-analysisd -t` và `wazuh-control` đều `root:root 750`, agent không chạy
+được config test lẫn restart. Config test phải **đạt trước** khi restart.
+
+Rollback nếu config test lỗi: xoá `118001-aegis-safe-demo.xml` rồi restart.
+117001 không đụng tới nên không cần khôi phục.
+
+## 2026-09-17 — ĐIỂM DỪNG: lab đang ở trạng thái đã thay đổi
+
+Chủ dự án yêu cầu tạm dừng tại đây. Mục này là thứ **phải đọc đầu tiên** khi
+quay lại, cùng với `AGENTS.md`. Số liệu bên dưới là ảnh chụp; kiểm trạng thái
+thật trước khi hành động. **Không chạy lại các lượt đã thực hiện.**
+
+### CẢNH BÁO: manager không ở trạng thái ban đầu
+
+Một file rule đã được **cài thêm** và đang nằm trên đĩa:
+
+```text
+/var/ossec/etc/rules/118001-aegis-safe-demo.xml
+sha256 0ddd7bc0b228af94cc1a72f86641ecb9d5711e2e84c25cbf5429aadcf9d190db
+soc:wazuh 640
+```
+
+Rule **chưa vào bộ nhớ** vì manager chưa restart sau khi cài. Nghĩa là hiện tại
+nó chưa có tác dụng gì, nhưng **lần restart kế tiếp, vì bất kỳ lý do gì, sẽ nạp
+nó**. Ai restart manager mà không biết điều này sẽ thấy một rule demo mới xuất
+hiện ngoài dự tính.
+
+Hai lựa chọn khi quay lại:
+
+1. **Tiếp tục demo**: chạy config test rồi restart, xem mục "Việc cần chủ dự án
+   chạy" ở trên.
+2. **Dừng hẳn**: gỡ file rồi restart để trở về nguyên trạng.
+
+```bash
+sudo rm -f /var/ossec/etc/rules/118001-aegis-safe-demo.xml
+sudo /var/ossec/bin/wazuh-analysisd -t && sudo systemctl restart wazuh-manager
+```
+
+Backup còn tại `/tmp/aegis-rule-backup.REDACTED` (thư mục tạm, sẽ mất khi máy
+reboot). Nó chứa bản sao 117001 và hash trước thay đổi. **117001 chưa bao giờ
+bị sửa**, hash vẫn `6b5b8615...`, nên rollback không cần khôi phục nó.
+Hậu tố thật của thư mục backup được redact theo bảng alias; tìm lại bằng
+`ls -d /tmp/aegis-rule-backup.*` trên manager.
+
+### Những gì KHÔNG bị thay đổi
+
+- Rule 117001: nguyên vẹn
+- Decoder 60000 và mọi decoder khác: không đụng
+- `local_rules.xml`: không đụng, hash vẫn `48b061a2...`
+- Cấu hình manager, TLS, firewall, sudoers: không đụng
+- Windows target: **chưa tạo** `C:\AEGIS-Lab\SCN001`, chưa copy payload,
+  chưa chạy payload, chưa đổi Execution Policy (vẫn `RemoteSigned` scope
+  CurrentUser như lúc khảo sát)
+- `scenarios/`: không đụng
+
+Thay đổi duy nhất do chủ dự án thực hiện theo yêu cầu của agent: xoá các PID
+file cũ và restart manager để khôi phục dịch vụ đang failed, và thêm `soc` vào
+nhóm `wazuh` để đọc được log.
+
+### Trạng thái repository tại điểm dừng
+
+- Branch `codex/issue-12-safe-demo`, HEAD `9acaff3`, ahead 15, **chưa push**
+- Ba file **chưa commit**:
+  - `backend/app/demo/evaluate.py` — thêm `report['demo_run']` và ràng buộc
+    `rule_id`/`parent_sid` trong `compare_demo_runs`
+  - `backend/tests/test_scn001_demo_evaluation.py` — 4 test cho phần trên
+  - `docs/ISSUE_12_SAFE_DEMO_CHECKPOINT.md` — các mục ngày 2026-09-17
+- Full suite của working tree: **2542 passed, 1 skipped**, exit 0
+
+Nếu muốn commit phần này, nó thuộc commit 9 (`evaluate.py` + test) và commit 10
+(checkpoint) trong danh sách 10 commit đã duyệt, hoặc một commit riêng nối tiếp.
+
+### A/B/C: chưa chạy lượt nào
+
+Không có Run A, B hay C nào được thực hiện. Không có evidence lab nào của demo,
+không có comparison, không có verdict. Mọi kết quả `Regression Passed` đang có
+trong tài liệu đều là **synthetic**, từ test phần mềm.
+
+### Việc còn lại theo thứ tự
+
+1. Chủ dự án chạy config test và restart manager
+2. Kiểm manager active, agent AGENT-01 kết nối lại, telemetry tới nơi
+3. Tạo `C:\AEGIS-Lab\SCN001`, copy hai payload, đối chiếu SHA-256
+   `0226fc3c28de6589d50bc2f7c17a49c5...` trên endpoint trước khi chạy
+4. Run A với baseline và `lab_update.ps1`
+5. Run B với baseline và `maintenance_check.ps1`
+6. Thay file 118001 sang revision `fixed` (hash `8186e0ee...`), config test,
+   restart có chủ đích, rồi Run C với **đúng** `maintenance_check.ps1`
+7. Thu snapshot theo scope agent + cửa sổ, dựng bundle
+8. Chuẩn bị collection request cho Run B kèm bằng chứng coverage/gaps/sampling/
+   clocks; **chủ dự án ký**, agent không tự ký
+9. `evaluate_demo_run` cho từng run, `compare_demo_runs` cho B→C
+10. Rollback rule và thư mục target, khôi phục Execution Policy
+
+Lấy `command_lines` cho study từ **bản ghi Sysmon 1 thật của Run A**, không đoán:
+runner dùng `ProcessStartInfo` và .NET luôn bọc nháy quanh `FileName`.
+
+### Nhắc lại các giới hạn chưa giải quyết
+
+- Không control nào được xác minh bằng logtest trên manager này
+- `baseline` là rule theo **tên file**, không phải behavioral detection
+- Behavioral rule fix của Run C vẫn là **acceptance criterion chưa đạt**
+- Payload và rule hành vi mới vẫn **chờ chủ dự án review** trước khi thực thi
+- Findings 5, 8, 11, 12 và residual caller-declared binding vẫn mở
+
+## 2026-09-18 — Lab chạy thật: Run A và Run B có kết quả, Run C còn chờ
+
+Hai VM kết nối được bằng key lab. Mục này thay thế phần "ĐIỂM DỪNG" ở trên về
+trạng thái; phần cảnh báo rule vẫn còn hiệu lực nhưng nội dung đã đổi.
+
+### Rule 118001 đã được chứng minh là live
+
+Manager tự restart lúc 07:44:36 (+07) sáng 18-09 sau khi máy khởi động lại, nạp
+file 118001 đã cài tối hôm trước. Không cần ai chạy tay.
+
+Bằng chứng không phải dòng log mà là **telemetry thật**: Run A làm rule nổ.
+Số rule tăng 15889 → 15891 khi thêm một file chứa **một** rule; chênh lệch 2 này
+chưa giải thích được và được ghi lại nguyên trạng, không bịa nguyên nhân. Nó
+không ảnh hưởng tính đúng: 118001 là ID duy nhất, và chỉ 117001/118001 là con
+của 91816.
+
+### Kết quả hai lượt chạy
+
+| Run | Payload | Rule cuối | PID con | Cửa sổ UTC |
+| --- | --- | --- | --- | --- |
+| A | `lab_update.ps1` | **118001** level 5 | 6452 | 00:51:26 – 00:53:26 |
+| B | `maintenance_check.ps1` | **91816** | 4136 | 00:54:25 – 00:56:25 |
+
+Alert Run A: `2026-09-18T00:51:43.205+0000`, agent 012, decoder
+`windows_eventchannel`, `path = C:\\AEGIS-Lab\\SCN001\\lab_update.ps1`.
+
+**Điểm mấu chốt đã tách bạch được:** sự kiện 4104 của Run B *đã qua* 91816 —
+nó là rule cuối cùng khớp. Nên khoảng trống đến từ điều kiện `path` của rule
+demo, **không phải** do parent lọc mất sự kiện. Đây đúng là thứ cần phân biệt.
+
+Baseline vẫn chỉ là rule theo **tên file**. Không gọi là behavioral detection.
+Tiêu chí behavioural của Issue #12 vẫn **chưa đạt**.
+
+### Quy tắc biểu diễn wire được telemetry thật xác nhận
+
+Driver dựng mọi giá trị canonical bằng `wire_text` từ giá trị native, rồi
+**assert** chúng bằng đúng chuỗi Wazuh đã gửi. Assert này pass:
+
+```text
+image       C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe
+commandLine \"C:\\Windows\\...\\powershell.exe\" -NoLogo ... -File \"C:\\AEGIS-Lab\\...\"
+```
+
+Backslash **nhân đôi** trong đường dẫn, nhưng `\"` chỉ **một** backslash.
+Đây là lần đầu quy tắc được kiểm bằng dữ liệu sinh ra từ chính code, chứ không
+phải đọc tay một bản ghi cũ.
+
+`verify_run` **pass cho cả Run A và Run B** với study/target/execution/receipt
+dựng từ giá trị đo thật.
+
+### Receipt rule state là quan sát của agent, không phải chữ ký người vận hành
+
+`confirmed_by = agent-ssh-hash-observation`. Căn cứ: nội dung rule ghi lúc
+`2026-09-17T16:16:18Z` (mtime), hash đọc lại lúc `2026-09-18T00:58:19Z` vẫn là
+baseline với mtime không đổi — hai run nằm trọn giữa hai mốc đó. **Không ký thay
+chủ dự án.** Collection approval vẫn chưa có và vẫn phải do chủ dự án ký.
+
+### Độ trễ nhận đã đo, dùng để chọn cửa sổ thu thập
+
+| Run | sự kiện trong cửa sổ | trễ min | trễ trung vị | trễ max | quá 60 s |
+| --- | --- | --- | --- | --- | --- |
+| A | 1237 | 0,02 s | 1,44 s | 43,61 s | 0 |
+| B | 1454 | 0,02 s | 1,55 s | 21,16 s | 0 |
+
+Cửa sổ nhận dùng `[win_start, win_end + 300 s]`, gấp ~7 lần độ trễ xấu nhất.
+Con số này đo được, không phỏng đoán.
+
+### CHẶN: adapter snapshot không nạp được `archives.json` thật
+
+`evaluate_demo_run` **chưa chạy được**. Nguyên nhân là khiếm khuyết của công cụ,
+do bằng chứng thật phát hiện:
+
+`docs/WAZUH_MANAGER_SNAPSHOT.md` dòng 96 khai source record ID phải duy nhất
+trong cùng manager, và dòng 103 nói kiểm tra đó áp **cả cho bản ghi bị loại**.
+`manager_snapshot.py:132` raise `duplicate_record` khi `(manager.name, id)` lặp.
+
+Nhưng `archives.json` của Wazuh 4.14.4 **không** cấp `id` cho từng bản ghi — nó
+cấp theo lô ghi. Bằng chứng:
+
+```text
+archive id 1789692979.3612073  ->  30 bản ghi in-scope
+   eventRecordID 7352  eventID 1  systemTime ...00:56:07.6741875Z  processId 4896
+   eventRecordID 7353  eventID 1  systemTime ...00:56:07.6821617Z  processId 6180
+   eventRecordID 7356  eventID 1  systemTime ...00:56:08.0083484Z  processId 1236
+   distinct eventRecordID trong nhóm: 30
+```
+
+Ba mươi sự kiện khác nhau, không phải bản gửi lại. Thu hẹp scope xuống đúng hai
+loại sự kiện profile cần vẫn còn 128 (Run A) và 80 (Run B) va chạm id.
+
+Không có dòng nào trùng byte. Có bản gửi lại thật (A: 4296 dòng / 3871 sự kiện;
+B: 2800 / 1950) nhưng **các bản lặp không bao giờ khác nội dung**, và các bản ghi
+quyết định đều duy nhất: mỗi run đúng một Sysmon 1 cho PID con và một 4104 của
+payload.
+
+Cách duy nhất để qua được check hiện tại là **xoá bản ghi thật** hoặc **bỏ field
+`id`** khỏi bằng chứng. Cả hai đều là sửa bằng chứng để ép pass, nên không làm.
+Trạng thái đúng lúc này là **Inconclusive vì công cụ**, không phải vì detection.
+
+### Ba lựa chọn cho khiếm khuyết adapter
+
+| | Hướng | Đánh đổi |
+| --- | --- | --- |
+| (a) | Sửa identity: khi có `win.system.eventRecordID`, khoá trùng lặp theo (agent, provider, channel, eventRecordID) thay vì `id`; giữ nguyên dedup theo body hash | Sửa một contract đã ghi tài liệu, cần test mới và cần chủ dự án duyệt |
+| (b) | Khai một bước chuẩn hoá: bỏ `id` do manager cấp trước khi đóng gói | Đổi bytes bằng chứng và đổi document hash; phải khai rõ |
+| (c) | Giữ Inconclusive, bàn giao bằng chứng thô | Không có verdict A/B/C, không có comparison |
+
+Khuyến nghị **(a)**: nó sửa đúng khiếm khuyết thay vì né. Chưa làm gì cho tới
+khi chủ dự án chọn.
+
+### Trạng thái manager và target lúc ghi mục này
+
+- `118001-aegis-safe-demo.xml` trên đĩa = **`8186e0ee...`** (revision `fixed`),
+  soc:wazuh 640, XML hợp lệ, đúng một rule, điều kiện `scriptBlockText`
+- **Chưa live**: analysisd vẫn là tiến trình 07:44:36, còn file sửa lúc 07:59:11
+- 117001 vẫn `6b5b8615...`, `local_rules.xml` vẫn `48b061a2...`
+- Backup: `$HOME/aegis-rule-backup.REDACTED` trên manager (đặt trong home, không
+  phải `/tmp`, để sống qua reboot); tìm bằng `ls -d ~/aegis-rule-backup.*`
+- Target: `C:\AEGIS-Lab\SCN001` (6 file kit, hash khớp tuyệt đối) và
+  `C:\AEGIS-Lab\runs` (preflight + A + B). Execution Policy **không đổi**
+  (đã là RemoteSigned từ trước)
+
+### Việc còn lại
+
+1. Chủ dự án chạy `sudo /var/ossec/bin/wazuh-analysisd -t && sudo systemctl
+   restart wazuh-manager` để `fixed` thành live
+2. Run C với `maintenance_check.ps1`; kỳ vọng 118001 nổ nhờ khớp nội dung script
+3. Chọn hướng xử lý khiếm khuyết adapter
+4. Chuẩn bị collection request cho Run B kèm bằng chứng coverage/gaps/sampling/
+   clocks; **chủ dự án ký**
+5. `evaluate_demo_run` ba lượt, `compare_demo_runs` B→C
+6. Rollback: gỡ 118001, xoá `C:\AEGIS-Lab`, khôi phục hash gốc
+
+### Nhắc lại giới hạn chưa giải quyết
+
+- Không control nào xác minh được bằng `wazuh-logtest` trên manager này
+- Run binding vẫn là caller-declared
+- Findings 5, 8, 11, 12 vẫn mở
+- Chênh lệch 2 rule khi nạp chưa giải thích được
+
+## 2026-09-18 — A/B/C chạy đủ, engine cho verdict, còn một chặn ở run binding
+
+### Chuỗi Gap → Fix → Re-test đã diễn ra trên telemetry thật
+
+| Run | Payload | Rule đang nạp | Rule cuối | PID con |
+| --- | --- | --- | --- | --- |
+| A | `lab_update.ps1` | baseline | **118001** | 6452 |
+| B | `maintenance_check.ps1` | baseline | 91816 | 4136 |
+| C | `maintenance_check.ps1` | **fixed** | **118001** | 5268 |
+
+Alert Run C: `2026-09-18T01:25:29.022+0000`, mô tả *decoded script
+representation matched* — đúng revision `fixed`. Cùng một payload với Run B,
+chỉ khác rule đang nạp.
+
+Manager được restart có chủ đích lúc 08:10:33 (+07); analysisd PID 10581, rule
+count 15891 không đổi (cùng số rule, khác nội dung). Hash rule quan sát có dấu
+thời gian trước Run C (`01:25:15Z`) và sau (`01:27:38Z`), đều là `8186e0ee...`.
+117001 vẫn `6b5b8615...` suốt toàn bộ lab.
+
+### Verdict của engine trên bằng chứng thật
+
+| Run | final_status | A01 | A02 | A03 |
+| --- | --- | --- | --- | --- |
+| A | **Detected** | satisfied | satisfied | satisfied |
+| B | **Inconclusive** | satisfied | satisfied | inconclusive |
+| C | **Detected** | satisfied | satisfied | satisfied |
+
+Run B là `Inconclusive`, **không phải** False negative. Đây là hành vi đúng:
+telemetry có mặt (A01, A02 satisfied) nhưng thiếu alert chỉ trở thành false
+negative khi có khai báo thu thập đầy đủ do người vận hành ký. **Agent không
+ký thay.** Chưa có approval nào.
+
+Mọi fingerprint (profile, scenario, context, inputs) và `run_id` đều khớp.
+`verify_run` pass cả ba run.
+
+### Đã sửa: adapter coi archive id là khoá duy nhất
+
+Chủ dự án duyệt hướng (a). `_event_identity` mới lấy danh tính từ chính sự
+kiện Windows: `(manager, agent, providerName, channel, eventRecordID)`, và chỉ
+lùi về archive id khi bản ghi không mang sự kiện Windows nào. Nó **không** tự
+phán xét metadata hỏng — `classify` chạy ngay sau và giữ nguyên chẩn đoán cũ.
+
+Diff thuần bổ sung, 94 dòng thêm, 0 xoá. Full suite: **2546 passed, 1 skipped**
+(trước là 2542; +4 test mới).
+
+**Ba fixture test phải đổi, cần chủ dự án tự đánh giá:** `test_101_selected_records...`,
+`test_limit_of_100_selected_documents...` và
+`test_unrelated_definite_nonmatch_not_a_launch_conflict` trước đây tạo nhiều
+bản ghi chỉ khác `id`. Theo ngữ nghĩa đúng thì đó là **cùng một sự kiện lặp
+lại**, nên chúng được cho thêm `eventRecordID` riêng. Ý định của từng test
+(giới hạn số document; một launch khác không phải xung đột) giữ nguyên. Đây
+không phải sửa test để che lỗi, nhưng chủ dự án nên tự xác nhận.
+
+### CHẶN: run binding báo `multiple_candidates` cho cả ba run
+
+`evaluate_demo_run` từ chối khi binding `conflict`, nên chưa có report hoàn
+chỉnh và chưa có comparison B→C. Cả ba run đều:
+
+```text
+conflict ['missing_binding_metadata', 'multiple_candidates', 'native_review_missing']
+```
+
+Nguyên nhân đo được, giống hệt ở cả ba cửa sổ. Mỗi cửa sổ có đúng 4 bản ghi
+4104:
+
+| # | processID | path | rule |
+| --- | --- | --- | --- |
+| 1 | runner | `Invoke-SafeDemo.ps1` | — |
+| 2 | **child** | **payload** | 118001 / 91816 / 118001 |
+| 3 | **child** | **không có field `path`** | — |
+| 4 | runner | `Invoke-SafeDemo.ps1` | — |
+
+Bản ghi 3 là script block PowerShell phát ra từ chính tiến trình con nhưng
+không đến từ một file, nên không có `path`. `_candidates` giữ lại mọi doc có
+`truth` khác FALSE, nên bản ghi này vào nhóm và `len(group) > 1` thành
+`multiple_candidates`.
+
+Nhưng nó mang đúng `processID` của child — tức là **telemetry thêm của chính
+tiến trình đang được bind**, không phải một ứng viên cạnh tranh. Đã kiểm:
+mỗi cửa sổ chỉ có **đúng một** launch powershell.exe khớp command line đã duyệt,
+và mọi bản ghi Sysmon 1 đều đủ `image` lẫn `commandLine`.
+
+Đây là **finding thứ hai**, khác với finding adapter. Chưa sửa gì: đổi tiêu
+chí ứng viên là đổi thêm một contract, và chủ dự án mới duyệt đúng một thay
+đổi. Cần quyết định trước khi đi tiếp.
+
+### Scope thu thập đã khai
+
+Bundle dùng: agent 012, **Sysmon eventID 1 và PowerShell eventID 4104**, cửa sổ
+nhận `[win_start, win_end + 300 s]`, lọc theo `systemTime` về đúng cửa sổ run.
+
+| Run | bản ghi | danh tính sự kiện riêng | bản gửi lại |
+| --- | --- | --- | --- |
+| A | 196 | 196 | 0 |
+| B | 118 | 118 | 0 |
+| C | 26 | 26 | 0 |
+
+Thu hẹp theo **loại sự kiện**, không theo PID hay theo nội dung — không chọn lọc
+bằng chứng theo kết quả mong muốn. Phải nêu rõ trong collection declaration.
+
+Trên tập rộng hơn (mọi loại sự kiện) có bản gửi lại thật: A 4296 dòng cho
+3871 sự kiện, B 2800 cho 1950. Các bản lặp **không bao giờ khác nội dung**.
+Đây là quan sát về chất lượng thu thập, cần đưa vào declaration.
+
+### Việc còn lại
+
+1. Quyết định về finding run binding
+2. Chuẩn bị collection request cho Run B kèm bằng chứng; **chủ dự án ký**
+3. `evaluate_demo_run` ba lượt và `compare_demo_runs` B→C
+4. Commit (hiện có 5 file chưa commit)
+5. Rollback lab: gỡ 118001, xoá `C:\AEGIS-Lab`
+
+Execution Policy **không bị đổi** trong toàn bộ lab (đã là RemoteSigned sẵn),
+nên rollback không cần khôi phục nó.
+
+## 2026-09-18 — Pipeline chạy thông đầu cuối trên bằng chứng lab
+
+### Kết quả cuối
+
+| Run | final_status | A01 | A02 | A03 | run_binding |
+| --- | --- | --- | --- | --- | --- |
+| A | **Detected** | satisfied | satisfied | satisfied | unknown |
+| B | **Inconclusive** | satisfied | satisfied | inconclusive | unknown |
+| C | **Detected** | satisfied | satisfied | satisfied | unknown |
+
+`run_binding` là `unknown` với lý do
+`['missing_binding_metadata', 'native_review_missing']` — không phải
+`caller_reviewed`, vì không có native review nào được cung cấp. Đúng thiết kế.
+
+### Comparison B → C: **Inconclusive**
+
+| Chỉ số | Giá trị |
+| --- | --- |
+| status | **Inconclusive** |
+| unchanged_pass | 2 (A01, A02) |
+| became_evaluable | 1 (A03) |
+| regression / improvement | 0 / 0 |
+
+**Không phải `Regression Passed`.** A03 chuyển từ `inconclusive` sang
+`satisfied`, nên engine gọi là `became_evaluable`, không phải `improvement`.
+Lý do: thiếu khai báo thu thập cho Run B nên việc vắng alert chưa được xác lập
+là false negative. Đây là kết quả đúng theo quy định: chưa đủ assurance thì
+giữ Inconclusive.
+
+Thiếu **đúng một** thứ để đi tiếp: chữ ký của chủ dự án trên collection
+approval cho Run B. **Agent không ký.**
+
+### Collection request cho Run B đã sẵn sàng review
+
+```text
+request sha256 : 34f59e688a3ec51026caf0bdcaf81400d1fa6c9450107a3b8a470d92e7d41561
+run_id         : scn001-b-20260918T0054Z
+coverage       : 2026-09-18T00:54:25.7529830Z .. 2026-09-18T00:56:25.7529830Z
+bundle_sha256  : ec8ca66da705e3391b0ec16521dddd1f0d97a869eb253ba5ffa350c9f58e79b4
+```
+
+Bằng chứng đo được để chủ dự án cân nhắc từng điều khoản:
+
+| Điều khoản | Bằng chứng |
+| --- | --- |
+| coverage | 118 bản ghi, 118 danh tính sự kiện riêng, 0 bản gửi lại |
+| clocks | trễ nhận min 0,02 s / trung vị 1,55 s / max 21,16 s; 0 sự kiện quá 60 s |
+| sampling/truncation | cửa sổ nhận rộng hơn cửa sổ run 300 s, gấp ~14 lần trễ xáu nhất |
+| parse errors | 0 dòng không parse được trong toàn bộ trích xuất |
+| scope | agent 012; Sysmon eventID 1 và PowerShell eventID 4104 — **không phải** mọi loại sự kiện |
+
+Giới hạn phải cân nhắc trước khi ký: scope **đã thu hẹp theo loại sự kiện**.
+Nó phủ đủ những gì profile kiểm (A01 cần Sysmon 1, A02/A03 cần 4104, và A03
+đọc `rule_id` từ chính bản ghi 4104), nhưng không phải toàn bộ những gì agent
+gửi. Trên tập rộng hơn có bản gửi lại thật (nội dung không đổi).
+
+### Finding run binding: đã sửa, chặt hơn mức đã duyệt
+
+Chủ dự án duyệt: doc cùng `child_pid` không phải ứng viên cạnh tranh. Khi
+cài đặt, test có sẵn cho thấy cách diễn đạt đó nới lỏng cả bản ghi
+process-create: hai sự kiện tạo tiến trình cho cùng một PID **thật sự** là mơ
+hồ về launch. Nên bản sửa được thu hẹp:
+
+- `wazuh-sysmon1-v1`: **giữ nguyên** — nhiều hơn một doc vẫn là conflict
+- `wazuh-powershell4104-v1`: chỉ conflict khi có doc mang PID khác `child_pid`
+
+Căn cứ: sự kiện process-create định danh **một** launch; script block thì
+không — một tiến trình phát ra nhiều cái. Đây là thay đổi **bảo thủ hơn**
+phương án đã duyệt, không rộng hơn.
+
+Một test có sẵn phải thu hẹp parametrize từ `[0, 1]` xuống `[0]`:
+`test_multiple_candidates_conflict_without_selecting_favorable_record`. Nhánh
+4104 (index 1) được thay bằng hai test mới nêu rõ cả hai chiều. Chủ dự án nên
+tự xác nhận điểm này.
+
+### Kiểm chứng phiên bản code dùng cho kết quả trên
+
+| | |
+| --- | --- |
+| Full suite | **2547 passed, 1 skipped** |
+| pip check | No broken requirements found |
+| HEAD đã commit | `9acaff3` (2538 passed) |
+
+Sáu file chưa commit: `evaluate.py`, `manager_snapshot.py`, `run_binding.py` và
+ba file test, cộng checkpoint. **Không được** trình 2538 hoặc 2542 như kết quả
+của code đã chạy lab này.
+
+### Trạng thái lab được giữ nguyên theo yêu cầu
+
+Rule 118001 revision `fixed` vẫn nạp, `C:\AEGIS-Lab` vẫn còn trên target.
+Chưa rollback. Cách gỡ đã ghi ở mục trước.
+
+## 2026-09-18 — Verdict kèm evidence ID, và chứng minh không dùng event của runner
+
+### Cách truy vết
+
+Mỗi `evidence_id` trong assertion được giải qua `evaluation.evidence_index` ra
+`raw_event_ref` dạng `<source-label>-line-N`, rồi lấy đúng dòng vật lý thứ N
+trong file snapshot tương ứng. So `raw_event_hash` với
+`sha256(b'{"_source":' + line + b'}')`. **Mọi hash đều khớp.**
+
+Lần chạy đầu tiên của bộ truy vết dùng sai khoá (`evidence_refs` thay vì
+`evidence_ids`) nên kiểm **0** bản ghi mà vẫn in ra "không có vấn đề". Đó là
+một pass rỗng, đã phát hiện và sửa; số liệu dưới đây là của lần chạy đúng.
+
+### Run A — `Detected`  (child 6452, runner 2948)
+
+| Assertion | Outcome | Evidence |
+| --- | --- | --- |
+| A01 | satisfied | `fe988a16…` Sysmon 1 recID 7196, pid 6452, parent 2948 |
+| A02 | satisfied | `4445df80…` 4104 recID 8657 rule **118001**; `943fd900…` 4104 recID 8661 (không path) |
+| A03 | satisfied | 3 evidence, **1 witness pair**: target `4445df80…` với anchor `fe988a16…` |
+
+### Run B — `Inconclusive`  (child 4136, runner 5856)
+
+| Assertion | Outcome | Evidence |
+| --- | --- | --- |
+| A01 | satisfied | `6456ee9e…` Sysmon 1 recID 7312, pid 4136, parent 5856 |
+| A02 | satisfied | `3fe9e24e…` 4104 recID 9456 rule **91816**; `9557cfca…` 4104 recID 9460 (không path) |
+| A03 | inconclusive | 2 evidence, **0 witness pair** |
+
+Điểm đáng chú ý: bản ghi của Run B mang rule 91816 (recID 9456, path
+`maintenance_check.ps1`) **không** nằm trong evidence của A03, vì A03 yêu cầu
+`rule_id == 118001`. Đúng như mong đợi — không có witness pair nào.
+
+### Run C — `Detected`  (child 5268, runner 6996)
+
+| Assertion | Outcome | Evidence |
+| --- | --- | --- |
+| A01 | satisfied | `ff4b207d…` Sysmon 1 recID 7648, pid 5268, parent 6996 |
+| A02 | satisfied | `676c0459…` 4104 recID 10268 rule **118001**; `2202d92d…` 4104 recID 10272 (không path) |
+| A03 | satisfied | 3 evidence, **1 witness pair**: target `676c0459…` với anchor `ff4b207d…` |
+
+### Phân biệt event của runner với của payload
+
+Năm tiêu chí, kiểm bằng chương trình trên toàn bộ evidence của cả ba run:
+
+| Tiêu chí | Kết quả |
+| --- | --- |
+| PID | mọi evidence mang PID **child** (6452 / 4136 / 5268); không bản ghi nào mang PID runner (2948 / 5856 / 6996) |
+| Chuỗi cha-con | mọi bản ghi Sysmon 1 có `parentProcessId` đúng bằng `runner_pid` của run đó |
+| Host | `computer` và `agent` đồng nhất trên mọi evidence |
+| Thời gian | mọi `systemTime` nằm trong cửa sổ run tương ứng |
+| Nội dung | **không** evidence nào trỏ `Invoke-SafeDemo.ps1` |
+
+Script của runner có sinh 4104 thật (hai bản mỗi cửa sổ, mang PID runner),
+nhưng chúng bị loại ở bước đánh giá điều kiện, không phải do ai lọc tay.
+
+### Nhắc lại điều không được làm mờ
+
+Revision `fixed` khớp **toàn văn nội dung script**. Đó là *reviewed
+script-content matching*, **không phải** behavioral detection. Acceptance
+criterion về behavioral rule fix của Issue #12 **vẫn chưa đạt**. Một payload
+cùng hành vi nhưng khác từng ký tự sẽ lọt qua `fixed` y hệt như đổi tên file
+lọt qua `baseline`.
+
+Chưa push, chưa merge, chưa đóng issue. Chưa có collection approval.
+
+## 2026-09-18 — ĐÍNH CHÍNH: bản sửa run_binding là sai, đã gỡ
+
+Reviewer độc lập tìm ra lỗi trong chính thay đổi tôi đã làm. Tôi tự tái lập và
+xác nhận. **Đã gỡ `backend/app/demo/run_binding.py` về HEAD** cùng hai test viết
+cho hành vi đó, và khôi phục `parametrize` về `[0, 1]`.
+
+### Lỗi là gì
+
+Guard có sẵn tại `run_binding.py:180` chỉ chạy `_native_matches` khi
+`len(selected) == 2`. Bản sửa của tôi cho document thứ ba vào `selected`, nên
+cross-check native **bị bỏ qua hoàn toàn** và không ghi lại lý do nào. Trước
+thay đổi, trạng thái này luôn kết thúc ở `conflict` nên việc bỏ qua còn thấy
+được; sau thay đổi nó ra `caller_reviewed` với `reasons: []`.
+
+Tái lập đo được, cùng một bundle, khác mỗi phiên bản code:
+
+| Receipt | HEAD | Code có bản sửa của tôi |
+| --- | --- | --- |
+| đúng đắn | `conflict [multiple_candidates]` | `caller_reviewed []` |
+| **sai trắng trợn** (sai host, sai record id, sai PID) | `conflict [multiple_candidates]` | `caller_reviewed []` |
+
+Một receipt sai hoàn toàn vẫn được chấp nhận ở trạng thái mạnh nhất. Đây là
+mất một thuộc tính an toàn thật, đúng kiểu "nới contract để ép pass" mà quy
+định dự án cấm. Không phải sửa lỗi.
+
+Reviewer cũng đúng ở điểm thứ hai: case `index=1` mà tôi cắt khỏi
+`parametrize` chính là case bắt được lỗi này. Cắt nó là xóa độ phủ, không
+phải diễn đạt lại.
+
+### Hệ quả: cái gì còn đứng, cái gì bỏ
+
+Đã chạy lại toàn bộ bằng code **đã gỡ** để biết điều gì không phụ thuộc vào
+bản sửa hỏng:
+
+| Kết luận | Trạng thái |
+| --- | --- |
+| A `Detected`, B `Inconclusive`, C `Detected` | **còn đứng** — tất cả từ `evaluate_bundle`, không dính run_binding |
+| Evidence ID, witness pair, hash | **còn đứng** — tái sinh giống hệt |
+| Phân biệt runner / payload | **còn đứng** — 0 evidence mang PID runner |
+| **Comparison B→C `Inconclusive`** | **Bỏ** — cần `evaluate_demo_run`, mà hàm này từ chối khi binding `conflict`. Không tái lập được bằng code sạch |
+| `report-{A,B,C}.json` (bản cũ) | **Bỏ** — sinh ra bởi code hỏng. Dùng `report-*.engine.json` |
+
+### ĐÍNH CHÍNH quan trọng hơn: vì sao Run B `Inconclusive`
+
+Tôi đã báo sai. Tôi nói "thiếu đúng một thứ: chữ ký trên collection
+approval". **Sai.**
+
+Run B, A03 trả `reason_code = insufficient_fields`, phát ra tại
+`backend/app/validation/engine.py:83`. Nhánh đó `return` **trước**
+`collection_not_confirmed` (:92) và trước `false_negative` (:95).
+
+Nghĩa là: **một collection approval hợp lệ sẽ KHÔNG lật B thành False
+negative**, và compare B→C sẽ không thành `Regression Passed`. Chặn thật là
+bản ghi 4104 không có `path` (`9557cfca…`, recID 9460) làm tập `unknown`
+không rỗng.
+
+Nếu chủ dự án đã ký approval dựa trên câu tôi nói thì đó là ký cho một điều
+không đạt được mục đích. Collection request `34f59e68…` vẫn còn đó, nhưng
+**ký nó lúc này không đổi được gì.**
+
+### Vấn đề tiềm ẩn còn lại ở HEAD, chưa sửa
+
+Guard `len(selected) == 2` bỏ qua cross-check native mà không ghi lý do —
+điều này **tồn tại sẵn ở HEAD**, chỉ bị `conflict` che mất. Bất kỳ bản sửa
+nào cho phép quá hai document đều phải xử lý guard này trước. Đây là quyết
+định thiết kế, **không tự động sửa**.
+
+### Kiểm chứng sau khi gỡ
+
+Full suite **2546 passed, 1 skipped**. Chỉ còn bản sửa adapter
+(`manager_snapshot.py` + fixture) đứng ngoài HEAD, cộng `evaluate.py` từ phiên
+trước và checkpoint này. Reviewer đánh giá bản sửa adapter là sửa lỗi thật,
+nhưng còn nêu vài điểm mức medium chưa xử lý.
+
+### Reviewer finding chưa xử lý, cần chủ dự án quyết
+
+- Tài liệu phát biểu quy tắc wire cho "mọi chuỗi eventdata", nhưng
+  `scriptBlockText` trong chính dữ liệu lab phủ định điều đó
+- `&` được giao thành `&amp;` trong eventdata — một lớp biểu diễn chưa được
+  mô hình hoá
+- Câu "chưa đo giá trị non-ASCII nào" không chính xác
+- Cửa sổ evidence của Run C chỉ vượt 16,3 s so với cửa sổ run, thấp hơn độ
+  trễ nhận tệ nhất đo được
+- Snapshot khai báo của Run A có chứa cả event của Run B (rộng hơn scope đã
+  khai)
+
+Quy tắc rút ra cho chính tôi: khi một test có sẵn cản đường, mặc định là
+**test đúng và tôi sai**, cho đến khi chứng minh được ngược lại bằng thực
+nghiệm. Lần này tôi đã thu hẹp `parametrize` thay vì dừng lại và hỏi.
+
+## 2026-09-18 — Trạng thái chính xác, hai blocker
+
+### Phát biểu đúng về tình trạng
+
+**Không được nói "Gap → Fix → Re-test đã được chứng minh".** Phát biểu đúng:
+
+- Run A và Run C có detection, xác lập qua `evaluate_demo_run`
+- Run B `Inconclusive` với `reason_code = insufficient_fields`
+- Comparison B→C đã chạy qua `compare_demo_runs`: **`Inconclusive`**,
+  A01/A02 `unchanged_pass`, A03 `became_evaluable`
+- **Chưa xin chủ dự án ký collection approval.** Ký lúc này không đổi được gì
+  vì `insufficient_fields` return trước nhánh khai báo
+
+### Blocker 1 — ĐÃ SỬA: binding theo vai trò, không theo số lượng
+
+Hàm mới `_roles(selected, final)` gán vai trò cho từng document:
+
+| Parser | `bound` (receipt mô tả) | `companion` |
+| --- | --- | --- |
+| `wazuh-sysmon1-v1` | event tạo tiến trình, chỉ được một | không có |
+| `wazuh-powershell4104-v1` | script block **có** `file_path` | script block **không** `file_path` **và** mang đúng `child_pid` |
+
+Mọi document trong nhóm phải thuộc một trong hai vai trò, nếu không thì vai
+trò coi như không xác định được và **fail closed** bằng `multiple_candidates`.
+Hai bản ghi cùng nhận path payload, hai event tạo tiến trình, hay một block
+không path mang PID khác — đều fail closed.
+
+Cross-check native chạy trên `bound`, **không dùng `len(selected)` để bỏ qua**.
+Khi vai trò không xác định được, thêm lý do `native_comparison_unavailable`
+thay vì im lặng.
+
+Bằng chứng bypass đã đóng, cùng một bundle qua ba phiên bản code:
+
+| Receipt | HEAD | Bản sửa hỏng (đã gỡ) | Bản sửa hiện tại |
+| --- | --- | --- | --- |
+| đúng đắn | `conflict` | `caller_reviewed []` | `conflict [multiple_candidates, native_comparison_unavailable]` |
+| sai trắng trợn | `conflict` | `caller_reviewed []` | `conflict [multiple_candidates, native_comparison_unavailable]` |
+
+Giữ nguyên `parametrize [0, 1]` cũ. Thêm bốn test, trong đó có regression
+receipt sai khi có companion: `native_metadata_mismatch` vẫn nổ.
+
+Full suite: **2550 passed, 1 skipped**. `pip check` sạch.
+
+### Blocker 2 — ĐIỀU TRA XONG, ĐỀ XUẤT CHỜ REVIEW (chưa làm gì)
+
+Truy vết `recID 9460` về bằng chứng thô
+(`B-part1.jsonl` dòng 14, qua `evidence_index`):
+
+| Thuộc tính | Giá trị |
+| --- | --- |
+| Event | PowerShell 4104, channel `Microsoft-Windows-PowerShell/Operational` |
+| Nguồn | agent 012, decoder `windows_eventchannel`, location `EventChannel` |
+| `processID` | 4136 — **tiến trình con của Run B**, không phải runner |
+| `scriptBlockText` | `$global:?` |
+| `scriptBlockId` | `862ca886…`, khác block của payload |
+| `path` | **không có field** |
+| `rule` | **không có block** |
+| `systemTime` | `00:54:36.1655235Z`, sau block payload ~59 ms |
+
+**Vai trò**: PowerShell runtime phát script block cho một biểu thức nội tại
+bên trong tiến trình payload. Thuộc payload process, nhưng **không phải** nội
+dung file payload và **không phải** của runner. Bản ghi tương ứng có trong cả
+Run A (recID 8661) và Run C (recID 10272).
+
+**Predicate cần `path`**: `{field: file_path, op: in, values: canonical_paths}`,
+dùng bởi cả A02 lẫn A03. `file_path` ánh xạ từ `win.eventdata.path`; thiếu
+field nên thành `None`, và `predicates.py:48` trả `UNKNOWN`.
+
+**Vì sao nằm trong scope**: scope của A02/A03 là hostname, asset_id và
+`event_provider == Microsoft-Windows-PowerShell`. Bản ghi thoả cả ba. Scope
+không nhắc tới `path`.
+
+**Vì sao chặn B mà không chặn A/C**: engine trả `satisfied` ở nhánh witness
+**trước** nhánh `if unknown:`. A và C có witness nên bản ghi này chỉ được
+liệt vào `unevaluable_evidence_ids`. B không có witness nên `unknown` không
+rỗng, thành `insufficient_fields` tại `engine.py:83`, trước
+`collection_not_confirmed` (:92) và `false_negative` (:95).
+
+#### Đề xuất (chưa áp dụng)
+
+Thêm một điều kiện vào match của A03 tại `backend/app/demo/study.py:51`:
+
+```text
+match=[path, {'field': 'rule_id', 'op': 'exists'},
+       {'field': 'rule_id', 'op': 'eq', 'value': str(target.rule_id)}]
+```
+
+Căn cứ đo được:
+
+- `all_of` là Kleene: `[UNKNOWN, FALSE]` cho ra `FALSE` (đã chạy kiểm)
+- `exists` là op hợp lệ, không operand; `exists` + `eq` cùng field validate
+  được ở cả `AssertionRule` lẫn `EvaluationProfile` (đã chạy kiểm)
+- recID 9460 không có rule block nên `rule_id` là None, `exists` thành FALSE,
+  toàn bộ match FALSE, bị loại khỏi candidate, `unknown` của A03 rỗng, engine
+  đi tiếp tới `collection_not_confirmed`
+- A và C không đổi: bản ghi payload mang rule 118001 nên cả hai điều kiện TRUE
+- Bản ghi payload của B mang rule 91816: `exists` TRUE, `eq` FALSE, đúng là
+  không phải witness
+
+**Cảnh báo phải cân nhắc**: thay đổi này biến một *unknown* thành một
+*phủ định dứt khoát*. Nó chỉ đúng nếu "không có rule block trong bản ghi
+archive" thực sự có nghĩa "không rule nào nổ". Nếu một đường thu thập nào đó
+lược bỏ rule block khỏi bản ghi đã alert, một detection thật sẽ thành
+non-match mà không ai biết. Phân bố đo được trong lab: A 18 có / 178 không,
+B 8 / 110, C 8 / 18 — nhất quán với giả thiết, nhưng **đây là quan sát trên
+lab này, không phải chứng minh ngữ nghĩa của Wazuh.**
+
+**Chi phí**: `verify_study` (study.py:78-83) dựng lại profile kỳ vọng bằng
+`_profile_rules(target)` và bắt profile nộp vào phải bằng đúng. Đổi điều kiện
+là đổi code sản phẩm, kéo theo đổi `pins.profile`, đổi study sha, và mọi rule
+receipt pin theo study sha đều phải dựng lại. Bằng chứng thô A/B/C không đổi
+nên **không cần chạy lab mới**, nhưng việc bộ run có còn tương thích hay không
+là quyết định của chủ dự án.
+
+**Phương án giữ nguyên**: B ở `insufficient_fields` vĩnh viễn, không
+approval nào đổi được, và comparison B→C không bao giờ vượt
+`became_evaluable`.
+
+### Bốn high finding và trạng thái xác minh
+
+| # | Finding | Xác minh | Xử lý |
+| --- | --- | --- | --- |
+| 1 | run_binding exemption vô hiệu hoá cross-check native, ra `caller_reviewed []` trên receipt sai | **Tôi tự tái lập**, đối chiếu HEAD | Đã gỡ, rồi sửa đúng bằng `_roles` |
+| 2 | `parametrize` bị cắt xoá đúng case bắt được lỗi #1 | **Tôi tự xác nhận** | Đã khôi phục `[0, 1]` |
+| 3 | Exemption rộng hơn lý lẽ của chính nó; `multiple_candidates` thành code chết trên nhánh 4104 | **Tôi tự xác nhận** | Không còn áp dụng; thay bằng gán vai trò fail closed |
+| 4 | Checkpoint nói sai lý do B `Inconclusive` và nói chỉ thiếu chữ ký | **Tôi tự xác nhận** tại `engine.py:83` | Đã đính chính |
+
+Lưu ý về chính bản review: 17 agent chết vì session limit, đúng các verifier
+của hai chiều `code-changes` và `verdict-honesty`. Bốn finding trên **chưa ai
+phản biện**; tôi tự kiểm từng cái bằng thực nghiệm.
+
+### Medium finding CHƯA KIỂM
+
+Chưa ai phản biện, cũng chưa tôi xác minh:
+
+- Tài liệu phát biểu quy tắc wire cho "mọi chuỗi eventdata"; `scriptBlockText`
+  trong chính dữ liệu lab được cho là phủ định điều đó
+- `&` được giao thành `&amp;` trong eventdata; kit generator không mô hình hoá
+- Câu "chưa đo giá trị non-ASCII nào" được cho là không chính xác
+- Cửa sổ evidence Run C chỉ vượt 16,3 s so với cửa sổ run, thấp hơn độ trễ
+  nhận tệ nhất đo được
+- Snapshot khai báo của Run A chứa cả event của Run B
+- Khẳng định "genuine resends" trong vật liệu collection approval được cho là
+  sai: các dòng thêm là bản ghi SCA khác nhau
+- `CR/LF` bị làm phẳng thành space được ghi là chưa đo, nhưng rule `fixed`
+  và kit generator đều phụ thuộc vào đó
+- Adapter: khoá identity mới có thể đếm trùng khi một bản thiếu
+  `eventRecordID`; tài liệu contract chưa cập nhật
+
+### Trạng thái lab, quan sát `2026-09-18T02:58:15Z`
+
+| Mục | Giá trị |
+| --- | --- |
+| 118001 | `8186e0ee…` (revision `fixed`), mtime 07:59:11 (+07) |
+| 117001 | `6b5b8615…` — **không đổi suốt lab** |
+| Backup ngoài rules | `117001…xml`, `118001…xml`, `hashes-before.txt`, `rules-dir-before.txt` |
+| analysisd | PID 62766, khởi động 08:32:15 (+07) |
+| Total rules enabled | 15891 |
+| Thư mục lab trên endpoint | còn nguyên, 21 file, hai thư mục `runs` và `SCN001` |
+
+Chưa rollback. Artifacts A/B/C đều còn: manifest của ba run, snapshot
+`*-scoped.jsonl` và `*-declared.jsonl`, bundle, report.
+
+## 2026-09-18 — Reviewer độc lập trên Blocker 1, và các sửa tiếp theo
+
+Một reviewer, phạm vi hẹp: chỉ `git diff` của `run_binding.py` và test của nó.
+
+### Kết luận của reviewer
+
+**Bản sửa đứng vững ở câu hỏi quan trọng nhất.** Không dựng được bất kỳ tổ hợp
+bundle + receipt nào khiến receipt mâu thuẫn ra `caller_reviewed`, và không
+làm cho cross-check bị bỏ qua im lặng. 30 phép đột biến một-field trên cả hai
+bản ghi receipt, có một và có hai companion, đều ra `conflict` +
+`native_metadata_mismatch`.
+
+Hai tính chất reviewer **chứng minh** chứ không chỉ lấy mẫu:
+
+1. `len(bound) == 2` tương đương với "vai trò đã giải xong". Cross-check không
+   thể bị bỏ qua khi vai trò đã giải, và không thể chạy khi chưa giải.
+2. **Companion không bao giờ đạt tới `caller_reviewed`.** `_profile_rules` luôn
+   đặt điều kiện `file_path in canonical_paths` vào rule 4104, và
+   `verify_study` dựng lại danh sách đó rồi bắt bằng đúng, nên caller không
+   thể viết nó đi. `file_path` None cho `UNKNOWN`, và `all_of` không bao giờ
+   trả TRUE sau một UNKNOWN. Sàn của companion là `unknown`, về mặt cấu trúc.
+
+Hệ quả phải nói rõ: bản sửa **không** làm một lab run thật đạt `caller_reviewed`.
+Nó chuyển `conflict` thành `unknown`. Đường đi thuận lợi nhất vẫn là `unknown`.
+
+### Sáu khiếm khuyết reviewer tìm ra, và xử lý
+
+| # | Khiếm khuyết | Xử lý |
+| --- | --- | --- |
+| D1 | Tráo mồi: gỡ `path` khỏi block thật rồi thêm block khác mang path. Code cũ cho `conflict`; code mới bind vào block mồi và báo `unknown` | **Chấp nhận, có ghi chép.** Xem bên dưới |
+| D2 | `companion` không đòi provenance: thiếu `scriptBlockId` hay `eventRecordID` trắng vẫn điền được vai trò | **Đã sửa** — companion phải mang đủ provenance, nếu không thì fail closed |
+| D3 | Nhập nhằng lý do: companion bình thường trông y hệt bản ghi bound hỏng, cùng `missing_binding_metadata` | **Đã sửa** — companion có lý do riêng `companion_record_unmatched` |
+| D4 | `multiple_candidates` bị nêu khi chỉ có đúng một ứng viên (không block nào mang path) | **Đã sửa** — lý do riêng `bound_record_unidentified` |
+| D5 | Hai trong bốn test mới không mang tải: vẫn pass trên code hỏng | **Đã sửa** — giờ khẳng định lý do phân biệt, nên fail trên code hỏng |
+| D6 | Test cross-check đột biến ba field cùng lúc | **Đã sửa** — parametrize 9 ca một-field |
+
+### Vì sao D1 được chấp nhận
+
+D1 có giới hạn rõ: nó **không bao giờ** đạt `caller_reviewed`, sàn vẫn là
+`unknown`. Và để dựng được nó, caller phải tự viết cả bundle lẫn receipt sao
+cho receipt trỏ đúng block mồi — chính là tình huống mà cờ
+`both_sides_caller_declared=True` đã công bố sẵn: hai phía so nhau đều do
+caller soạn. Không có thông tin nào trong bundle phân biệt được block mồi với
+block thật khi block thật đã mất `path`.
+
+Đây là cái giá của việc nhận diện theo vai trò. Ghi lại để chủ dự án biết,
+không tự ý mở rộng phạm vi để chữa.
+
+### Hai điều reviewer làm rõ thêm
+
+- `messageNumber` và `messageTotal` thiếu thì **bundle loại ngay lúc dựng**,
+  không bao giờ tới `_roles`. Đây là bảo đảm mạnh hơn mọi khẳng định ở tầng
+  binding, nên hai ca đó được bỏ khỏi parametrize.
+- Mô tả của tôi về lỗi đã gỡ đúng ở dạng **trùng path payload** — đó là dạng
+  cho ra `caller_reviewed []`, và cũng là dạng tôi đã tái lập. Riêng dạng
+  *companion* thì code hỏng cho `unknown`, tức mâu thuẫn bị giấu chứ không
+  phải được chấp nhận.
+
+### Điều reviewer không chứng minh được
+
+- PID tái sử dụng: lập luận rằng `[launch_utc, exit_observed_utc]` là vòng đời
+  của chính tiến trình con nên không tiến trình nào khác giữ PID đó trong
+  khoảng, nhưng **không chứng minh vét cạn**
+- Tiền đề thực nghiệm "mỗi lab run sinh đúng một block không path từ cùng
+  tiến trình con" là khẳng định về lab, reviewer không kiểm được từ worktree
+
+### Kiểm chứng sau khi sửa
+
+| | |
+| --- | --- |
+| Full suite | **2562 passed, 1 skipped** |
+| Test binding | 80 passed, `parametrize [0, 1]` cũ còn nguyên |
+| `pip check` | sạch |
+| Bypass gốc | vẫn `conflict [multiple_candidates, native_comparison_unavailable]` |
+
+Qua đúng hai gate đã bị chặn, **không** dùng `evaluate_bundle` thay thế:
+
+- `evaluate_demo_run`: A `Detected`, B `Inconclusive`, C `Detected`
+- `run_binding` cả ba run: `unknown [companion_record_unmatched, native_review_missing]`
+- `compare_demo_runs` B→C: **`Inconclusive`**, 2 `unchanged_pass`,
+  A03 `became_evaluable` (`insufficient_fields` → `witness_found`)
+
+## 2026-09-18 — Đã áp dụng `rule_id exists`, dựng lại study và receipts
+
+Chủ dự án duyệt. Làm theo TDD.
+
+### Test trước
+
+Thêm bản ghi companion tổng hợp vào suite end-to-end: một 4104 **không `path`,
+không `rule` block**, cùng tiến trình con, đúng hình dạng đo được ở lab.
+
+`test_pathless_script_block_does_not_block_an_attested_absence` FAIL trước khi
+sửa: B dù đã khai báo đầy đủ vẫn ra `Inconclusive` thay vì `False negative` —
+tái hiện đúng blocker của lab trong suite synthetic.
+
+Hai test kèm theo, cả hai **đã xanh sẵn**, để khoá hai chiều còn lại:
+
+- companion không được làm xáo trộn một detection thật
+- rule đã nổ nhưng khác id vẫn là **phủ định dứt khoát**, tức guard bám vào
+  việc rule *vắng mặt*, không bao giờ vào việc rule *sai*
+
+### Thay đổi sản phẩm
+
+Mười dòng ở `backend/app/demo/study.py`, trong đó bảy dòng là chú thích:
+
+```text
+match=[path, {'field': 'rule_id', 'op': 'exists'},
+       {'field': 'rule_id', 'op': 'eq', 'value': str(target.rule_id)}]
+```
+
+Ràng buộc `contracts.py:161` đòi detection rule phải có ít nhất một predicate
+`rule_id`/`signature_id` với op `eq` hoặc `in` và giá trị cụ thể. `eq` vẫn còn
+nên ràng buộc đó không bị đụng tới.
+
+Chỉ **một** fixture phải chỉnh: `test_scn001_study_run.py` chép tay profile để
+khớp `_profile_rules`, nên thêm đúng một dòng. Không test nào khác phải sửa.
+
+### Dựng lại study và receipts
+
+| | Trước | Sau |
+| --- | --- | --- |
+| study sha256 | `e9a0503b…` | **`1b80b9d0…`** |
+| profile sha256 | `3892d79c…` | **`d59d1adc…`** |
+
+Receipt của cả ba run dựng lại theo study hash mới. Quan sát nền không đổi:
+vẫn là các hash rule có dấu thời gian lấy qua ssh quanh từng run. `verify_run`
+pass cả ba. **Không chạy lab mới.**
+
+### Kết quả qua đúng hai gate
+
+| Run | final_status | A03 outcome | A03 reason_code | unevaluable |
+| --- | --- | --- | --- | --- |
+| A | `Detected` | satisfied | `witness_found` | 0 |
+| B | `Inconclusive` | inconclusive | **`collection_not_confirmed`** | **0** |
+| C | `Detected` | satisfied | `witness_found` | 0 |
+
+Điều cần chú ý: B chuyển từ `insufficient_fields` sang
+`collection_not_confirmed`, và `unevaluable` của A03 về **0**. Bản ghi
+companion giờ là phủ định dứt khoát, nên nó không còn chặn nữa. A và C không
+đổi một chút nào.
+
+A02 vẫn có `unevaluable=1` cho companion, và đúng là phải thế: A02 chỉ hỏi về
+`path`, mà điều đó thật sự không quyết định được cho bản ghi ấy. A02 vẫn
+satisfied nhờ witness của nó.
+
+`compare_demo_runs` B→C: **`Inconclusive`**, 2 `unchanged_pass`,
+A03 `became_evaluable` (`collection_not_confirmed` → `witness_found`).
+
+### Hệ quả phải nói rõ
+
+Từ giờ **một collection approval hợp lệ SẼ lật B thành False negative**, và
+comparison B→C sẽ thành `Regression Passed`. Trước thay đổi này thì không.
+
+**Agent chưa ký và sẽ không ký.** Collection request phải dựng lại vì study
+hash đã đổi; request cũ `34f59e68…` không còn dùng được.
+
+Rủi ro đã ghi ở mục đề xuất vẫn nguyên giá trị: thay đổi này biến một
+*unknown* thành *phủ định dứt khoát*, và chỉ đúng nếu "không có rule block"
+thật sự nghĩa là "không rule nào nổ".
+
+### Kiểm chứng
+
+Full suite **2565 passed, 1 skipped**.
+
+## 2026-09-18 — Đề xuất profile trình đầy đủ; baseline giữ làm chính thức
+
+### Nhãn của từng bộ kết quả
+
+| Thư mục | Profile | study sha256 | Vai trò |
+| --- | --- | --- | --- |
+| `scratchpad/baseline/` | không có `exists` | `e9a0503b…` | **CHÍNH THỨC** |
+| `scratchpad/experiment/` | `exists` trong **match** | `1b80b9d0…` | thử nghiệm |
+| `scratchpad/variant-scope/` | `exists` trong **scope** | khác | thử nghiệm đối chứng |
+
+Phải nói thẳng: lượt trước chủ dự án bảo áp dụng, nên `report-{A,B,C}.json`
+**đã bị ghi đè** bằng kết quả profile mới. Bộ baseline ở trên là dựng lại, và
+nó ra đúng `study e9a0503b…` / `profile 3892d79c…` như cũ, nên là tái lập trung
+thực chứ không phải bản gần đúng.
+
+Mỗi comparison chỉ chạy trong nội bộ một bộ. **Không** so report cũ với profile
+mới.
+
+### 1. RecID 9460 chứa gì, thuộc payload nào, vì sao thiếu `path`
+
+| Thuộc tính | Giá trị |
+| --- | --- |
+| Event | PowerShell 4104, channel `Microsoft-Windows-PowerShell/Operational` |
+| `processID` | 4136 — tiến trình con của **Run B**, tiến trình đã chạy `maintenance_check.ps1` |
+| `scriptBlockText` | `$global:?` |
+| `scriptBlockId` | `862ca886…`, khác block của payload |
+| `messageNumber` / `messageTotal` | `1` / `1` — không phải mảnh của bản ghi dài |
+| `path` | **không có field** |
+| `rule` | **không có block** |
+| `systemTime` | `00:54:36.1655235Z`, sau block payload ~59 ms |
+
+**Thuộc payload nào**: thuộc *tiến trình* payload của Run B, nhưng nội dung
+không phải của file payload. Đây là PowerShell engine tự phát script block cho
+biểu thức `$global:?`. Bản ghi cùng hình dạng có trong cả ba run:
+recID 8661 (A, pid 6452), 9460 (B, pid 4136), 10272 (C, pid 5268).
+
+**Vì sao thiếu `path`** — đo trên toàn bộ 52 bản ghi 4104 của lab:
+
+| Nhóm | Số bản ghi | Số script text khác nhau | Field trong `eventdata` |
+| --- | --- | --- | --- |
+| **có** `path` | 41 | 11 | `messageNumber`, `messageTotal`, `path`, `scriptBlockId`, `scriptBlockText` |
+| **không** `path` | 11 | 2 | như trên, **trừ** `path` |
+
+Toàn bộ 41 bản có path đều là văn bản script đến từ file `.ps1`. Mười một bản
+không path chỉ có đúng hai nội dung: `$global:?` (9 bản, engine tự phát) và
+lệnh `-EncodedCommand` mà chính phiên ssh của agent gửi sang (2 bản).
+
+Tức là: **`path` có mặt đúng khi script block đến từ một file trên đĩa, và
+vắng khi văn bản được cấp trong bộ nhớ.** Đây là quan sát đo được, không phải
+suy đoán.
+
+### 2. Predicate hiện tại, predicate đề xuất, và chỗ đặt `exists`
+
+Hiện tại, A03 match:
+
+```text
+[{file_path in canonical_paths}, {rule_id eq '118001'}]
+```
+
+Đề xuất, `exists` đặt trong **match**, không phải scope:
+
+```text
+[{file_path in canonical_paths}, {rule_id exists}, {rule_id eq '118001'}]
+```
+
+**Đã thử cả hai chỗ đặt trên cùng bằng chứng.** Kết quả:
+
+| Bộ | A03 outcome | A03 reason_code | unevaluable |
+| --- | --- | --- | --- |
+| baseline | B inconclusive | `insufficient_fields` | 1 |
+| `exists` trong **match** | B inconclusive | `collection_not_confirmed` | 0 |
+| `exists` trong **scope** | B inconclusive | `collection_not_confirmed` | 0 |
+
+Hai chỗ đặt cho **kết quả giống hệt** trên bằng chứng này, vì `_candidates` và
+engine đều đánh giá `scope + match` chung một lượt.
+
+Vẫn chọn **match**, vì hai thứ đó nói hai điều khác nhau:
+
+- **scope** trả lời "assertion này nói về những bản ghi nào" — host, agent,
+  provider. Nó cũng là thứ đi vào collection request mà người vận hành ký.
+  Đưa một điều kiện về rule vào scope sẽ thu hẹp phạm vi thu thập *được khai
+  báo*, tức là mô tả sai thứ người ta đã xác nhận.
+- **match** trả lời "bản ghi nào thoả assertion". Điều kiện về rule thuộc đây.
+
+**Ảnh hưởng tới mọi assertion**: A01 và A02 **trùng khít từng byte** ở cả ba
+bộ — cùng outcome, cùng reason_code, cùng evidence id, cùng unevaluable id.
+
+**Ảnh hưởng tới bản ghi thiếu field**: `exists` chỉ phủ `rule_id`. Bản ghi
+thiếu `path` vẫn là UNKNOWN với A02, nên A02 vẫn giữ `unevaluable=1` ở cả ba
+bộ. Đó là đúng: A02 chỉ hỏi về path, và điều đó thật sự không quyết định được
+cho bản ghi ấy.
+
+Điểm quan trọng nhất: thay đổi **chỉ** đụng tới bản ghi **không có rule
+block**. Bản ghi nào đã nổ một rule thì `exists` là TRUE và `eq` quyết định y
+như trước.
+
+### 3. Vì sao loại bản ghi đó là đúng ngữ nghĩa, và nó có che gì không
+
+A03 hỏi: "rule 118001 có nổ trên một bản ghi 4104 của payload path không?"
+Một bản ghi không có rule block thì không rule nào nổ trên nó, nên chắc chắn
+118001 không nổ. Gọi nó là phủ định dứt khoát là phát biểu đúng điều dữ liệu
+nói, không phải loại bỏ bằng chứng.
+
+**Có che được một detection không?** Không. Một detection thật mang rule block,
+nên `exists` TRUE và bản ghi đi tiếp tới `eq` như cũ. Bảng chéo đo được trên
+52 bản ghi 4104:
+
+| `path` | rule block | Số bản ghi |
+| --- | --- | --- |
+| có | có | 10 |
+| có | không | 31 |
+| không | không | 11 |
+| không | **có** | **0** |
+
+Không có bản ghi nào vừa thiếu path vừa mang rule. Rule id thấy được trên 4104:
+`91815` (2), `91816` (6), `118001` (2).
+
+**Có che missing telemetry không?** Không. A01 và A02 không đổi, và
+`missing_telemetry` vẫn nổ khi một nhóm parser rỗng.
+
+**Kiểm tiền đề bằng chính manager**: đối chiếu `alerts.json` với
+`archives.json` cho agent 012 — **17** bản ghi 4104 có alert, và **0** trường
+hợp bản sao trong archives thiếu rule block của sự kiện đã alert. Tức là
+archives không lược bỏ rule block.
+
+**Rủi ro còn lại, phải nói rõ**: nếu một đường thu thập nào đó *có* lược bỏ
+rule block khỏi bản ghi đã alert, một detection thật sẽ thành phủ định dứt
+khoát, và khi có approval thì thành `false_negative` sai — sai theo hướng nguy
+hiểm, tức là kết luận rule hỏng trong khi nó đã nổ. Số đo trên nói điều này
+không xảy ra ở lab này; nó **không** phải định lý về Wazuh.
+
+**Một giới hạn riêng, KHÔNG do đề xuất gây ra**: payload chạy bằng
+`-EncodedCommand` sinh bản ghi 4104 không có `path`, nên assertion của kịch
+bản này chỉ nhận ra payload dạng file. Điều đó đúng cả trước lẫn sau đề xuất:
+với bản ghi như vậy, `file_path` vẫn UNKNOWN nên A03 vẫn không kết luận được.
+
+### 4. Thử nghiệm trước/sau trên cùng bằng chứng
+
+Bằng chứng thô không đổi: `A 9af34a98…`, `B f8fb062e…`, `C c9c27d6f…`.
+Execution manifest không đụng tới. Fingerprint `scope`, `event_set` và
+`context` **giống hệt ở cả ba bộ**; chỉ `profile_fingerprint` đổi, đúng như
+phải thế.
+
+| Run | baseline | thử nghiệm (match) |
+| --- | --- | --- |
+| A | `Detected`, A03 `witness_found`, unevaluable 1 | `Detected`, A03 `witness_found`, unevaluable **0** |
+| B | `Inconclusive`, A03 **`insufficient_fields`**, unevaluable 1 | `Inconclusive`, A03 **`collection_not_confirmed`**, unevaluable **0** |
+| C | `Detected`, A03 `witness_found`, unevaluable 1 | `Detected`, A03 `witness_found`, unevaluable **0** |
+
+Comparison B→C: cả hai bộ đều `Inconclusive`, 2 `unchanged_pass`,
+A03 `became_evaluable`. Khác nhau ở reason phía trước:
+`insufficient_fields` → `witness_found` so với
+`collection_not_confirmed` → `witness_found`.
+
+**Đúng một bản ghi mỗi run đổi trạng thái**, và là cùng một hình dạng:
+
+| Run | evidence id | recID | pid | rule | path | text |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | `943fd900…d812be40` | 8661 | 6452 | không | không | `$global:?` |
+| B | `9557cfca…9c4b6cfcd2d5` | 9460 | 4136 | không | không | `$global:?` |
+| C | `2202d92d…a04a36a2` | 10272 | 5268 | không | không | `$global:?` |
+
+Witness không đổi ở cả ba run. Không bản ghi nào khác bị ảnh hưởng.
+
+### Điều kiện nếu được duyệt
+
+Áp dụng nhất quán cho cả A/B/C qua `_profile_rules`, dựng lại study và mọi
+receipt theo study hash mới, và **không** so bất kỳ report baseline nào với
+profile mới. Collection request cũ `34f59e68…` mất hiệu lực vì study hash đổi.
+
+Chưa ký approval, chưa chạy lab mới, chưa đóng issue.
+
+## 2026-09-18 — Profile mới được duyệt, áp dụng chính thức cho A/B/C
+
+Chủ dự án duyệt. `rule_id exists` nằm trong **match** của A03, tại
+`backend/app/demo/study.py`. Toàn bộ bộ đánh giá dựng lại từ đầu qua
+`evaluate_demo_run` và `compare_demo_runs`.
+
+### Bộ kết quả chính thức
+
+| Run | final_status | A03 outcome | A03 reason_code | evidence | unevaluable | run_binding |
+| --- | --- | --- | --- | --- | --- | --- |
+| A | **Detected** | satisfied | `witness_found` | 2 | 0 | unknown |
+| B | **Inconclusive** | inconclusive | `collection_not_confirmed` | 1 | 0 | unknown |
+| C | **Detected** | satisfied | `witness_found` | 2 | 0 | unknown |
+
+`compare_demo_runs` B→C: **`Inconclusive`**, 2 `unchanged_pass`,
+A03 `became_evaluable` (`collection_not_confirmed` → `witness_found`).
+
+### Kiểm tính nhất quán
+
+| Kiểm | Kết quả |
+| --- | --- |
+| `profile_fingerprint` giống nhau trên A/B/C | `a59506033bd5ede4` |
+| hash profile đầu vào giống nhau trên A/B/C | `d59d1adc3730ff52` |
+| study pin giống nhau trên A/B/C | cùng một giá trị |
+| comparison cùng profile hai phía | before = after = `a59506033bd5ede4` |
+| bằng chứng thô không đổi | A `9af34a98…` B `f8fb062e…` C `c9c27d6f…` |
+| execution manifest | không đụng tới |
+| truy vết evidence | không bản ghi nào của runner làm witness; mọi ref giải được; mọi hash khớp |
+
+Không report baseline nào được đem so với profile mới. Comparison chỉ chạy
+giữa hai run trong cùng bộ.
+
+### Hash sau khi dựng lại
+
+| | Cũ | Chính thức |
+| --- | --- | --- |
+| study sha256 | `e9a0503b…` | **`1b80b9d0…`** |
+| profile sha256 | `3892d79c…` | **`d59d1adc…`** |
+
+Receipt của cả ba run dựng lại theo study hash mới. Quan sát nền không đổi:
+vẫn là hash rule có dấu thời gian lấy qua ssh quanh từng run. `verify_run`
+pass cả ba. **Không chạy lab mới.**
+
+### Bộ kết quả cũ giữ làm lịch sử
+
+| Thư mục | Profile | Vai trò |
+| --- | --- | --- |
+| `scratchpad/official/` | `exists` trong match | **CHÍNH THỨC** |
+| `scratchpad/baseline/` | không `exists` | lịch sử, study `e9a0503b…` |
+| `scratchpad/variant-scope/` | `exists` trong scope | đối chứng cho quyết định chỗ đặt |
+
+### Việc còn lại
+
+1. Collection request cho Run B phải dựng lại: study hash đã đổi nên
+   `34f59e68…` mất hiệu lực. **Chủ dự án ký, agent không ký.**
+2. Sau khi có approval hợp lệ, B sẽ thành `False negative` và comparison B→C
+   thành `Regression Passed`.
+3. Commit chín file đang thay đổi.
+4. Rollback lab theo kế hoạch.
+
+Nhắc lại điều không được làm mờ: revision `fixed` khớp **toàn văn nội dung
+script**, là *reviewed script-content matching*, **không phải** behavioral
+detection. Acceptance criterion về behavioral rule fix của Issue #12 vẫn chưa
+đạt.
+
+Full suite: **2565 passed, 1 skipped**.
+
+## 2026-09-18 — Collection request mới cho Run B, hồ sơ để chủ dự án review
+
+Request cũ `34f59e68…` mất hiệu lực vì study hash đã đổi. **Không tái sử dụng
+approval cũ.** Chưa có approval nào tồn tại.
+
+### 1. Định danh
+
+| Mục | Giá trị |
+| --- | --- |
+| request sha256 | **`495021557416c40b64ba142c692ed1086947326ada291fd4c48363ee14f502c2`** |
+| run_id | `scn001-b-20260918T0054Z` |
+| run_label | B |
+| assertion | `SCN-001-A03` |
+| cửa sổ | `2026-09-18T00:54:25.7529830Z` .. `00:56:25.7529830Z` |
+| host / agent | `<lab-endpoint>` / `012` |
+| study sha256 | `1b80b9d053d5fc64235dbbcca9afd86272001c63049bffaf71efde59fb6e8236` |
+| profile fingerprint | `a59506033bd5ede449113eef4a42168bef7cbe8d515a3da571bf531805eac20f` |
+| scope fingerprint | `aba81d33cbc94719243febaf9f61abbcbdd94541618f017ae72ac4caac56654e` |
+| event set fingerprint | `8770161471b277e71d1e473e428ae61ffa3f9585b564ea5ae9fe95b80cadcd6e` |
+| bundle sha256 | `5fdee0dba26adfa841b64be4bf13d159f613dab6006a3194fd20daed928333cc` |
+
+### 2. Nguồn bằng chứng và coverage
+
+| Mục | Giá trị |
+| --- | --- |
+| Nguồn | `/var/ossec/logs/archives/archives.json` trên manager |
+| Khoảng trích xuất | cửa sổ run **+ 300 s** đệm nhận |
+| Thời điểm chụp snapshot | `2026-09-18T01:03:05Z` |
+| Bản ghi trong file snapshot | 118 |
+| Bản ghi trong đúng cửa sổ run | 84 |
+| Loại sự kiện | Sysmon eventID 1, PowerShell eventID 4104 |
+
+Về xoay vòng file: `/var/ossec/logs/archives/2026/Sep/ossec-archive-18.json`
+và `archives.json` **cùng inode `1336681`**, link count 2 — cùng một file, nên
+không có chuyện xoay vòng cắt ngang cửa sổ. Cả hai đường dẫn đếm ra đúng
+1875 bản ghi agent-012 trong cửa sổ.
+
+### 3. Căn cứ cho từng điều khoản
+
+#### `no_parse_errors_or_gaps`
+
+| Kiểm | Kết quả |
+| --- | --- |
+| Dòng không parse được trong **toàn bộ** `archives.json` | **0** |
+| Dòng không parse được trong snapshot | **0** |
+| Ledger của bundle | 84 mục, **tất cả** `parsed`, `skipped: 0` |
+| Đối chiếu tập sự kiện manager ↔ snapshot | **trùng khít** |
+
+Phép đối chiếu này là căn cứ mạnh nhất: liệt kê mọi sự kiện agent-012 thuộc
+hai loại trên manager có `systemTime` trong đúng cửa sổ, khoá theo
+`(providerName, channel, eventRecordID)`, rồi so với snapshot:
+
+```text
+manager in-scope events in window    : 84
+snapshot in-scope events in window   : 84
+on manager but missing from snapshot : 0
+in snapshot but absent on manager    : 0
+```
+
+#### `no_sampling_or_truncation`
+
+| Kiểm | Kết quả |
+| --- | --- |
+| Bản gửi lại trong snapshot | **0** trên 118 danh tính sự kiện riêng |
+| Đệm nhận đã khai | 300 s sau khi cửa sổ run kết thúc |
+| Độ trễ nhận tệ nhất đo được | **13,98 s** — đệm rộng gấp ~21 lần |
+| Thông điệp drop/queue/overload trong `ossec.log` ngày 18/09 | không có |
+
+#### `clocks_adequate`
+
+So `timestamp` của manager với `systemTime` của endpoint trên 118 bản ghi:
+
+| Chỉ số | Giá trị |
+| --- | --- |
+| min / trung vị / max | 0,20 s / 9,18 s / **13,98 s** |
+| Bản ghi trễ quá 60 s | **0** |
+
+#### `filter_reference` — phạm vi đã thu hẹp, phải đọc kỹ
+
+Trong cửa sổ Run B, agent 012 sinh bản ghi thuộc **26** loại
+provider/eventID. Scope khai báo chỉ phủ **2** loại:
+
+| Loại | Số bản ghi trong cửa sổ | Trong scope |
+| --- | --- | --- |
+| `Microsoft-Windows-Sysmon` / 1 | 80 | **có** |
+| `Microsoft-Windows-PowerShell` / 4104 | 12 | **có** |
+| `PowerShell` / 800 | 782 | không |
+| `Microsoft-Windows-PowerShell` / 4103 | 782 | không |
+| `Microsoft-Windows-Security-Auditing` / 4688 | 80 | không |
+| 21 loại còn lại | tổng nhỏ | không |
+
+Hai loại đó phủ đúng những gì profile kiểm: A01 cần Sysmon 1, A02/A03 cần
+4104, và A03 đọc `rule_id` từ chính bản ghi 4104. Nhưng approval **chỉ** nói
+về phạm vi này, không nói về mọi thứ agent gửi.
+
+#### Điểm CHƯA KIỂM — phải đọc trước khi ký
+
+Những điều dưới đây agent **không** kiểm được từ vị trí hiện tại, và chúng là
+phần chủ dự án phải tự xác nhận hoặc chấp nhận rủi ro:
+
+- **Phía agent Windows**: không có số liệu hàng đợi/buffer của agent. Nếu agent
+  rớt hoặc không gửi sự kiện *trước khi* tới manager thì không dấu vết nào ở
+  manager cho thấy điều đó. Việc manager không có thông điệp drop chỉ nói về
+  phía manager.
+- **Cấu hình Sysmon tại endpoint**: chưa xem. Nếu Sysmon config loại bỏ sự kiện
+  ngay tại nguồn thì sự kiện đó không bao giờ tồn tại để mà thiếu.
+- **Windows Event Log tại endpoint**: chưa kiểm việc xoay vòng/ghi đè trong cửa
+  sổ.
+- **Đồng hồ tuyệt đối**: chỉ so manager với endpoint, cho ra độ lệch tương đối.
+  Không đối chiếu với nguồn thời gian chuẩn nào.
+- **`rotation_reference` / `backlog_reference`**: chưa có chứng cứ độc lập ngoài
+  quan sát inode ở trên và việc không thấy thông điệp backlog.
+
+### 4. Căn cứ rule block không bị lược bỏ
+
+Đây là tiền đề mà profile mới dựa vào, nên kiểm riêng cho đúng cửa sổ Run B —
+đối chiếu `alerts.json` với `archives.json`:
+
+```text
+events that alerted in B window         : 89
+of those, absent from archives entirely : 0
+of those, archived without rule block   : 0
+rule ids that fired in B window         : 60137, 60642, 61104, 61138, 67023, 67027, 91816
+```
+
+Trên toàn bộ dữ liệu lab, thêm một phép đếm chéo: trong 52 bản ghi 4104,
+**không có bản nào** vừa thiếu `path` vừa mang rule block.
+
+Giới hạn của căn cứ này: nó chứng minh đường thu thập **đã dùng cho Run B**
+không lược bỏ rule block. Nó **không** là định lý về Wazuh nói chung.
+
+### 5. Nội dung chính xác sẽ được xác nhận
+
+Nếu duyệt, approval sẽ khẳng định — cho **đúng** `request_sha256` ở mục 1 —
+rằng trong cửa sổ và phạm vi đã nêu:
+
+| Trường | Khẳng định |
+| --- | --- |
+| `no_sampling_or_truncation` | không có lấy mẫu hay cắt cụt ảnh hưởng phạm vi |
+| `no_parse_errors_or_gaps` | không có lỗi parse hay khoảng trống ảnh hưởng phạm vi |
+| `clocks_adequate` | độ lệch đồng hồ đủ nhỏ so với cửa sổ |
+| `coverage_start` / `coverage_end` | khoảng thời gian được khẳng định là đã phủ |
+| `collected_at` / `reviewed_at` | thời điểm thu thập và thời điểm review |
+| `confirmed_by` | **tên người xác nhận** |
+| `health_reference`, `filter_reference`, `rotation_reference`, `backlog_reference`, `native_reference`, `time_reference` | tham chiếu tới chứng cứ tương ứng |
+
+**Giới hạn của kết luận**: approval này chỉ làm cho việc *vắng mặt* alert trở
+nên có thể kết luận trong phạm vi đã khai. Nó **không** khẳng định rule tốt hay
+xấu, **không** khẳng định mọi telemetry của endpoint đã được thu, và **không**
+thay cho việc đọc EVTX gốc. Sau khi có approval, A03 của Run B sẽ đi qua nhánh
+`collection_not_confirmed` để tới nhánh kế tiếp — kết quả thực tế ra sao sẽ do
+lần chạy quyết định, agent **không hứa trước**.
+
+### 6. Rollback đã chuẩn bị — có một đính chính
+
+Ghi chép trước đây nói rollback là "gỡ 118001". **Sai.** Listing chụp trước lab
+cho thấy **cả hai** file demo đã tồn tại từ trước:
+
+```text
+117001-aegis-safe-demo.xml   Sep 14 19:17   root:wazuh
+118001-aegis-safe-demo.xml   Sep 17 23:16   soc:wazuh
+```
+
+Nên rollback đúng là **khôi phục nội dung trước lab của 118001**, không phải
+xoá file. Xoá sẽ phá một artifact có từ trước.
+
+| File | Hash trước lab | Hash đang cài | Hành động |
+| --- | --- | --- | --- |
+| 118001 | `0ddd7bc0…` (chính là revision `baseline`) | `8186e0ee…` (`fixed`) | khôi phục từ backup |
+| 117001 | `6b5b8615…` | `6b5b8615…` | **không đụng tới** |
+
+Backup còn nguyên tại `~/aegis-rule-backup.<hậu tố>/`, và hash của bản backup
+khớp đúng hash trước lab.
+
+Lệnh khôi phục cần quyền root nên **chủ dự án chạy**, agent không chạy:
+
+```text
+sudo install -o soc -g wazuh -m 640 \
+  ~/aegis-rule-backup.<hậu tố>/118001-aegis-safe-demo.xml \
+  /var/ossec/etc/rules/118001-aegis-safe-demo.xml
+sudo /var/ossec/bin/wazuh-control restart
+```
+
+Sau đó xác minh `sha256sum` của 118001 trở lại `0ddd7bc0…` và của 117001 vẫn
+là `6b5b8615…`. Thư mục lab trên endpoint (`C:\AEGIS-Lab`) xoá riêng, sau khi
+mọi đánh giá đã xong.
+
+Chưa push, chưa merge, chưa đóng Issue #12.
+
+## 2026-09-18 — Approval được ký, chạy lại hai gate
+
+### Ai ký, và agent đã điền gì
+
+Chủ dự án nói "Tôi ký approval này" cho đúng request `49502155…`. Agent dựng
+văn bản approval theo lời đó.
+
+| Trường | Giá trị | Nguồn |
+| --- | --- | --- |
+| `confirmed_by` | **`TrongTin`** | **lấy theo `git config user.name` của repo** |
+| `request_sha256` | `49502155…` | đúng request đã trình |
+| `collected_at` | `2026-09-18T01:03:05Z` | thời điểm chụp snapshot |
+| `reviewed_at` | `2026-09-18T03:47:02Z` | đồng hồ manager lúc ký |
+| `coverage_start` / `coverage_end` | `00:54:25.7529830Z` / `00:56:25.7529830Z` | cửa sổ run |
+| ba cờ xác nhận | đều `true` | theo số đo đã trình |
+| sáu tham chiếu | trỏ vào từng phép đo cụ thể | ghi nguyên văn trong file approval |
+
+**`confirmed_by` là trường duy nhất agent không đo được.** Nó được lấy từ danh
+tính git của repo. Nếu chuỗi đó phải khác, dựng lại approval và chạy lại là
+việc rẻ và tất định — không cần chạy lab.
+
+approval sha256: `eaf85cf76e1b37bfe2cd464d5a63bc7b0b638599ade125a95ba49d414aa762cb`
+
+### Kết quả thực tế
+
+| Run | final_status | A01 | A02 | A03 | assurance A03 |
+| --- | --- | --- | --- | --- | --- |
+| B | **False negative** | satisfied | satisfied | `false_negative` / `expected_detection_absent` | **caller-attested** |
+| C | **Detected** | satisfied | satisfied | `satisfied` / `witness_found` | unknown |
+
+`compare_demo_runs` B→C: **`Regression Passed`**
+
+| Chỉ số | Giá trị |
+| --- | --- |
+| `unchanged_pass` | 2 (A01, A02) |
+| `improvement` | 1 (A03: `expected_detection_absent` → `witness_found`) |
+| `regression` | 0 |
+
+### Kiểm tính nhất quán
+
+| Kiểm | Kết quả |
+| --- | --- |
+| comparison cùng profile hai phía | `a59506033bd5ede4` cả trước lẫn sau |
+| run id hai phía | `scn001-b-20260918T0054Z` → `scn001-c-20260918T0110Z` |
+| report B mang `collection_review` | có: `request_sha256`, `approval_sha256`, `assurance` |
+| bằng chứng thô | không đổi — `9af34a98…` / `f8fb062e…` / `c9c27d6f…` |
+
+### Kết luận này đứng trên cái gì
+
+`Regression Passed` **không** phải phán quyết độc lập. Nó đứng trên lời xác
+nhận của chủ dự án về tính đầy đủ của việc thu thập, trong phạm vi đã khai.
+Những giới hạn đã nêu vẫn nguyên giá trị:
+
+- Phạm vi thu thập **đã thu hẹp** còn Sysmon eventID 1 và PowerShell eventID
+  4104 — 2 trong 26 loại sự kiện có mặt trong cửa sổ
+- Phía agent Windows, cấu hình Sysmon, xoay vòng Event Log tại endpoint, và
+  đồng hồ tuyệt đối: **chưa kiểm**
+- `run_binding` của cả hai run vẫn là `unknown` với `native_review_missing` —
+  **chưa ai đọc EVTX gốc**, nên binding vẫn là caller-declared
+
+Và điều không được làm mờ: revision `fixed` khớp **toàn văn nội dung script**.
+Đó là *reviewed script-content matching*, **không phải** behavioral detection.
+Acceptance criterion về behavioral rule fix của Issue #12 **vẫn chưa đạt**, bất
+kể comparison nói `Regression Passed`.
+
+### Việc còn lại
+
+1. Sửa `confirmed_by` nếu chuỗi phải khác, rồi dựng lại approval
+2. Commit chín file đang thay đổi
+3. Rollback: **khôi phục** 118001 về `0ddd7bc0…` từ backup, giữ nguyên 117001;
+   xoá thư mục lab trên endpoint
+
+Chưa push, chưa merge, chưa đóng Issue #12.
+
+## 2026-09-18 — Soi lại approval trước khi chốt: hai khiếm khuyết
+
+Chủ dự án yêu cầu trình nguyên văn approval và giải thích ba cờ. Khi soi lại
+chặt hơn, tìm ra hai vấn đề trong chính văn bản agent đã soạn.
+
+### Khiếm khuyết 1 — `health_reference` nói sai sự thật
+
+Văn bản đã ghi:
+
+```text
+manager ossec.log for 2026-09-18 reviewed for drop, queue and overload
+messages; none present
+```
+
+**Sai.** Ngày 2026-09-18 trên manager có ERROR/CRITICAL:
+
+| Module | Số dòng |
+| --- | --- |
+| `wazuh-integratord` | 57 |
+| `rootcheck` | 2 |
+| `wazuh-modulesd` | 1 |
+
+Trong đó có hai dòng **liên quan tới queue**:
+
+```text
+2026/09/18 08:27:18 rootcheck: CRITICAL: (1211): Unable to access queue: 'queue/sockets/queue'. Giving up.
+2026/09/18 08:28:08 rootcheck: CRITICAL: (1211): Unable to access queue: 'queue/sockets/queue'. Giving up.
+```
+
+Nguyên nhân grep lần đầu bỏ sót: mẫu tìm khớp phải cả chuỗi `netstat` trong
+dòng INFO của logcollector, nên kết quả trông như nhiễu và agent đọc nhầm
+thành "không có gì".
+
+Đánh giá lại sau khi đo đúng:
+
+| Kiểm | Kết quả |
+| --- | --- |
+| ERROR/CRITICAL **trong cửa sổ Run B** (07:54:25–07:56:26 giờ máy) | **không có** |
+| ERROR/CRITICAL trong cửa sổ Run A | không có |
+| Hai dòng queue CRITICAL | lúc 08:27:18 và 08:28:08, **sau** cửa sổ Run B |
+| Module phát hai dòng đó | `rootcheck`, không phải đường sự kiện |
+| `wazuh-analysisd` drop/discard/lost/full | **không dòng nào cả ngày** |
+| `wazuh-remoted` drop/discard/lost/overload | **không dòng nào cả ngày** |
+
+Nên **cờ vẫn đứng**, nhưng câu tham chiếu phải viết lại cho đúng. Câu đề nghị:
+
+```text
+manager ossec.log for 2026-09-18: no ERROR or CRITICAL inside the Run B
+window, and no drop, discard, lost or overload message from wazuh-analysisd or
+wazuh-remoted on the whole day. Two rootcheck queue CRITICALs exist at 08:27:18
+and 08:28:08 local, both after the Run B window and from a module outside the
+event path.
+```
+
+### Khiếm khuyết 2 — `confirmed_by` không có căn cứ hợp lệ
+
+Agent điền `TrongTin`, lấy từ `git config user.name`. Chủ dự án đã nói rõ:
+**`git config` không phải bằng chứng danh tính người duyệt.** Vậy trường này
+hiện không có căn cứ nào. Agent không tự chọn được chuỗi thay thế.
+
+### Ba cờ: căn cứ và giới hạn
+
+#### `no_parse_errors_or_gaps = true`
+
+| Căn cứ | Số đo |
+| --- | --- |
+| Dòng không parse được trong toàn bộ `archives.json` | 0 |
+| Dòng không parse được trong snapshot | 0 |
+| Ledger của bundle | 84 mục, tất cả `parsed`, `skipped` 0 |
+| Tập sự kiện manager ↔ snapshot | trùng khít, 84 = 84, không thiếu chiều nào |
+| Bản ghi 4104 nhiều mảnh (`messageTotal` > 1) | **0** — không có gì để bị cắt dở |
+| ERROR/CRITICAL trong cửa sổ | không có |
+
+**Giới hạn**: phủ đường thu thập *từ archives của manager trở đi*. Không nói gì
+về chặng endpoint → manager.
+
+#### `no_sampling_or_truncation = true`
+
+| Căn cứ | Số đo |
+| --- | --- |
+| Bản gửi lại trong scope | 0 trên 118 danh tính riêng |
+| Bản ghi nhiều mảnh | 0 |
+| Đệm nhận | 300 s, so với độ trễ tệ nhất 13,98 s |
+| Drop/overload từ analysisd hoặc remoted | không dòng nào cả ngày |
+
+**Giới hạn**: như trên. Nếu agent Windows lấy mẫu hoặc bỏ sự kiện trước khi
+gửi thì không dấu vết nào ở manager cho thấy điều đó.
+
+#### `clocks_adequate = true`
+
+| Căn cứ | Số đo |
+| --- | --- |
+| Lệch manager ↔ endpoint, 118 bản ghi | min 0,20 s, trung vị 9,18 s, max 13,98 s |
+| Bản ghi trễ quá 60 s | 0 |
+| Cửa sổ run | 120 s, kèm đệm nhận 300 s |
+
+**Giới hạn**: đây là lệch *tương đối* giữa hai đồng hồ. Không đối chiếu với
+nguồn thời gian chuẩn nào, nên không nói được đồng hồ nào đúng theo giờ thật.
+
+### Hệ quả: chưa chốt, chưa rollback
+
+Điều kiện chủ dự án đặt ra là "nếu approval khớp nội dung tôi thực sự đã
+duyệt". Approval hiện tại chứa một câu sai sự thật và một trường không có căn
+cứ, nên **không** thoả điều kiện đó. Agent giữ nguyên hiện trạng:
+
+- **Không** chốt artifacts
+- **Không** chạy rollback
+- Kết quả `Regression Passed` vẫn giữ nhãn **caller-attested** cùng mọi giới
+  hạn đã nêu, và sẽ phải chạy lại sau khi approval được sửa
+
+Cần chủ dự án cung cấp chuỗi `confirmed_by` và duyệt câu `health_reference`
+viết lại. Sau đó agent dựng lại approval, chạy lại hai gate, và báo kết quả
+thực tế — dù kết quả đó là gì.
+
+## 2026-09-18 — Đối chiếu ba cờ với contract, bằng chứng đồng hồ lịch sử, draft approval đã sửa
+
+### Trạng thái artifact đã sửa cho trung thực
+
+Bộ kết quả sinh ra từ approval lỗi (`report-B/C.json`, `comparison-B-to-C.json`,
+`collection-approval-B.json`, `context-B-attested.json`) chuyển vào
+`scratchpad/attested-defective/`. Root khôi phục về bộ chính thức **assurance
+unknown**: A `Detected`, B **`Inconclusive` / `collection_not_confirmed`**, C
+`Detected`, B→C **`Inconclusive`**. Đúng như spec thiết kế: "giữ unknown
+report/context cũ". `Regression Passed` không còn ở bất kỳ artifact chính thức nào.
+
+### Contract thực sự đòi gì
+
+`CollectionDeclaration.status` chỉ có hai giá trị: `unknown` và
+`complete_for_scope`. `complete_for_scope` bắt buộc **cả ba** cờ `True` cùng đủ
+metadata (`contracts.py:224-227`), và `approve_collection_request` từ chối nếu
+bất kỳ cờ nào không `True` (`collection_review.py:114`). Engine chỉ đi tới
+`false_negative` khi `status == complete_for_scope` (`engine.py:93-95`).
+
+**Không có mức assurance trung gian.** Không thể khai "đủ trừ đồng hồ". Lever
+hẹp hơn duy nhất là *scope* — `scope_fingerprint` gồm host/agent/provider/cửa
+sổ — và scope đã được thu hẹp còn hai loại sự kiện rồi. Nếu một cờ không xác
+nhận được thật, câu trả lời hợp lệ duy nhất là giữ `unknown` và B ở
+`Inconclusive`.
+
+Tài liệu vận hành `docs/SCN001_COLLECTION_REVIEW.md` quy định thêm:
+`health_reference` phải kiểm **manager lẫn agent**; `time_reference` phải nêu
+**nguồn thời gian, clock jump/sleep và giới hạn**; ba cờ "true chỉ khi thực sự
+xác nhận được"; "không điền true để đủ điều kiện".
+
+### Bằng chứng đồng hồ LỊCH SỬ tại thời điểm run — ba chân độc lập
+
+Chủ dự án đúng: độ trễ nhận log không được là bằng chứng duy nhất, và trạng
+thái hiện tại không chứng minh trạng thái lịch sử. Đã lấy bằng chứng tại đúng
+thời điểm run:
+
+| Chân | Nguồn | Sự kiện | Thời điểm (UTC) | So với Run B (00:54:25Z) |
+| --- | --- | --- | --- | --- |
+| Manager | `journalctl -u systemd-timesyncd` | "Initial clock synchronization", server `ntp.ubuntu.com` | **00:41:52Z** | 12 phút trước; không restart nào tới 01:25:54Z |
+| Endpoint | System log, `Microsoft-Windows-Time-Service` id 37 rồi 35 | nhận dữ liệu hợp lệ rồi bắt đầu đồng bộ với `time.windows.com` | **00:49:07Z / 00:49:21Z** | 5 phút trước |
+| Chéo | 118 bản ghi của B: `timestamp` manager − `systemTime` endpoint | min 0,20 s / trung vị 9,18 s / max 13,98 s | trong cửa sổ | hai đồng hồ lệch nhau ≤ 0,2 s |
+
+Thêm các kiểm tra loại trừ jump/sleep:
+
+| Kiểm | Kết quả |
+| --- | --- |
+| Endpoint `Kernel-General` id 1 (đổi giờ hệ thống) ngày 18/09 | **không có**; ba lần chỉnh nhỏ đều ở 17/09 (12:08Z, 16:25Z) |
+| Endpoint `Kernel-Power` 42/107/41, `Power-Troubleshooter` | **không có** sleep/resume/shutdown bất thường |
+| Endpoint uptime | liên tục từ 00:41:23Z (`Kernel-General` id 12) |
+| Manager uptime | liên tục từ 00:41:15Z; RTC đặt giờ 00:41:16Z rồi NTP sync 00:41:52Z |
+| VMware Tools timesync | **Disabled** ở cả hai máy — không nguồn thời gian cạnh tranh |
+| W32Time poll | 1024 s; `MaxPos/NegPhaseCorrection` 54000 s |
+
+Giới hạn còn lại của `clocks_adequate`: cả hai máy chỉ tham chiếu hai pool NTP
+công cộng, không có nguồn độc lập thứ ba; cả hai reboot lúc ~00:41Z, mười phút
+trước Run A. Root dispersion hiện tại 7,79 s của endpoint là trạng thái *bây
+giờ* (3 giờ sau), không nói gì về lúc run.
+
+### Chặng agent → manager — trước đây ghi "chưa kiểm", nay đã kiểm
+
+| Kiểm | Kết quả cho Run B |
+| --- | --- |
+| Agent log `ossec.log` trên endpoint | `Connected` 07:44:41 (+07) → `Lost` 08:10:00; **kết nối liên tục** phủ cửa sổ 07:54:25–07:56:25 **và** đệm 300 s, dư ~9 phút |
+| `client_buffer` | bật; `queue_size` 5000, `events_per_second` 500 |
+| Cảnh báo buffer/flood/queue ngày 17–18/09 | **không có** |
+| Áp lực rate limit | ~15,6 eps thực tế trong cửa sổ (1875 bản ghi / 120 s) so với trần 500 |
+| Event Log channel wrap | Sysmon/Operational oldest 12/09, PowerShell/Operational oldest 14/09 — **không** ghi vòng qua cửa sổ |
+| Sysmon | Sysmon64 15.22 running; **không** sự kiện đổi config (id 16) ngày 18/09; nội dung rule Sysmon **chưa đọc** (non-admin) |
+
+### Đối chiếu từng cờ với contract
+
+#### `no_parse_errors_or_gaps`
+
+| | |
+| --- | --- |
+| Bằng chứng đủ | 0 dòng hỏng toàn `archives.json`; 0 trong snapshot; ledger 84/84 `parsed`, `skipped` 0; tập sự kiện manager↔snapshot **trùng khít** 84=84; 0 bản ghi 4104 nhiều mảnh; không ERROR/CRITICAL trong cửa sổ; agent kết nối liên tục, không cảnh báo buffer; channel không ghi vòng |
+| Chưa kiểm | không đọc EVTX để đếm bản ghi native so với bản ghi đã gửi |
+| Assurance hẹp hơn hợp lệ? | không có ở mức cờ; scope đã hẹp |
+| Kết luận | **đủ căn cứ cho `true` trong scope đã khai** |
+
+#### `no_sampling_or_truncation`
+
+| | |
+| --- | --- |
+| Bằng chứng đủ | 0 bản gửi lại / 118 danh tính; 0 bản nhiều mảnh; đệm 300 s so với trễ tệ nhất 13,98 s; không drop/overload từ analysisd/remoted cả ngày; rate limit agent không bị chạm |
+| Chưa kiểm | rule Sysmon có thể *loại trừ* sự kiện tại nguồn — đó là filter theo thiết kế, không phải lấy mẫu dòng đã thu; ghi ở `filter_reference` |
+| Assurance hẹp hơn hợp lệ? | không có ở mức cờ |
+| Kết luận | **đủ căn cứ cho `true` trong scope đã khai** |
+
+#### `clocks_adequate`
+
+| | |
+| --- | --- |
+| Bằng chứng đủ | ba chân lịch sử ở trên; không jump/sleep; cửa sổ 120 s + đệm 300 s so với lệch ≤ 0,2 s |
+| Chưa kiểm | nguồn tham chiếu độc lập ngoài hai pool NTP công cộng |
+| Assurance hẹp hơn hợp lệ? | không có ở mức cờ |
+| Kết luận | **đủ căn cứ cho `true`** — không còn dựa vào độ trễ nhận log một mình |
+
+### Draft approval đã sửa — CHƯA KÝ, chưa dùng được
+
+File: `scratchpad/collection-approval-B.DRAFT.json`. `confirmed_by` **cố ý để
+trống**: contract `NonBlank` từ chối nó, nên file này không thể trở thành
+approval nếu chưa có người điền. Đã dry-run: mọi trường khác validate được.
+**Không lấy danh tính từ git config.** `reviewed_at` đặt theo giờ manager lúc
+soạn; người review đổi thành giờ review thật nếu khác (chỉ cần ≥ `collected_at`).
+
+```json
+{
+  "backlog_reference": "Receipt buffer 300 s after window end. Manager-receipt lag over 118 records: min 0.20 s, median 9.18 s, max 13.98 s; 0 records over 60 s; 34 of 118 records arrived after the window end and inside the buffer. No backlog or queue messages from analysisd or remoted on 2026-09-18.",
+  "clocks_adequate": true,
+  "collected_at": "2026-09-18T01:03:05Z",
+  "confirmed_by": "",
+  "coverage_end": "2026-09-18T00:56:25.7529830Z",
+  "coverage_start": "2026-09-18T00:54:25.7529830Z",
+  "filter_reference": "Declared scope: agent 012, Sysmon eventID 1 and PowerShell eventID 4104 only. In the window the agent produced 26 provider/eventID kinds; 2 are in scope (80 + 12 records). Agent rate limit 500 eps vs about 15.6 eps observed in the window, so no throttling pressure. Sysmon64 15.22 running; no Sysmon config-change (id 16) events on 2026-09-18. Sysmon rule contents not read (non-admin): source-side exclusions are unverified.",
+  "health_reference": "Manager ossec.log 2026-09-18: no ERROR/CRITICAL inside the Run B window (07:54:25-07:56:26 +07); no drop/discard/lost/overload from wazuh-analysisd or wazuh-remoted on the whole day; two rootcheck queue CRITICALs at 08:27:18 and 08:28:08 +07 are after the window and from a module outside the event path; 57 wazuh-integratord ERRORs (Discord) are outside the event path. Agent ossec.log on the endpoint: connected to manager 07:44:41-08:10:00 +07 without interruption, covering the window and its 300 s receipt buffer; client_buffer enabled (queue 5000, 500 eps); no buffer/flood/queue warnings on 2026-09-17 or 2026-09-18.",
+  "kind": "scn001_collection_approval",
+  "native_reference": "Native EVTX not read. Manager-to-snapshot in-scope event sets are identical (84 = 84, keyed by providerName/channel/eventRecordID, none missing either way). Run binding remains caller-declared (unknown, native_review_missing) per SCN001_RUN_BINDING.md.",
+  "no_parse_errors_or_gaps": true,
+  "no_sampling_or_truncation": true,
+  "reference": "docs/ISSUE_12_SAFE_DEMO_CHECKPOINT.md (2026-09-18): sections \"Collection request moi cho Run B\", \"Soi lai approval truoc khi chot\", \"Draft approval da sua\"",
+  "request_sha256": "495021557416c40b64ba142c692ed1086947326ada291fd4c48363ee14f502c2",
+  "reviewed_at": "2026-09-18T04:06:57Z",
+  "rotation_reference": "archives.json and 2026/Sep/ossec-archive-18.json share inode 1336681 (link count 2): one file, no rotation split across the window; logall_json=yes. Endpoint channels Microsoft-Windows-Sysmon/Operational (oldest record 2026-09-12) and Microsoft-Windows-PowerShell/Operational (oldest 2026-09-14) had not wrapped over the window.",
+  "time_reference": "Manager: systemd-timesyncd to ntp.ubuntu.com, initial clock synchronization 2026-09-18T00:41:52Z (journal), no restart until 01:25:54Z; VMware Tools timesync disabled. Endpoint: W32Time to time.windows.com, valid data 00:49:07Z and synchronizing 00:49:21Z (System log id 37/35), five minutes before the window; no Kernel-General 1 time-change and no Kernel-Power sleep/resume on 2026-09-18; VMware Tools timesync disabled; uptime continuous from 00:41:23Z. Cross-check: manager receipt minus endpoint systemTime over 118 records min 0.20 s, bounding relative offset at or below 0.2 s. Limit: no reference beyond the two public NTP pools; both hosts rebooted about 00:41Z, ten minutes before Run A.",
+  "version": "0.1.0"
+}
+```
+
+So với bản lỗi: `health_reference` viết lại đúng sự thật và phủ cả agent;
+`time_reference` nêu nguồn, sự kiện đồng bộ, jump/sleep và giới hạn;
+`filter_reference`, `rotation_reference`, `backlog_reference`, `native_reference`
+bổ sung số đo phía endpoint. `request_sha256` **không đổi** vì study/profile/
+snapshot không đổi.
+
+### Cảnh báo cho Run C (không thuộc approval này, nhưng phải ghi)
+
+Agent log cho thấy trong Run C agent **rớt kết nối 7 lần** từ 01:25:54Z tới
+01:32:17Z (remoted trên manager bị flapping — journal manager ghi "Network
+configuration changed" cùng các giây đó), và snapshot C chụp lúc 01:32:18Z, **một
+giây** sau lần kết nối lại cuối. Điều đó giải thích vì sao C chỉ có 26 bản ghi so
+với 118 (B) và 196 (A), và đúng với finding medium trước đây "cửa sổ evidence
+Run C hẹp hơn độ trễ tệ nhất".
+
+Verdict `Detected` của C **vẫn đứng**: witness lúc 01:25:28–29Z, trước cú rớt
+đầu tiên 01:25:54Z, và bằng chứng dương không cần tính đầy đủ. Nhưng **mọi khẳng
+định đầy đủ thu thập cho Run C sẽ là sai**, và không được ký approval nào cho C
+trên snapshot này.
+
+### Bảng AC sửa theo ý chủ dự án
+
+| AC | Trạng thái |
+| --- | --- |
+| Payload/target approved, non-destructive | ✅ |
+| Cùng scenario version, hành vi tương đương, có tài liệu | ✅ — `scenarios/` sạch |
+| Mỗi kết luận dẫn evidence ID và raw-event reference | ✅ |
+| Rule revision trước/sau được version control | ✅ — `detections/wazuh/scn-001/{baseline,fixed}.xml.template` |
+| Comparison thể hiện chuyển trạng thái, không sửa ground truth | ✅ — ground truth (scenario, detections) không đụng; profile đổi **có duyệt, nhất quán giữa mọi report**, không phải vi phạm |
+| Fixtures/screenshots/recordings sanitize trước công bố | ✅ (n/a) — chưa tạo screenshot/recording nào nên không có gì để sanitize; fixture và checkpoint đã quét rò rỉ, sạch |
+| Demo script và operator checklist lặp lại được | ⚠️ `docs/DEMO.md` có; checklist riêng cho lab này chưa tách |
+| Tests xanh | ✅ 2565 passed, 1 skipped |
+
+Điểm lớn nhất không đổi: **Required runs** ghi "Run C: behavioral rule fix".
+Revision `fixed` khớp toàn văn script — *reviewed script-content matching*, không
+phải behavioral. **Yêu cầu cốt lõi của Issue #12 chưa đạt.**
+
+### Rollback — track riêng, không phụ thuộc approval
+
+Ký approval **không** phải điều kiện kỹ thuật để khôi phục lab. Rollback sẵn
+sàng, chưa chạy:
+
+| Điều kiện | Kết quả |
+| --- | --- |
+| Backup 118001 | `0ddd7bc0…` = hash trước lab = revision `baseline` |
+| Backup 117001 | `6b5b8615…` = hash đang cài — **không đụng** |
+| 118001 đang cài | `8186e0ee…` (`fixed`), owner `soc:wazuh`, mode 640 |
+| `soc` ghi được 118001 tại chỗ | **có** — không cần root cho bước copy |
+| `soc` ghi được 117001 | không (root:wazuh) — đúng ý, không được đụng |
+| `sudo -n` | không — **restart service cần chủ dự án** |
+
+Trình tự: (1) agent ghi đè nội dung 118001 từ backup, giữ inode/owner/mode;
+(2) agent xác minh `sha256` 118001 = `0ddd7bc0…`, 117001 = `6b5b8615…`;
+(3) chủ dự án chạy `sudo /var/ossec/bin/wazuh-control restart`; (4) agent xác
+minh analysisd PID mới, `Total rules enabled`, và hash lần nữa. Thư mục
+`C:\AEGIS-Lab` trên endpoint xoá sau cùng, khi mọi đánh giá đã xong.
+
+### Ghi chú tài liệu
+
+`docs/SCN001_COLLECTION_REVIEW.md` còn câu "chưa chạy formal A/B/C và chưa có
+kết luận Regression Passed nào trên lab thật; các kết quả hiện có đều là
+synthetic". Sau phiên này câu đó cần cập nhật; **chưa sửa** vì ngoài phạm vi
+được giao.
+
+## 2026-09-18 — Approval cuối sau review độc lập
+
+### Reviewer kết luận gì
+
+Một reviewer, chỉ-đọc, tự đo lại trên snapshot, manager và endpoint. **Cả ba cờ
+đủ căn cứ trong đúng scope đã khai.** Điểm mạnh hơn dự kiến: reviewer đọc được
+**EVTX native** trên endpoint và đối chiếu record ID với manager:
+
+| Loại | EVTX native | Manager | Snapshot |
+| --- | --- | --- | --- |
+| Sysmon 1 trong cửa sổ | 80 | 80 | 80 |
+| PowerShell 4104 trong cửa sổ | 4 (9422, 9456, 9460, 9481) | 4 | 4 |
+
+Ba tập **trùng khít**. Đây là bằng chứng dương xuyên suốt endpoint → manager →
+snapshot, không phải suy ra từ việc "không thấy cảnh báo". Nó đóng đúng chặng
+mà checkpoint trước ghi là chưa kiểm.
+
+### Ba câu phải sửa trong draft (cùng chuẩn đã áp cho `health_reference` cũ)
+
+| Reference | Câu cũ | Sự thật đo được | Nguyên nhân |
+| --- | --- | --- | --- |
+| `filter_reference` | "26 loại, 80 + 12 bản ghi", "~15,6 eps" | **25 loại, 80 + 4**, 1454 bản ghi, 12,1 eps trung bình, đỉnh 93/s | đếm bằng tiền tố chuỗi giây, rộng hơn cửa sổ thật |
+| `backlog_reference` | "34/118 đến sau khi cửa sổ đóng" | **23** sau cửa sổ + 11 trước cửa sổ = 34 ngoài cửa sổ | trộn hai chiều |
+| `time_reference` | "chặn offset ≤ 0,2 s" | **bỏ** — `lag = delay + offset`, chỉ chặn được manager không *đi trước* endpoint quá 0,2 s, không chặn chiều ngược | đúng điều chủ dự án đã chỉ ra |
+
+Bổ sung theo reviewer: `health_reference` thêm ERROR vulnerability-scanner
+07:44:42 (ngoài cửa sổ, ngoài đường sự kiện) và ghi rõ cả WARNING trong
+07:54–08:02 cũng không có; `rotation_reference` nói thật rằng channel PowerShell
+đã đầy và ghi vòng nói chung, chỉ là bản ghi trong cửa sổ được agent đọc trong
+14 s; `native_reference` ghi phép đối chiếu EVTX.
+
+### Căn cứ `clocks_adequate` sau khi bỏ câu 0,2 s
+
+1. Lịch sử NTP: manager sync 00:41:52Z, endpoint sync 00:49:21Z — cả hai trước
+   cửa sổ, cả hai không có sự kiện sync/restart nào khác cho tới sau Run B.
+2. Không jump/sleep: không `Kernel-General 1`, không `Kernel-Power 41/42/107`,
+   uptime liên tục cả hai máy.
+3. Cấu trúc phép đo: `window_start/end` trong `execution.json` **và** `systemTime`
+   của sự kiện đều từ đồng hồ endpoint, nên việc một bản ghi thuộc cửa sổ hay
+   không **không phụ thuộc** offset giữa hai máy. Offset chỉ ảnh hưởng đệm nhận
+   300 s và mốc `before_utc/after_utc` của rule receipt — hai chỗ có biên độ rất
+   rộng so với bất kỳ offset nào hai pool NTP công cộng có thể tạo ra.
+4. Giới hạn nêu rõ: phân bố trễ nhận không tự chứng minh offset; VMware timesync
+   trên endpoint chỉ quan sát được hiện tại; chỉ hai pool NTP công cộng.
+
+### Chưa kiểm — và ảnh hưởng thực tế
+
+| Chưa kiểm | Ảnh hưởng thực tế lên approval B |
+| --- | --- |
+| Nội dung rule Sysmon | sự kiện bị *loại tại nguồn* không bao giờ tồn tại để mất; là filter, không phải gap. Sysmon 1 của chính payload (PID 4136) có mặt |
+| Chính sách ScriptBlockLogging | hiệu quả đã kiểm gián tiếp: cả 4 bản 4104 đều level 5/VERBOSE, chỉ có khi bật |
+| analysisd bỏ sự kiện ở mức WARNING (`Could not read XML string`) | phép grep ERROR/CRITICAL có điểm mù; reviewer đã grep cả WARNING trong 07:54–08:02: **không có**. Một WARNING như vậy có xảy ra lúc 04:01:15Z do chính script chẩn đoán của agent, ngoài cửa sổ |
+| Bảo trì tự động trên manager | `apt-daily-upgrade.timer` có nổ lúc 08:24:36 (+07) — sau B, là nguyên nhân Run C flapping; **không** có gì chạy trong cửa sổ B |
+| VMware timesync endpoint tại thời điểm run | chỉ thấy "Disabled" hiện tại; manager có `tools.conf` không đổi từ 2025-08 |
+| EVTX so với thứ đã gửi | **đã đóng** bởi reviewer (80/80, 4/4) |
+
+Nguyên tắc giữ nguyên: thiếu cảnh báo không phải chứng minh tuyệt đối. Cái
+chứng minh ở đây là phép đối chiếu dương ba tập record ID.
+
+### Run C — sửa nguyên nhân
+
+Checkpoint trước viết remoted flapping do "Network configuration changed". Sai
+về nhân quả: journal manager cho thấy `apt-daily-upgrade.service` bắt đầu
+08:24:36 (+07), `unattended-upgrade` chạy từ 08:25:41 và qua systemd re-exec đã
+restart `wazuh-manager`, `open-vm-tools`, `timesyncd`, `ssh`, `journald`,
+`filebeat`… **7 lần** tới ~08:33. Các dòng timesyncd là triệu chứng, không phải
+nguyên nhân. Ảnh hưởng lên B: **không** — cửa sổ + đệm của B kết thúc 08:01:25,
+restart duy nhất giữa B và C là của chủ dự án lúc 08:09:59, sau khi mọi sự kiện
+B đã tới manager. Run C giữ là **positive witness**, không khai complete.
+
+### Approval cuối — hai trường chờ chủ dự án
+
+`scratchpad/collection-approval-B.DRAFT.json`. `confirmed_by` **và** `reviewed_at`
+cùng để trống; contract từ chối cả hai (đã dry-run), mọi trường khác validate.
+`reviewed_at` phải là thời điểm chủ dự án review thật, không phải giờ agent soạn.
+`request_sha256` không đổi: `49502155…`.
+
+```json
+{
+  "backlog_reference": "Receipt buffer 300 s after window end. Manager-receipt lag over 118 records: min 0.20 s, median 9.18 s, max 13.98 s; 0 records over 60 s. Every in-scope event with systemTime inside the window had reached the manager by 00:56:23.69Z, before the window closed; 23 of the 118 snapshot records carry a systemTime after the window end and 11 before its start, all inside the receipt buffer. No backlog or queue messages from analysisd or remoted on 2026-09-18.",
+  "clocks_adequate": true,
+  "collected_at": "2026-09-18T01:03:05Z",
+  "confirmed_by": "",
+  "coverage_end": "2026-09-18T00:56:25.7529830Z",
+  "coverage_start": "2026-09-18T00:54:25.7529830Z",
+  "filter_reference": "Declared scope: agent 012, Sysmon eventID 1 and PowerShell eventID 4104 only. By systemTime inside the window the agent produced 25 provider/eventID kinds and 1454 records (12.1 events/s average, 93 peak in one second, against a 500 eps agent limit); 2 kinds are in scope: 80 Sysmon 1 and 4 PowerShell 4104. Sysmon64 15.22 running; no Sysmon config-change (id 16) event on 2026-09-18; Sysmon rule contents not read (non-admin), so source-side exclusions are unverified. All four 4104 records are level 5/VERBOSE, which only occurs with script block logging enabled.",
+  "health_reference": "Manager ossec.log 2026-09-18: no ERROR, CRITICAL or WARNING inside 07:54-08:02 +07 (window plus receipt buffer); no drop/discard/lost/overload from wazuh-analysisd or wazuh-remoted on the whole day. Outside the window and outside the event path: one wazuh-modulesd vulnerability-scanner ERROR at 07:44:42, two rootcheck queue CRITICALs at 08:27:18 and 08:28:08, 57 wazuh-integratord (Discord) ERRORs. Agent ossec.log on the endpoint: connected to the manager 07:44:41-08:10:00 +07 with zero non-INFO lines, covering the window and its 300 s buffer; client_buffer enabled (queue 5000, 500 eps); no buffer/flood/queue warnings on 2026-09-17 or 2026-09-18.",
+  "kind": "scn001_collection_approval",
+  "native_reference": "Native EVTX on the endpoint read by the independent reviewer: Sysmon/Operational eventID 1 record IDs in the window (80) and PowerShell/Operational eventID 4104 record IDs (9422, 9456, 9460, 9481) are identical to the manager archive sets and to the snapshot (84 = 84, keyed by providerName/channel/eventRecordID). Run binding remains caller-declared (unknown, native_review_missing) per SCN001_RUN_BINDING.md.",
+  "no_parse_errors_or_gaps": true,
+  "no_sampling_or_truncation": true,
+  "reference": "docs/ISSUE_12_SAFE_DEMO_CHECKPOINT.md (2026-09-18): sections \"Collection request moi cho Run B\", \"Soi lai approval truoc khi chot\", \"Doi chieu ba co voi contract\", \"Approval cuoi sau review doc lap\"",
+  "request_sha256": "495021557416c40b64ba142c692ed1086947326ada291fd4c48363ee14f502c2",
+  "reviewed_at": "",
+  "rotation_reference": "archives.json and 2026/Sep/ossec-archive-18.json share inode 1336681 (link count 2): one file, no rotation split across the window; logall_json=yes. Endpoint channel Microsoft-Windows-Sysmon/Operational has never wrapped (oldest record 1). Microsoft-Windows-PowerShell/Operational is Circular and at capacity; the in-window records 9422-9481 were read by the agent within 14 s and are still present.",
+  "time_reference": "Manager: systemd-timesyncd to ntp.ubuntu.com, \"Initial clock synchronization\" 2026-09-18T00:41:52Z (journal), no timesyncd event until 01:25:54Z; VMware Tools timesync disabled (tools.conf unchanged since 2025-08-06). Endpoint: W32Time to time.windows.com, valid data 00:49:07Z and synchronizing 00:49:21Z (System log id 37 then 35), five minutes before the window; no Kernel-General 1 time-change and no Kernel-Power 41/42/107 sleep or resume on 2026-09-18; uptime continuous from 00:41:23Z; VMware Tools timesync currently disabled, its state during the window not independently verifiable. Window bounds and event systemTime both come from the endpoint clock, so window membership does not depend on the inter-host offset. The receipt-lag distribution (min 0.20 s) is transport plus offset and does not by itself bound the offset; the NTP legs do. Limits: two public NTP pools only; both hosts rebooted about 00:41Z, ten minutes before Run A.",
+  "version": "0.1.0"
+}
+```
+
+Giới hạn của kết luận khi đã ký: assurance là **caller-attested** cho đúng scope
+(agent 012, Sysmon 1 + PowerShell 4104, 00:54:25.75Z–00:56:25.75Z). Nó không nói
+gì về 23 loại sự kiện ngoài scope, không thay bước run binding (vẫn
+`native_review_missing`), và không đụng tới yêu cầu "behavioral rule fix" còn
+thiếu của Issue #12.
+
+## 2026-09-18 — Approval Run B đã ký, hai gate chạy lại, rollback bước 1
+
+### Approval
+
+| Trường | Giá trị | Nguồn |
+| --- | --- | --- |
+| `confirmed_by` | `Nguyen Le Trong Tin` | chủ dự án tự cung cấp trong chat, **không** lấy từ git config |
+| `reviewed_at` | `2026-09-18T04:26:39Z` | giờ manager (UTC) lúc nhận xác nhận |
+| `request_sha256` | `495021557416c40b64ba142c692ed1086947326ada291fd4c48363ee14f502c2` | không đổi so với bản đã trình |
+| approval sha256 | `577aa115f255e780e630bd0ddc285802725f1880348162af122a5b109bbb98b3` | |
+| mọi trường khác | y nguyên draft đã review (ba cờ, bảy references, coverage, `collected_at`) | |
+
+Lưu tại `scratchpad/collection-approval-B.json`, `context-B-attested.json`; bộ
+`unknown` gốc giữ ở `scratchpad/official/`.
+
+### Kết quả thực tế qua `evaluate_demo_run` + `compare_demo_runs`
+
+| Run | final_status | A03 | assurance |
+| --- | --- | --- | --- |
+| B | **False negative** | `false_negative` / `expected_detection_absent` | caller-attested |
+| C | **Detected** | `satisfied` / `witness_found` | unknown |
+
+B→C: **`Regression Passed`** — 2 `unchanged_pass`, 1 `improvement`, 0 `regression`;
+cùng `profile_fingerprint` hai phía. `run_binding` cả hai run vẫn `unknown`
+(`companion_record_unmatched`, `native_review_missing`).
+
+Giới hạn giữ nguyên: caller-attested cho đúng scope (agent 012, Sysmon 1 +
+4104, 00:54:25.75Z–00:56:25.75Z); Run C chỉ là positive witness, không có
+attestation; yêu cầu **behavioral rule fix** của Issue #12 vẫn chưa đạt.
+
+### Rollback bước 1 — đã thực hiện
+
+| | Trước | Sau |
+| --- | --- | --- |
+| 118001 | `8186e0ee…` (`fixed`) | **`0ddd7bc0…`** = backup = trước lab |
+| 117001 | `6b5b8615…` | `6b5b8615…` — **không đụng** |
+| inode / owner / mode 118001 | 1310848 soc:wazuh 640 | giữ nguyên |
+
+Ghi đè nội dung tại chỗ bằng quyền `soc`, không cần root. Service
+`wazuh-analysisd` PID 62766 vẫn nạp rule cũ; **bước 2 cần chủ dự án**:
+`sudo /var/ossec/bin/wazuh-control restart`, sau đó agent xác minh PID mới,
+`Total rules enabled`, hash lần nữa. Thư mục `C:\AEGIS-Lab` trên endpoint xoá
+sau cùng.
+
+Chưa push, chưa merge, chưa đóng Issue #12.
+
+## 2026-09-18 — Rollback hoàn tất, xác minh sau restart
+
+Chủ dự án chạy `wazuh-control restart`. Quan sát lúc `2026-09-18T04:28:45Z`:
+
+| Kiểm | Kết quả |
+| --- | --- |
+| `wazuh-analysisd` | PID **80464**, khởi động 04:28:19Z — **sau** khi file được khôi phục (04:27:03Z) |
+| `wazuh-remoted` | PID 80538/80539, 04:28:20Z |
+| `Total rules enabled` sau restart | 15891 (không đổi: cùng số rule, nội dung 118001 đã về baseline) |
+| 118001 | `0ddd7bc0…` — description "filename baseline matched" |
+| 117001 | `6b5b8615…` — **không đụng suốt lab** |
+| ERROR/CRITICAL analysisd khi nạp rule | không có |
+
+Rule demo trên manager đã về đúng trạng thái trước lab. Thư mục `C:\AEGIS-Lab`
+trên endpoint (payload, runner, `runs/`) **chưa xoá** — chờ chủ dự án quyết,
+vì đó là bản gốc của execution manifests đã sao chép về scratchpad.
+
+Trạng thái cuối phiên: B **False negative** (caller-attested), C **Detected**
+(positive witness, không attestation), B→C **Regression Passed**; giới hạn và
+yêu cầu behavioral fix còn thiếu ghi ở các mục trước. Chín file chưa commit.
+Chưa push, merge hay đóng Issue #12.
+
+## 2026-09-18 — Bước tiếp Issue #12: đề xuất behavioral rule fix (chờ duyệt một lần)
+
+### Điểm xuất phát đã kiểm
+
+| Mục | Trạng thái |
+| --- | --- |
+| Branch / HEAD | `codex/issue-12-safe-demo` @ `9acaff3`, 9 file chưa commit giữ nguyên |
+| Lab | 118001 = `0ddd7bc0…` (baseline, trước lab), 117001 = `6b5b8615…`, analysisd PID 80464 |
+| Thí nghiệm A/B/C cũ | **giữ nguyên nhãn**: B False negative caller-attested, C Detected, B→C Regression Passed; `fixed` là script-content matching, **chưa** là behavioral fix |
+| `wazuh-logtest` trên manager | `root:wazuh` 750; `soc` không thuộc group `wazuh` → **logtest native cần chủ dự án chạy** |
+
+### Hành vi quan sát được của scenario (từ evidence thật)
+
+1. Sysmon 1: `powershell.exe -NoLogo -NoProfile -NonInteractive -File "<lab>\<name>.ps1"`,
+   parent `powershell -EncodedCommand` (runner), `currentDirectory` = thư mục lab, integrity High.
+2. PowerShell 4104: script block = payload; **parent 91816 nổ chỉ vì `$PID`**
+   (`(?i)(\$env:TEMP|\$env:USERNAME|\$env:COMPUTERNAME|\$env:USERDOMAIN|\$PID)`, T1082).
+
+Payload hiện tại (`Write-Output 'AEGIS_SAFE_DEMO_V1'; Write-Output ('AEGIS_PID=' + $PID)`)
+chỉ có **một** hành vi: đọc `$PID` và in ra. Hành vi đó trùng đúng regex của parent
+91816, nên mọi rule con dưới 91816 không phân biệt được payload với bất kỳ script
+lành tính nào chạm `$PID`/`$env:*` — control "lành tính không match" không thể đứng.
+
+### Parent rule: đổi từ 91816 sang 91802
+
+Cả họ 0915 (91803–91846) đều là con của **91802** (level 0, chỉ đòi có `ScriptBlockId`).
+Treo 118001 dưới 91816 khiến control nào không chứa `$env:/$PID` **không bao giờ tới**
+118001 — ra `not_demo` vì lý do sai (không được đánh giá). Treo dưới 91802 thì mọi 4104
+đều được đánh giá; 118001 (level 5) và 91816 (level 4) là anh em, Wazuh báo rule có
+level cao nhất khi cùng match — **giả định cần xác minh bằng logtest**.
+
+### Hai phương án
+
+**A — không đổi payload.** Revision `behavioral`, parent 91802, pcre2 trên `scriptBlockText`:
+"giá trị định danh tiến trình được ghi ra output" — bất kỳ cách viết nào trong họ
+`Write-Output|Write-Host|echo|[Console]::WriteLine` kết hợp `$PID|GetCurrentProcess().Id`,
+hoặc dạng pipe `... $PID ... | Write-*`. Controls: đổi tên → detected; viết lại
+`"AEGIS_SAFE_DEMO_V1","AEGIS_PID=$PID" | Write-Output` (cùng stdout) → detected;
+`$x = $PID` không in → not matched; `Write-Output $env:COMPUTERNAME` → not matched (chỉ 91816).
+Điểm yếu: ý nghĩa an ninh mỏng ("in PID của chính nó"); regex phủ một họ cách viết hữu hạn.
+Không đổi ground truth, không đổi study pin payload.
+
+**B — làm giàu payload (cần duyệt).** Payload thực hiện discovery lành tính, stdout
+**giữ nguyên hợp đồng** `AEGIS_SAFE_DEMO_V1` / `AEGIS_PID=<pid>`:
+
+```powershell
+$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }
+Write-Output 'AEGIS_SAFE_DEMO_V1'
+Write-Output ('AEGIS_PID=' + $facts.Pid)
+```
+
+Rule `behavioral`, parent 91802, hội cả hai hành vi trong một script block:
+`(?is)(?=.*(?:\$env:(?:COMPUTERNAME|USERNAME|USERDOMAIN)|GetEnvironmentVariable|\[Environment\]::(?:MachineName|UserName)))(?=.*(?:\$PID|GetCurrentProcess\(\)\.Id))`
+— tức "system + process identity discovery" (T1082), không phụ thuộc tên file, toàn văn hay marker.
+Controls: đổi tên → detected; viết lại bằng `[Environment]::MachineName` + `GetCurrentProcess().Id`
+→ detected; env-only (`Write-Output $env:COMPUTERNAME`) → not matched (91816); **payload cũ**
+(pid-only) → not matched — chứng minh rule mới hẹp hơn parent; thiếu `scriptBlockText` → unknown;
+fragmented → not matched. Telemetry không đổi (Sysmon 1 + 4104). Scenario YAML **không đổi**
+(assertions chung); đổi: `PAYLOAD` trong `study.py`/`prepare_scn001_kit.py`, pin `payload` của
+study, fixture kit tests, `run.py` chấp nhận revision `behavioral` cho label C.
+Ý nghĩa an ninh rõ hơn: gần với rule săn discovery thật.
+
+**Khuyến nghị: B.** A đúng chữ "behavioral" nhưng thực chất chỉ tái phát biểu regex của parent.
+
+### Phạm vi làm sau khi duyệt (chung cho A/B)
+
+- Template `detections/wazuh/scn-001/behavioral.xml.template`, `render_rule` thêm revision, tests
+- Kit: logtest-cases thêm reworded / env-only / pid-only / missing-text; catalog expected cho 3 revision
+- `run.py`: label C chấp nhận `behavioral`; study contract pin revision thứ ba
+- Bộ A/B/C **mới** trên lab: run ID, manifests, snapshots riêng; cùng scenario 0.1.0 và profile; không trộn với thí nghiệm cũ; attestation mới nếu cần, trình nguyên văn
+- Logtest native: kit sinh input; **chủ dự án chạy** `wazuh-logtest` trên manager, agent đối chiếu provenance
+- Operator checklist, evidence đã sanitize, backup/rollback 118001, giữ 117001
+
+## 2026-09-18 — Phương án B được duyệt: behavioral revision, payload làm giàu, kit 0.2.0
+
+### Thay đổi code (TDD: tests đỏ trước, xanh sau)
+
+| File | Thay đổi |
+| --- | --- |
+| `detections/wazuh/scn-001/behavioral.xml.template` | **mới** — rule hành vi, `$behavior_pattern`, guards giữ nguyên |
+| `demos/scn-001/payload.ps1` | payload discovery lành tính; stdout **không đổi** |
+| `scripts/prepare_scn001_kit.py` | `PAYLOAD` mới, `REVISIONS` 3 revision, `BEHAVIOR_PATTERN` **không dẫn xuất từ payload**, `KIT_VERSION 0.2.0`, 15 logtest case với cột `expected_behavioral`, `original` lấy text từ `PAYLOAD` |
+| `backend/app/demo/study.py` | `PAYLOAD`, `_CASES` (+env-only, pid-only, reworded), `_ARTIFACTS` (+behavioral.xml), kit 0.2.0, pin `behavioral` |
+| `backend/app/demo/_study_contracts.py` | `Pins.behavioral` |
+| `backend/app/demo/run.py` | label C → revision `behavioral`; `fixed` vẫn được ship/pin nhưng không label nào áp dụng |
+| `demos/scn-001/Invoke-SafeDemo.ps1` | reviewed bytes mới, 3 revision, C → behavioral, hash-check `behavioral.xml`, kit 0.2.0 |
+| `tests/fixtures/demo/scn-001/rule-cases/base.synthetic.json` | scriptBlockText = payload mới |
+| 5 file test | ghim mới + controls: reworded/env-only/pid-only, `(C, fixed)` giờ là lựa chọn không hợp lệ |
+
+Pattern hành vi (pcre2, hai lookahead trong một script block):
+
+```text
+(?is)(?=.*(?:$env:(?:COMPUTERNAME|USERNAME|USERDOMAIN)|[Environment]::(?:MachineName|UserName|UserDomainName)|GetEnvironmentVariable))(?=.*(?:$PID|GetCurrentProcess().Id))
+```
+
+Test ghim rằng pattern **không chứa** `AEGIS`, `Write-Output`, tên file hay `$facts`; khớp
+payload mới, bản flatten, bản viết lại (`[Environment]::MachineName` + `GetCurrentProcess().Id`),
+bản chữ thường; **không** khớp payload cũ (pid-only), env-only, marker-only, `$x = $PID`,
+`Get-Process -Id $PID`. Giới hạn nêu rõ trong catalog: `comment-only` (mã bị comment) vẫn match —
+rule văn bản không phân biệt được mã chết.
+
+Full suite **2571 passed, 1 skipped**; `pip check` sạch.
+
+### Kit v2 và lab
+
+| Mục | Giá trị |
+| --- | --- |
+| kit | `scratchpad/kit-lab-118001-v2/`, lab dir **`C:\AEGIS-Lab\SCN001-v2`** (thư mục riêng, `SCN001` cũ không đụng) |
+| payload sha256 | `e8a5ebee1cb2dc30…` |
+| baseline.xml (parent 91802, path v2) | `8dcb4020f9d1422c…` |
+| fixed.xml | `420a0cfe4a162d15…` |
+| behavioral.xml | `351ddc13ad4a0807…` |
+| endpoint | 6/6 file khớp `kit.json` |
+| manager staging | `~/aegis-v2/` (rules, kit.json, 15 logtest case, driver) — **không cài** |
+| backup trước v2 | `~/aegis-rule-backup-v2/118001-before-v2.xml` = `0ddd7bc0…` (pre-lab) |
+| 118001 hiện tại (file) | `8dcb4020…` = baseline v2; **analysisd chưa nạp** (PID 80464) |
+| 117001 | `6b5b8615…` không đổi |
+
+### Trình tự bộ A/B/C mới (mỗi restart cần root của chủ dự án)
+
+1. Restart → logtest `baseline` (kỳ vọng: original/renamed theo catalog; xác minh Wazuh chọn rule level cao nhất giữa anh em 118001/91816)
+2. Run A, Run B (baseline v2), trích snapshot riêng
+3. Cài `behavioral.xml` → restart → logtest `behavioral` (reworded/env-only/pid-only)
+4. Run C (behavioral), trích snapshot
+5. Study v2 từ telemetry đo được, `evaluate_demo_run` + `compare_demo_runs`; attestation mới cho B nếu cần, trình nguyên văn
+6. Rollback 118001 về `0ddd7bc0…` → restart → xác minh
+
+## 2026-09-18 — Bộ v2: Run A, Run B xong trên baseline v2 (parent 91802)
+
+| Mục | Giá trị |
+| --- | --- |
+| Restart #1 (chủ dự án) | analysisd PID **86151**, 04:21:12Z-ish, 15891 rule; 118001 = `8dcb4020…` baseline v2 |
+| Run A | `scn001v2-a-20260918T0523Z`, child 6692, runner 6984, window 05:23:16.905Z–05:25:16.972Z; hash obs 05:23:16Z / 05:25:18Z = `8dcb4020…` |
+| Run B | `scn001v2-b-20260918T0525Z`, child 7036, runner 2184, window 05:25:35.424Z–05:27:35.538Z; hash obs 05:25:34Z / 05:27:36Z = `8dcb4020…` |
+| stdout | cả hai đúng `AEGIS_SAFE_DEMO_V1` / `AEGIS_PID=<child>` |
+
+### Đo được trên telemetry thật
+
+| Run | Payload 4104 | Rule nổ | Ý nghĩa |
+| --- | --- | --- | --- |
+| A | recID 11513, pid 6692, `lab_update.ps1` | **118001** (L5) | 91816 (L4) cũng khớp `$env:/$PID` nhưng Wazuh báo 118001 → **sibling level cao hơn thắng** — giả định thiết kế được xác nhận bằng dữ liệu, không cần logtest cho điểm này |
+| B | recID 12313, pid 7036, `maintenance_check.ps1` | **91816** | đúng gap: event tới parent chain, baseline (theo tên) không khớp |
+
+Sysmon 1 đo được: A recID 8280 (parent 6984), B recID 8296 (parent 2184); command line dạng
+`powershell.exe -NoLogo -NoProfile -NonInteractive -File "C:\AEGIS-Lab\SCN001-v2\<name>.ps1"`,
+lưu tại `scratchpad/sysmon1_v2.json` để study v2 lấy giá trị, không gõ tay.
+
+Lưu ý: logtest driver lần đầu lỗi cú pháp do agent ghi sai `
+`; đã tách phần Python ra
+`aegis_logtest_v2.py` và kiểm `bash -n` + `py_compile` trên manager. Kết quả logtest
+baseline chưa có (chủ dự án chạy lại khi tiện); điểm cần logtest nhất đã được telemetry thật trả lời.
+
+### Đã chuẩn bị cho Run C
+
+| Mục | Giá trị |
+| --- | --- |
+| backup baseline v2 | `~/aegis-rule-backup-v2/118001-baseline-v2.xml` = `8dcb4020…` |
+| backup pre-lab | `~/aegis-rule-backup-v2/118001-before-v2.xml` = `0ddd7bc0…` |
+| 118001 (file) | **`351ddc13…` = behavioral**, parent 91802; analysisd (86151) chưa nạp |
+| 117001 | `6b5b8615…` không đổi |
+
+Cần chủ dự án: `wazuh-control restart` rồi `aegis_logtest_v2.sh behavioral`. Sau đó Run C.
+
+## 2026-09-18 — Bộ v2: Run B attestation (request + draft, chưa ký)
+
+| Mục | Giá trị |
+| --- | --- |
+| request sha256 | **`65b50de1ac2e5454849e101421bc2e51ddd6b1f25e134ddd91ec66f88fddf7ca`** |
+| run_id / cửa sổ | `scn001v2-b-20260918T0525Z`, `05:25:35.4238238Z`–`05:27:35.4238238Z` |
+| study / profile v2 | `d3889018…` / fingerprint `4f140927…` |
+| snapshot | `B-declared.jsonl` sha `540285ca…`, 38 bản ghi, chụp `05:32:44Z` (sau khi đệm 300 s đóng; lần chụp 05:30:06Z bị loại vì sớm, bytes giống hệt) |
+| manager ↔ snapshot trong cửa sổ | **10 = 10**, không thiếu/thừa |
+| rule block | 10 alert trong cửa sổ, 0 thiếu block |
+| lag | min 0,94 / trung vị 1,72 / max 10,40 s |
+| manager health | không ERROR/CRITICAL/WARNING 12:25–12:33 (+07) |
+| agent | kết nối 12:21:15 (+07) → không rớt tới sau 12:32:36; buffer không tràn |
+| đồng hồ | manager NTP active; endpoint last sync 00:49:21Z (4 h 36 m trước), poll 32768 s, không đổi giờ/sleep |
+| **điểm phải đọc kỹ** | channel PowerShell/Operational **đã ghi vòng** (oldest 00:54:46Z, vẫn trước cửa sổ 4,5 h); endpoint chưa sync NTP lại từ 00:49Z |
+
+Draft: `scratchpad/collection-approval-B-v2.DRAFT.json`, `confirmed_by` và `reviewed_at` để trống (contract từ chối, đã dry-run). Không tái dùng chữ ký của snapshot cũ.
+
+```json
+{
+  "backlog_reference": "Receipt buffer 300 s after window end; snapshot taken at 05:32:44Z, after the buffer closed (a first pull at 05:30:06Z was discarded as premature and produced identical bytes). Manager-receipt lag over 38 records: min 0.94 s, median 1.72 s, max 10.40 s; none over 60 s. No backlog or queue messages.",
+  "clocks_adequate": true,
+  "collected_at": "2026-09-18T05:32:44Z",
+  "confirmed_by": "",
+  "coverage_end": "2026-09-18T05:27:35.4238238Z",
+  "coverage_start": "2026-09-18T05:25:35.4238238Z",
+  "filter_reference": "Declared scope: agent 012, Sysmon eventID 1 and PowerShell eventID 4104 only. In-window in-scope events: 10 on the manager, 10 in the snapshot, identical sets keyed by providerName/channel/eventRecordID. Sysmon64 15.22; rule contents not read (non-admin). Script block logging active: payload 4104 present at level VERBOSE.",
+  "health_reference": "Manager ossec.log 2026-09-18: no ERROR, CRITICAL or WARNING between 12:25 and 12:33 +07 (window plus receipt buffer); the only analysisd WARNING of the day is the 04:01:15Z XML-parse warning caused by the operator diagnostic script, outside every window; no drop/discard/lost/overload from analysisd or remoted. Agent ossec.log: connected to the manager at 12:21:15 +07 (after restart #1 of the v2 set) and no Lost/Unable line until after 12:32:36; client_buffer enabled (queue 5000, 500 eps); no buffer/flood/queue warnings.",
+  "kind": "scn001_collection_approval",
+  "native_reference": "Native EVTX not read for this window. Manager-to-snapshot in-scope event sets identical (10 = 10). Run binding remains caller-declared per SCN001_RUN_BINDING.md.",
+  "no_parse_errors_or_gaps": true,
+  "no_sampling_or_truncation": true,
+  "reference": "docs/ISSUE_12_SAFE_DEMO_CHECKPOINT.md (2026-09-18): section \"Bo v2: Run B attestation\"",
+  "request_sha256": "65b50de1ac2e5454849e101421bc2e51ddd6b1f25e134ddd91ec66f88fddf7ca",
+  "reviewed_at": "",
+  "rotation_reference": "archives.json and 2026/Sep/ossec-archive-18.json share inode 1336681 (link count 2), no rotation split; logall_json=yes. Endpoint Microsoft-Windows-Sysmon/Operational oldest record 2026-09-12. Microsoft-Windows-PowerShell/Operational HAS wrapped: oldest record now 2026-09-18T00:54:46Z, which is 4.5 h before this window; in-window records were read by the agent within about one second and are present.",
+  "time_reference": "Manager: systemd-timesyncd active and synchronized (timedatectl), initial sync 2026-09-18T00:41:52Z; wazuh-control restart at 12:21 +07 did not touch timesyncd (no journal entries 12:15-12:35). Endpoint: W32Time to time.windows.com, last successful sync 2026-09-18T00:49:21Z, 4 h 36 min before this window; SpecialPollInterval 32768 s so no further sync was due; no Kernel-General 1 time change and no Kernel-Power sleep/resume after 04:30Z; uptime continuous from 00:41:23Z. Cross-check: manager receipt minus endpoint systemTime min 0.94 s, a one-directional bound only. Window bounds and event systemTime both come from the endpoint clock, so window membership does not depend on the inter-host offset. Limits: two public NTP pools; endpoint free-running on its VM clock since 00:49Z within a 120 s window plus 300 s buffer.",
+  "version": "0.1.0"
+}
+```
+
+## 2026-09-18 — Bộ v2: Run C, đánh giá, và một finding về khoảng thực thi
+
+| Mục | Giá trị |
+| --- | --- |
+| Restart #2 (chủ dự án) | analysisd PID **89883**, 05:36:34Z, 15891 rule; 118001 = `351ddc13…` behavioral |
+| Run C | `scn001v2-c-20260918T0537Z`, child 5584, runner 1104, window 05:37:45.115Z–05:39:45.212Z; hash obs 05:37:44Z / 05:39:46Z = `351ddc13…` |
+| Payload 4104 C | recID **13166**, pid 5584 → **118001 "behavior matched, environment and process identity discovery"** |
+| Sysmon 1 C | recID 8385, parent 1104; command line = B (đo được) |
+| Snapshot C | `C-declared.jsonl` sha `a348cbbc…`, 31 bản ghi, 6 trong cửa sổ, chụp 05:44:51Z sau khi đệm đóng; manager↔snapshot **6=6** |
+
+### Qua `evaluate_demo_run` / `evaluate_bundle`
+
+| Run | evaluate_demo_run | evaluate_bundle | A03 |
+| --- | --- | --- | --- |
+| A | **Detected** | Detected | witness_found |
+| B | **từ chối** (binding `conflict`) | Inconclusive | collection_not_confirmed |
+| C | (chưa chạy tới, driver dừng ở B) | Detected | witness_found |
+
+### Finding: companion ngoài khoảng thực thi 2,3 ms
+
+Binding B v2: `conflict [companion_record_unmatched, native_review_missing, outside_execution_interval]`.
+Bản ghi gây conflict là companion `$global:?` (pid 7036, không path) — script block PowerShell
+ghi lúc tắt tiến trình. Đo trên cả ba run:
+
+| Run | child sống | companion so với `exit_observed_utc` | kết quả |
+| --- | --- | --- | --- |
+| A | 0,250 s | −0,5 ms | INSIDE |
+| B | 0,227 s | **+2,3 ms** | **OUTSIDE → conflict** |
+| C | 0,313 s | −87 ms | INSIDE |
+
+Đây là race giữa log shutdown của PowerShell và thời điểm runner quan sát child thoát, cỡ mili-giây.
+`_candidates` áp `outside_execution_interval` cho **mọi** document trong nhóm, kể cả companion.
+Reviewer trước đã ghi nhận hành vi này là fail-closed và tôi chấp nhận; telemetry thật cho thấy nó
+chặn một run hợp lệ. **Không tự nới.** Đề xuất (chờ duyệt): chỉ với vai trò companion, cho phép
+trễ sau exit ≤ 1 s (fail closed ngoài mức đó); bản ghi bound giữ khoảng nghiêm ngặt. Patch dự thảo
+ở `scratchpad/proposal-companion-grace.diff`, kèm test. Nếu không duyệt: B v2 không có report
+`evaluate_demo_run`, kết quả engine là Inconclusive/collection_not_confirmed, không compare chính thức.
+
+### Logtest behavioral: harness lỗi, chưa có kết quả
+
+Owner chạy `aegis_logtest_v2.sh behavioral`: `fired=None` ở **mọi** case, kể cả `env-only` (đáng ra 91816)
+→ driver không đưa được event vào decoder; 11 dòng PASS là rỗng. Driver đã sửa để lưu raw output từng
+case vào `~/aegis-v2/raw/`; cần chạy lại để đọc. Điểm quan trọng nhất (sibling level, behavioral
+nổ trên payload thật) đã được telemetry A/B/C trả lời; logtest còn cần cho các control synthetic
+(reworded/env-only/pid-only).
+
+### Rollback bước 1 — đã thực hiện
+
+| | |
+| --- | --- |
+| backup behavioral | `~/aegis-rule-backup-v2/118001-behavioral-v2.xml` = `351ddc13…` |
+| 118001 (file) | **`0ddd7bc0…`** = pre-lab, parent 91816, inode 1310848 soc:wazuh 640 |
+| 117001 | `6b5b8615…` không đổi suốt cả hai bộ |
+| analysisd | PID 89883 **vẫn nạp behavioral** — cần restart #3 |
+
+## 2026-09-18 — Truy vết lệch hash logtest, cài lại behavioral, driver thành gate cứng
+
+Chủ dự án chạy `logtest behavioral` thấy installed `0ddd7bc0…` ≠ expected `351ddc13…`, rồi restart (#3, analysisd 93645, 05:49:51Z).
+
+**Truy vết**: mtime 118001 = 05:47:32Z = đúng lúc agent tạo `118001-behavioral-v2.xml` backup và khôi phục pre-lab
+(rollback bước 1, đã ghi ở mục trước). Restart #3 vì thế nạp bản pre-lab (parent 91816). Không có file trôi.
+Alert 118001 cuối trong `alerts.json` (05:37:57Z) vẫn mang mô tả behavioral → Run C v2 thực sự chạy trên behavioral
+(gate của C lúc đó: hash quan sát trước/sau `351ddc13…` + analysisd 89883 nạp sau khi file ghi + alert thật). Logtest
+behavioral chưa từng chạy hợp lệ — đó là điểm chủ dự án bắt đúng.
+
+| Hành động | Kết quả |
+| --- | --- |
+| Backup pre-lab lần nữa | `~/aegis-rule-backup-v2/118001-prelab-again-*.xml` = `0ddd7bc0…` |
+| Cài lại behavioral | 118001 = **`351ddc13…`**, parent 91802, inode 1310848 soc:wazuh 640 |
+| 117001 | `6b5b8615…`, mtime 2026-09-14 — **chưa bao giờ bị đụng** |
+| Driver | gate cứng: installed hash ≠ expected → exit 3, không chạy case; analysisd khởi động trước lần ghi file → exit 3; in hash 117001; raw output từng case vào `~/aegis-v2/raw/` |
+| Self-test gate (soc) | hash khớp nhưng analysisd 93645 trước lần ghi → **exit 3** đúng như thiết kế |
+
+Cần: restart #4 rồi logtest behavioral. Run C v2 hiện có giữ nguyên làm evidence; việc chạy lại C dưới gate logtest
+là quyết định của chủ dự án (chạy lại sẽ tạo run ID/snapshot riêng, không trộn).
+
+## 2026-09-18 — Logtest gate qua nhưng harness rỗng lần hai; chuyển sang socket
+
+Restart #4: analysisd **96274** khởi động 05:54:14Z, sau lần ghi file 05:51:34Z → gate driver qua; 118001 = `351ddc13…`, 117001 = `6b5b8615…`.
+Nhưng `fired=None` ở mọi case lần nữa. Raw output cho thấy `wazuh-logtest -q` với stdin không phải TTY trả **rc=0 và không in gì**:
+client CLI thoát ở EOF trước khi nhận kết quả. 11 dòng PASS vì thế là rỗng — driver cũ không được tính.
+
+Driver Python viết lại: nói chuyện thẳng với `/var/ossec/queue/sockets/logtest` (giao thức `{version:1, command:log_processing, parameters:{event, log_format, location:EventChannel}}`),
+thử `log_format` `eventchannel` → `json` → `syslog`, dừng ở format đầu tiên được decode; in decoder và rule; raw response từng case vào `~/aegis-v2/raw/`;
+**exit 4 "HARNESS FAIL" nếu không case nào được decode** — không còn khả năng PASS rỗng. Gate hash/PID trong shell wrapper giữ nguyên.
+Socket là `wazuh:wazuh 660` nên vẫn cần root; `py_compile` OK trên manager.
+
+## 2026-09-18 — Logtest socket: decode bằng `json`, chưa tới chuỗi Windows; probe đối chứng
+
+Driver socket (log_format `eventchannel`, location `EventChannel`) được analysisd trả lời, nhưng `decoder.name = json`
+cho **mọi** case, kể cả `env-only` không nổ 91816. Nguyên nhân cấu trúc: `windows_eventchannel` không phải decoder XML
+mà nằm trong analysisd, chỉ áp khi nguồn có log_format eventchannel; rule 60000 gate bằng `<decoded_as>windows_eventchannel</decoded_as>`,
+nên decoder `json` chung không bao giờ dẫn tới 91801/91802/118001. CLI `wazuh-logtest` cố định log_format syslog → không dùng được.
+Bốn dòng FAIL + mười một dòng PASS của lần này **không phải** kết quả rule.
+
+Đối chứng đã chuẩn bị: `~/aegis-v2/aegis_logtest_probe.py` (root) gửi qua socket **dòng thật** của payload B v2 (pid 7036, lấy từ
+`archives.log` dạng `(<lab-endpoint>) any->EventChannel {…}`) và case synthetic `original`, với 5 tổ hợp log_format/location, in decoder + rule.
+Nếu dòng thật cũng ra `json` → logtest không thể tái tạo đường eventchannel; controls synthetic phải chuyển sang cách khác
+(đề xuất sau, không tự làm). Nếu dòng thật ra `windows_eventchannel` → khác biệt nằm ở shape synthetic, sửa kit cases.
+
+Bằng chứng chính cho behavioral vẫn là telemetry thật: A → 118001 (baseline), B → 91816, C → 118001 "behavior matched".
+
+## 2026-09-18 — Probe: wazuh-logtest không tái tạo được đường eventchannel (giới hạn công cụ)
+
+Probe (root) gửi qua socket logtest cả **dòng thật** của payload B v2 (pid 7036, nguyên văn từ `archives.log`) lẫn case synthetic,
+với 5 tổ hợp `log_format` × `location` (`eventchannel`/`json`/`eventlog`/`syslog`; `EventChannel` và `(<lab-endpoint>) any->EventChannel`):
+**10/10 ra decoder `json`, rule None.** Vậy `windows_eventchannel` chỉ được áp cho message agent → remoted → analysisd;
+logtest (CLI lẫn socket) trên Wazuh 4.14.4 không đi qua nó. Rule 60000 gate `<decoded_as>windows_eventchannel</decoded_as>`
+nên không rule Windows nào đánh giá được từ logtest.
+
+Hệ quả cho yêu cầu "chạy logtest bằng input native": **không đạt được bằng wazuh-logtest** trên bản này. Không phải lỗi
+kit hay rule; kit cases vẫn đúng shape (giống dòng thật trừ `message`/`providerGuid` v.v. không được rule dùng).
+
+Những gì ĐÃ xác minh trên engine thật (đường agent thật):
+
+| Control | Cách xác minh | Kết quả |
+| --- | --- | --- |
+| original (đổi tên file, baseline) | Run A v2 | 118001 baseline |
+| renamed (baseline) | Run B v2 | 91816, không 118001 → gap |
+| renamed (behavioral) | Run C v2 | **118001 behavioral** |
+| sibling level (118001 L5 vs 91816 L4 dưới 91802) | Run A v2 | 118001 thắng |
+| reworded / env-only / pid-only / marker-only / comment-only | **chưa** trên engine thật; chỉ pytest regex (Python `re`, không phải PCRE2) | offline |
+
+Lựa chọn cho phần chưa xác minh trên engine thật (chờ chủ dự án):
+
+- **(a)** chạy các control lành tính qua đường agent thật trên endpoint (script env-only, pid-only, reworded; mỗi cái ~1 dòng, không ghi file),
+  đọc rule nổ trong archives — cần duyệt vì là hành vi lab mới, dù vô hại; không thuộc scenario A/B/C.
+- **(b)** chấp nhận giới hạn: controls chỉ ở mức pytest regex + ghi rõ trong docs/AC là chưa qua PCRE2 thật.
+
+## 2026-09-18 — Controls qua đường agent thật (được duyệt) — bằng chứng engine thực
+
+Run ID `scn001v2-controls-20260918T060503Z`, thư mục `C:\AEGIS-Lab\controls-v2`, behavioral `351ddc13…` đang nạp
+(analysisd 96274; hash quan sát 06:05:03Z / 06:05:14Z). Runner PID 4080, mỗi script chạy `powershell -NoLogo -NoProfile -NonInteractive -File`, không ghi file, không đổi cấu hình.
+
+| Script | sha256 | child PID | launch → exit (UTC) | Sysmon 1 recID | 4104 recID | Rule nổ | Kỳ vọng |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `env-only.ps1` (`Write-Output $env:COMPUTERNAME`) | `9cc01be3…` | 1788 | 06:05:03.629 → .849 | 8487 | 13736 | **91816** | not 118001 ✓ |
+| `pid-only.ps1` (payload cũ) | `0226fc3c…` | 7964 | 06:05:06.859 → 07.125 | 8489 | 13752 | **91816** | not 118001 ✓ — rule mới hẹp hơn parent |
+| `reworded.ps1` (`[Environment]::MachineName` + `GetCurrentProcess().Id`) | `a813f41e…` | 6332 | 06:05:10.142 → .300 | 8491 | 13769 | **118001** "behavior matched" | 118001 ✓ |
+
+Nguyên văn script + hash: `scratchpad/controls-v2/controls.json`; manifest run: `run_output.json`; 6 dòng raw archives: `raw-evidence.jsonl`.
+Đây là kiểm chứng PCRE2 thật qua analysisd; pytest regex (Python `re`) chỉ là đặc tả offline, không thay thế.
+
+Chưa qua engine thật: `marker-only`, `comment-only` (không được duyệt chạy; giữ ở mức offline, giới hạn `comment-only` đã nêu).
+
+## 2026-09-18 — Companion grace áp dụng (TDD), bộ v2 qua hai gate, approval cuối chờ duyệt
+
+### Grace: timestamp nào lệch, vì sao hợp lệ
+
+- **Lệch**: `systemTime` của companion (PowerShell đóng dấu khi ghi block lúc tắt) so với `exit_observed_utc` (runner đóng dấu khi thấy child thoát).
+  Hai đồng hồ trên cùng host đọc cùng một khoảnh khắc từ hai phía; đo: A −0,5 ms, B **+2,3 ms**, C −87 ms.
+- **Contract**: `COMPANION_EXIT_GRACE_NS = 1_000_000_000` (hữu hạn, trong `run_binding.py`, ghi ở `SCN001_RUN_BINDING.md`).
+  Chỉ áp cho companion (4104, không path, đúng `child_pid`, đủ provenance), chỉ sau exit, chỉ trong ngưỡng; ghi lý do `companion_after_exit` (unknown).
+  Bound record (Sysmon 1, block có path) giữ khoảng nghiêm ngặt; PID khác → vẫn conflict; cross-check native không bị bỏ qua.
+- **Tests mới (8)**: trong ngưỡng (+0,5 s, đúng 1,0 s) → unknown + `companion_after_exit`; ngoài (1 ns quá, +1,5 s) → conflict; PID sai → conflict, không grace;
+  bound record +0,5 s → conflict; duplicate bound + companion trễ → `multiple_candidates`; receipt sai với companion trễ → `native_metadata_mismatch`.
+- Suite: binding 88 passed; **full 2579 passed, 1 skipped**.
+
+### Bộ v2 qua `evaluate_demo_run` + `compare_demo_runs` (chưa attest)
+
+| Run | final_status | binding |
+| --- | --- | --- |
+| A `scn001v2-a-20260918T0523Z` | **Detected** | unknown [companion_record_unmatched, native_review_missing] |
+| B `scn001v2-b-20260918T0525Z` | **Inconclusive** (`collection_not_confirmed`) | unknown [**companion_after_exit**, companion_record_unmatched, native_review_missing] |
+| C `scn001v2-c-20260918T0537Z` | **Detected** | unknown [companion_record_unmatched, native_review_missing] |
+
+Compare B→C chưa attest: **Inconclusive**, {'unchanged_pass': 2, 'became_evaluable': 1}.
+Request B v2 tái tạo sau patch: **`65b50de1ac2e5454…` không đổi** (study `d3889018…`, bundle không đổi) → material được bind không đổi.
+
+### Approval cuối v2 — chờ duyệt một lần
+
+`scratchpad/collection-approval-B-v2.FINAL-DRAFT.json`: `confirmed_by` = **Nguyen Le Trong Tin** (tên chủ dự án xác nhận), `reviewed_at` để trống —
+sẽ điền giờ manager UTC lúc nhận duyệt. Contract từ chối bản trống (dry-run); mọi trường khác validate. Không tái dùng approval cũ.
+
+```json
+{
+  "backlog_reference": "Receipt buffer 300 s after window end; snapshot taken at 05:32:44Z, after the buffer closed (a first pull at 05:30:06Z was discarded as premature and produced identical bytes). Manager-receipt lag over 38 records: min 0.94 s, median 1.72 s, max 10.40 s; none over 60 s. No backlog or queue messages.",
+  "clocks_adequate": true,
+  "collected_at": "2026-09-18T05:32:44Z",
+  "confirmed_by": "Nguyen Le Trong Tin",
+  "coverage_end": "2026-09-18T05:27:35.4238238Z",
+  "coverage_start": "2026-09-18T05:25:35.4238238Z",
+  "filter_reference": "Declared scope: agent 012, Sysmon eventID 1 and PowerShell eventID 4104 only. In-window in-scope events: 10 on the manager, 10 in the snapshot, identical sets keyed by providerName/channel/eventRecordID. Sysmon64 15.22; rule contents not read (non-admin). Script block logging active: payload 4104 present at level VERBOSE.",
+  "health_reference": "Manager ossec.log 2026-09-18: no ERROR, CRITICAL or WARNING between 12:25 and 12:33 +07 (window plus receipt buffer); the only analysisd WARNING of the day is the 04:01:15Z XML-parse warning caused by the operator diagnostic script, outside every window; no drop/discard/lost/overload from analysisd or remoted. Agent ossec.log: connected to the manager at 12:21:15 +07 (after restart #1 of the v2 set) and no Lost/Unable line until after 12:32:36; client_buffer enabled (queue 5000, 500 eps); no buffer/flood/queue warnings.",
+  "kind": "scn001_collection_approval",
+  "native_reference": "Native EVTX not read for this window. Manager-to-snapshot in-scope event sets identical (10 = 10). Run binding remains caller-declared per SCN001_RUN_BINDING.md.",
+  "no_parse_errors_or_gaps": true,
+  "no_sampling_or_truncation": true,
+  "reference": "docs/ISSUE_12_SAFE_DEMO_CHECKPOINT.md (2026-09-18): sections \"Bo v2: Run B attestation\", \"Companion grace\", \"Approval cuoi v2\"",
+  "request_sha256": "65b50de1ac2e5454849e101421bc2e51ddd6b1f25e134ddd91ec66f88fddf7ca",
+  "reviewed_at": "",
+  "rotation_reference": "archives.json and 2026/Sep/ossec-archive-18.json share inode 1336681 (link count 2), no rotation split; logall_json=yes. Endpoint Microsoft-Windows-Sysmon/Operational oldest record 2026-09-12. Microsoft-Windows-PowerShell/Operational HAS wrapped: oldest record now 2026-09-18T00:54:46Z, which is 4.5 h before this window; in-window records were read by the agent within about one second and are present.",
+  "time_reference": "Manager: systemd-timesyncd active and synchronized (timedatectl), initial sync 2026-09-18T00:41:52Z; wazuh-control restart at 12:21 +07 did not touch timesyncd (no journal entries 12:15-12:35). Endpoint: W32Time to time.windows.com, last successful sync 2026-09-18T00:49:21Z, 4 h 36 min before this window; SpecialPollInterval 32768 s so no further sync was due; no Kernel-General 1 time change and no Kernel-Power sleep/resume after 04:30Z; uptime continuous from 00:41:23Z. Cross-check: manager receipt minus endpoint systemTime min 0.94 s, a one-directional bound only. Window bounds and event systemTime both come from the endpoint clock, so window membership does not depend on the inter-host offset. Limits: two public NTP pools; endpoint free-running on its VM clock since 00:49Z within a 120 s window plus 300 s buffer.",
+  "version": "0.1.0"
+}
+```
+
+## 2026-09-18 — Packaging, rollback bước 1 (lần cuối), PR draft
+
+| Mục | Kết quả |
+| --- | --- |
+| `pip wheel . --no-deps` | `aegis_verify-0.1.0-py3-none-any.whl` dựng được; chứa `run_binding.py` (grace + `_roles`), `study.py` (`rule_id exists`, pin behavioral), `_study_contracts.py`, `manager_snapshot.py` |
+| `pip check` | sạch |
+| 118001 (file) | **`0ddd7bc0…`** pre-lab, parent 91816, inode 1310848 soc:wazuh 640 — backup behavioral cuối `118001-behavioral-final.xml` = `351ddc13…` |
+| 117001 | `6b5b8615…`, mtime 2026-09-14 — chưa bao giờ đụng |
+| analysisd | PID 96274 **vẫn nạp behavioral** — cần restart #5 để hoàn tất rollback |
+| PR draft | `scratchpad/pr/PR_ISSUE_12.md` (description + bảng AC → artifact/test/evidence) |
+
+Reviewer độc lập (một) đang đối chiếu AC; commit sau khi có kết quả review và chữ ký approval B v2.
+
+## 2026-09-18 — Approval B v2 đã ký, kết quả attested, rollback hoàn tất
+
+### Approval
+
+| Trường | Giá trị |
+| --- | --- |
+| `request_sha256` | `65b50de1ac2e5454849e101421bc2e51ddd6b1f25e134ddd91ec66f88fddf7ca` (tái tạo trước khi ký, khớp) |
+| `confirmed_by` | `Nguyen Le Trong Tin` — chủ dự án xác nhận trong chat cho đúng request này |
+| `reviewed_at` | `2026-09-18T06:24:42Z` — giờ manager UTC lúc nhận duyệt |
+| approval sha256 | `b941d40bb962b1dcd20c4374443e2604f4eb1964df039789ee7f9d305b75ddde` |
+| mọi trường khác | y nguyên FINAL-DRAFT đã trình (ba cờ, bảy references, coverage, `collected_at`) |
+
+Lưu: `scratchpad/collection-approval-B-v2.json`, `context-B-v2-attested.json`; bộ `unknown` gốc giữ ở `report-v2-*.json` trước ký (đã ghi đè B/C bằng bản attested — bản unattested còn trong lịch sử checkpoint).
+
+### Kết quả thực tế qua `evaluate_demo_run` + `compare_demo_runs`
+
+| Run | final_status | A03 | assurance | binding |
+| --- | --- | --- | --- | --- |
+| B `scn001v2-b-20260918T0525Z` | **False negative** | `expected_detection_absent` | caller-attested | unknown [companion_after_exit, companion_record_unmatched, native_review_missing] |
+| C `scn001v2-c-20260918T0537Z` | **Detected** | `witness_found` | unknown | unknown [companion_record_unmatched, native_review_missing] |
+
+Evidence B: A01/A03 `5b063b1f095d` (part1 line 20, Sysmon 1 child 7036), A02 `a61bf42216b1` (line 17, 4104 recID 12313 rule 91816).
+Evidence C: A01 `0537eb4a0cfe` (line 20, Sysmon 1 child 5584), A02/A03 `27f61f274a8a` (line 17, 4104 recID 13166 rule 118001).
+
+**Compare B→C: `Regression Passed`** — 2 `unchanged_pass`, 1 `improvement` (A03 `expected_detection_absent` → `witness_found`), 0 regression; cùng `profile_fingerprint`.
+
+Giới hạn giữ nguyên: caller-attested cho scope 2 loại sự kiện; run binding cả hai run `unknown` (`native_review_missing`); channel PowerShell/Operational đã ghi vòng trước cửa sổ; endpoint NTP sync cuối 00:49:21Z.
+
+### Rollback — hoàn tất, xác minh 06:25:03Z
+
+| Kiểm | Kết quả |
+| --- | --- |
+| Restart (chủ dự án) | Completed 13:22:48 +07 |
+| analysisd | PID **99794**, khởi động 06:22:42Z — sau lần ghi file pre-lab |
+| Total rules enabled | 15891; **không** ERROR/CRITICAL nạp rule |
+| 118001 | `0ddd7bc0…`, "filename baseline matched", parent 91816 — đúng trạng thái trước lab |
+| 117001 | `6b5b8615…` — không đổi suốt cả hai bộ |
+
+Backup còn đủ ở `~/aegis-rule-backup-v2/` (pre-lab, baseline v2, behavioral). Thư mục `C:\AEGIS-Lab` (SCN001, SCN001-v2, runs, runs-v2, controls-v2) **chưa xoá**: manifests, snapshots, controls đã sao chép về scratchpad; xoá là quyết định của chủ dự án.
+
+## 2026-09-18 — Reviewer độc lập (AC) và xử lý gap trước commit
+
+Hai lần khởi động đầu bị API 429 trước khi làm gì; lần thứ ba hoàn tất (34 tool uses). Kết luận theo AC:
+
+| AC | Reviewer | Xử lý |
+| --- | --- | --- |
+| 1 payload/target | partially — payload mới chỉ có duyệt trong chat/checkpoint, không artifact ký | ghi rõ; không tạo artifact hồi tố |
+| 2 scenario/behavior | met | — |
+| 3 evidence IDs + raw refs | met — 9/9 entry resolve, hash khớp, witness = child pid | — |
+| 4 rule revisions in git | partially — `behavioral.xml.template` chưa `git add`; pin kit/study chỉ ở scratchpad | thêm template vào commit này; hash pin ghi trong checkpoint, evidence thô giữ private |
+| 5 comparison / ground truth | met — Regression Passed, `scenarios/` sạch | — |
+| 6 sanitize | partially — hostname lab trong checkpoint (3 chỗ, HEAD không có); IP agent trong evidence scratchpad; file scratch dính banner SSH | thay hostname bằng `<lab-endpoint>` (3 chỗ); evidence thô không vào Git; gỡ banner khỏi `run_output.json`/`v2_actual.txt` |
+| 7 checklist/script | met | — |
+| 8 tests | met — reviewer tự chạy 2579 passed / 1 skipped | — |
+
+### Gap xếp hạng và trạng thái
+
+1. **Rule behavioral khớp cả script block preflight của runner** (`Invoke-SafeDemo.ps1` đọc `[Environment]::MachineName` + `$PID`; C recID 12921 → 118001), chỉ bị loại khỏi verdict nhờ scope path của A03 → **công bố** trong `SCN001_RUN_BINDING.md` và PR; không thu hẹp rule trong phạm vi này (quyết định sau).
+2. Template behavioral chưa track → `git add` trong commit.
+3. Không có raw artifact cho probe logtest và bằng chứng manager/đồng hồ → **đã lưu** `scratchpad/evidence-v2-raw/`: `logtest-probe-output.txt` (output chủ dự án dán), `manager-B-v2.txt` (timedatectl, journal timesyncd, ossec.log 12:20–12:33, inode, rule state, 10 key trong cửa sổ), `endpoint-B-v2.txt` (agent log, buffer config, w32tm, Time-Service/Kernel events, channels).
+4. PR nói thiếu số control offline → sửa: **10/15** chỉ offline; 5 (`original`, `renamed`, `reworded`, `env-only`, `pid-only`) đã qua engine thật.
+5. File scratch dính banner SSH → đã gỡ, `run_output.json` là JSON hợp lệ.
+6. `_roles` nhận nhiều companion trùng trong im lặng → thêm lý do `multiple_companions` (unknown) theo TDD: RED chứng minh bằng cách tắt hai dòng code (assert thiếu lý do), GREEN 89 test binding, **full 2580 passed, 1 skipped**.
+7. Caveat `rule_id exists` chưa vào docs người dùng → thêm mục vào `SCN001_STUDY_RUN.md`.
+8. Sanitize hostname → xử lý như AC 6. `caller_reviewed` không thể đạt trên run thật (mọi run có companion) → nêu trong `SCN001_RUN_BINDING.md` và PR.
+
+Reviewer không kiểm được từ worktree: trạng thái manager/rollback (giờ có artifact ở `evidence-v2-raw/`), và các duyệt trong chat (payload, controls, chữ ký) — chỉ có trong checkpoint.
+
+Sẵn sàng commit: 21 file sửa + 2 file mới. Chưa push/merge/đóng issue.

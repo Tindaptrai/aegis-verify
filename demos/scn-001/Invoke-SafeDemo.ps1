@@ -101,9 +101,9 @@ function Get-AegisPreflight {
         throw 'AEGIS_WRONG_HOST'
     }
     if ($RunLabel -cnotin @('A', 'B', 'C', 'Rehearsal') -or
-        $AppliedRuleRevision -cnotin @('baseline', 'fixed') -or
+        $AppliedRuleRevision -cnotin @('baseline', 'fixed', 'behavioral') -or
         ($RunLabel -cin @('A', 'B') -and $AppliedRuleRevision -cne 'baseline') -or
-        ($RunLabel -ceq 'C' -and $AppliedRuleRevision -cne 'fixed')) {
+        ($RunLabel -ceq 'C' -and $AppliedRuleRevision -cne 'behavioral')) {
         throw 'AEGIS_INVALID_RUN_SELECTION'
     }
     if ($RunId -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$') { throw 'AEGIS_INVALID_RUN_ID' }
@@ -123,11 +123,11 @@ function Get-AegisPreflight {
     if ($kit.filenames -isnot [array] -or $kit.artifact_sha256 -isnot [pscustomobject]) {
         throw 'AEGIS_INVALID_KIT_MANIFEST'
     }
-    foreach ($name in @('lab_update.ps1', 'maintenance_check.ps1', 'baseline.xml', 'fixed.xml')) {
+    foreach ($name in @('lab_update.ps1', 'maintenance_check.ps1', 'baseline.xml', 'fixed.xml', 'behavioral.xml')) {
         if ($kit.artifact_sha256.$name -isnot [string] -or
             $kit.artifact_sha256.$name -cnotmatch '^[0-9a-f]{64}$') { throw 'AEGIS_INVALID_KIT_MANIFEST' }
     }
-    if ($kit.kind -cne 'safe_demo_kit' -or $kit.kit_version -cne '0.1.0' -or
+    if ($kit.kind -cne 'safe_demo_kit' -or $kit.kit_version -cne '0.2.0' -or
         $kit.scenario_id -cne 'SCN-001' -or $kit.scenario_version -cne '0.1.0' -or
         $kit.target_host -cne $ExpectedComputerName -or $kit.lab_directory -cne $KitDirectory -or
         $kit.filenames.Count -ne 2 -or $kit.filenames[0] -cne 'lab_update.ps1' -or
@@ -136,7 +136,7 @@ function Get-AegisPreflight {
         $kit.parent_sid -isnot [int] -or $kit.parent_sid -lt 1 -or $kit.parent_sid -gt 999999 -or
         $kit.parent_sid -eq $kit.rule_id) { throw 'AEGIS_INVALID_KIT_MANIFEST' }
     # Do not trust a mutable manifest to authorize arbitrary payload bytes.
-    $reviewed = [Text.Encoding]::ASCII.GetBytes("Write-Output 'AEGIS_SAFE_DEMO_V1'`nWrite-Output ('AEGIS_PID=' + `$PID)`n")
+    $reviewed = [Text.Encoding]::ASCII.GetBytes("`$facts = @{ Host = `$env:COMPUTERNAME; User = `$env:USERNAME; Pid = `$PID }`nWrite-Output 'AEGIS_SAFE_DEMO_V1'`nWrite-Output ('AEGIS_PID=' + `$facts.Pid)`n")
     $reviewedHash = Get-AegisHash $reviewed
     foreach ($name in @('lab_update.ps1', 'maintenance_check.ps1')) {
         $bytes = Read-AegisBytes (Join-Path $KitDirectory $name)
@@ -147,7 +147,7 @@ function Get-AegisPreflight {
             throw 'AEGIS_PAYLOAD_HASH_MISMATCH'
         }
     }
-    foreach ($name in @('baseline.xml', 'fixed.xml')) {
+    foreach ($name in @('baseline.xml', 'fixed.xml', 'behavioral.xml')) {
         $hash = Get-AegisHash (Read-AegisBytes (Join-Path $KitDirectory $name))
         if ($kit.artifact_sha256.$name -cne $hash) { throw 'AEGIS_RULE_HASH_MISMATCH' }
     }

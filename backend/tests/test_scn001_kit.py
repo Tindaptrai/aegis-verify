@@ -13,7 +13,13 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'scripts/prepare_scn001_kit.py'
-PAYLOAD = b"Write-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $PID)\n"
+PAYLOAD = b"$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }\nWrite-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $facts.Pid)\n"
+OLD_PAYLOAD = b"Write-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $PID)\n"  # pid-only: the pre-behavioral payload, now a control
+REWORDED = ("$m = [Environment]::MachineName; $u = [Environment]::UserName\n"
+            "\"AEGIS_SAFE_DEMO_V1\"\n"
+            "\"AEGIS_PID=\" + [System.Diagnostics.Process]::GetCurrentProcess().Id\n")
+ENV_ONLY = "Write-Output $env:COMPUTERNAME\n"
+REVISIONS = ('baseline', 'fixed', 'behavioral')
 
 
 @pytest.fixture
@@ -46,7 +52,7 @@ def test_two_names_share_reviewed_bytes(kit_module, tmp_path):
     assert (out / 'Invoke-SafeDemo.ps1').read_bytes() == (ROOT / 'demos/scn-001/Invoke-SafeDemo.ps1').read_bytes()
 
 
-@pytest.mark.parametrize('revision', ['baseline', 'fixed'])
+@pytest.mark.parametrize('revision', REVISIONS)
 def test_rule_fields_are_scoped_and_literal(kit_module, revision):
     xml = kit_module.render_rule(revision=revision, rule_id=119901,
                                 parent_sid=91816, target_host='SYNTHETIC.ENDPOINT',
@@ -64,6 +70,21 @@ def test_rule_fields_are_scoped_and_literal(kit_module, revision):
     if revision == 'baseline':
         assert 'win.eventdata.path' in fields
         assert 'win.eventdata.scriptBlockText' not in fields
+    elif revision == 'behavioral':
+        assert 'win.eventdata.path' not in fields
+        pattern = fields['win.eventdata.scriptBlockText']
+        # The behavioral revision must not be built from the payload text at all:
+        # no marker, no cmdlet spelling, no filename. Only the two observed
+        # behaviors, in any wording, in one script block.
+        for forbidden in ('AEGIS', 'Write-Output', 'lab_update', 'maintenance_check', '$facts'):
+            assert forbidden not in pattern
+        for text in (PAYLOAD.decode(), PAYLOAD.decode().replace('\n', ' '), REWORDED,
+                     REWORDED.replace('\n', ' '), PAYLOAD.decode().lower()):
+            assert re.search(pattern, text), text
+        for text in (OLD_PAYLOAD.decode(), ENV_ONLY, "Write-Output 'AEGIS_SAFE_DEMO_V1'",
+                     "Write-Output 'unrelated synthetic control'", '', '$x = $PID',
+                     'Get-Process -Id $PID', '[Environment]::MachineName'):
+            assert not re.search(pattern, text), text
     else:
         assert 'win.eventdata.path' not in fields
         pattern = fields['win.eventdata.scriptBlockText']
@@ -151,6 +172,21 @@ def test_kit_contains_explicit_synthetic_cases(kit_module, tmp_path):
     assert original['aegis_synthetic_test_only'] is True
     assert cases['renamed']['expected_fixed'] == 'demo_match'
     assert cases['renamed']['expected_baseline'] == 'not_demo'
+    assert cases['renamed']['expected_behavioral'] == 'demo_match'
+    # Same behavior, different wording: only the behavioral revision keeps up.
+    assert cases['reworded']['expected_behavioral'] == 'demo_match'
+    assert cases['reworded']['expected_fixed'] == 'not_demo'
+    # Benign look-alikes: one behavior alone is not the pair.
+    for name in ('env-only', 'pid-only', 'marker-only', 'unrelated'):
+        assert cases[name]['expected_behavioral'] == 'not_demo', name
+    # Known limit of any text rule, stated rather than hidden: commented-out code
+    # still carries both behaviors as text.
+    assert cases['comment-only']['expected_behavioral'] == 'demo_match'
+    for name in ('missing-text', 'fragmented', 'missing-counter', 'wrong-host', 'wrong-event-id'):
+        assert cases[name]['expected_behavioral'] == 'not_demo', name
+    reworded = json.loads((out / cases['reworded']['file']).read_bytes())
+    assert reworded['win']['eventdata']['scriptBlockText'] == REWORDED
+    assert json.loads((out / cases['pid-only']['file']).read_bytes())['win']['eventdata']['scriptBlockText'].encode() == OLD_PAYLOAD
     for name in ('marker-only', 'comment-only', 'wrong-host', 'wrong-event-id',
                  'missing-text', 'fragmented', 'missing-counter'):
         assert cases[name]['expected_fixed'] == 'not_demo'
@@ -201,7 +237,8 @@ def test_output_in_another_checkout_refused(kit_module, tmp_path):
 
 
 NATIVE_PROFILE = 'wazuh-eventchannel-4.14.4-lf-v1'
-FLAT_SCRIPT = "Write-Output 'AEGIS_SAFE_DEMO_V1' Write-Output ('AEGIS_PID=' + $PID)"
+FLAT_SCRIPT = ("$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID } "
+               "Write-Output 'AEGIS_SAFE_DEMO_V1' Write-Output ('AEGIS_PID=' + $facts.Pid)")
 
 
 def native_rule(kit_module, revision):
@@ -244,7 +281,7 @@ def test_native_profile_fixed_matches_exact_lossy_representation_only(kit_module
     assert rule.find("field[@name='win.eventdata.path']") is None
 
 
-@pytest.mark.parametrize('revision', ['baseline', 'fixed'])
+@pytest.mark.parametrize('revision', REVISIONS)
 def test_native_profile_preserves_guards(kit_module, revision):
     rule = native_rule(kit_module, revision)
     assert rule.attrib == {'id': '119901', 'level': '5'}
@@ -279,7 +316,7 @@ def test_native_kit_records_profile_without_changing_payload_or_runner(kit_modul
     manifest = kit_module.prepare_kit(**options(tmp_path, field_profile=NATIVE_PROFILE))
     out = tmp_path / 'kit'
     assert manifest['field_profile'] == NATIVE_PROFILE
-    assert manifest['kit_version'] == '0.1.0'  # Additive metadata, unchanged runner contract.
+    assert manifest['kit_version'] == '0.2.0'  # Enriched payload and third revision: runner contract moved with it.
     assert (out / 'lab_update.ps1').read_bytes() == PAYLOAD
     assert (out / 'maintenance_check.ps1').read_bytes() == PAYLOAD
     assert (out / 'Invoke-SafeDemo.ps1').read_bytes() == (ROOT / 'demos/scn-001/Invoke-SafeDemo.ps1').read_bytes()
@@ -290,9 +327,11 @@ def test_native_kit_records_profile_without_changing_payload_or_runner(kit_modul
     assert catalog['field_profile'] == NATIVE_PROFILE
     assert catalog['synthetic_only'] is True
     assert catalog['input_layer'] == 'decoded_fields_json_not_native_transport'
-    assert len(catalog['cases']) == 12
+    assert len(catalog['cases']) == 15
     fixed = ET.fromstring((out / 'fixed.xml').read_bytes()).find('rule')
     fields = {field.attrib['name']: field.text for field in fixed.findall('field')}
+    behavioral = ET.fromstring((out / 'behavioral.xml').read_bytes()).find('rule')
+    behavior_fields = {field.attrib['name']: field.text for field in behavioral.findall('field')}
     for case in catalog['cases']:
         event = json.loads((out / case['file']).read_bytes())
         assert event['aegis_synthetic_test_only'] is True
@@ -300,13 +339,15 @@ def test_native_kit_records_profile_without_changing_payload_or_runner(kit_modul
                   for section, data in event['win'].items() for key, value in data.items()}
         matched = all(literal_match(pattern, values.get(key)) for key, pattern in fields.items())
         assert matched == (case['name'] in ('original', 'renamed')), case['name']
+        behavioral_hit = all(literal_match(pattern, values.get(key)) for key, pattern in behavior_fields.items())
+        assert behavioral_hit == (case['expected_behavioral'] == 'demo_match'), case['name']
         if case['name'] == 'renamed':
             assert values['win.eventdata.path'] == r'C:\\AEGIS Synthetic\\maintenance_check.ps1'
             assert values['win.eventdata.scriptBlockText'] == FLAT_SCRIPT
 
 
 def test_explicit_legacy_profile_retains_default_rule_bytes(kit_module):
-    for revision in ('baseline', 'fixed'):
+    for revision in REVISIONS:
         args = dict(revision=revision, rule_id=119901, parent_sid=91816,
                     target_host='SYNTHETIC', baseline_path=r'C:\A\lab_update.ps1')
         assert kit_module.render_rule(**args, field_profile='decoded-json-v1') == kit_module.render_rule(**args)

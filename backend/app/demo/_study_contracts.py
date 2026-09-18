@@ -75,6 +75,10 @@ class Pins(Closed):
     payload: Digest
     baseline: Digest
     fixed: Digest
+    # The behavioral revision is the one Run C now applies. `fixed` stays pinned
+    # as the content-matching revision the first experiment used, so that
+    # experiment remains reproducible from the same kit.
+    behavioral: Digest
 
 
 class Target(Closed):

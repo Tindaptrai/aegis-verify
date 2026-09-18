@@ -36,7 +36,7 @@ Object đóng, không bỏ qua unknown fields:
 | --- | --- |
 | kind, version | scn001_study, 0.1.0 |
 | study_id | ID riêng của study đã review |
-| pins | SHA-256 lowercase của scenario, profile, kit, runner, payload, baseline, fixed |
+| pins | SHA-256 lowercase của scenario, profile, kit, runner, payload, baseline, fixed, behavioral |
 | target | Các literal/context đã review theo bảng dưới |
 | collection_reference | Tham chiếu quy trình collection đã khóa, không phải complete flag |
 | time_reference | Tham chiếu nguồn/kiểm tra thời gian đã review |
@@ -98,7 +98,7 @@ child/launch; launched có PID và thời điểm launch nhưng chưa có exit. 
 phải executed, exit_code integer0 (không boolean), timed_out false,
 failure_code null; child/runner PID là integer dương <= 2^32-1 và khác nhau.
 
-- A dùng original/baseline; B dùng renamed/baseline; C dùng renamed/fixed.
+- A dùng original/baseline; B dùng renamed/baseline; C dùng renamed/**behavioral** (kit 0.2.0).
 - Rehearsal dùng renamed và giữ nguyên nhãn, không tự đổi thành A/B/C.
 - Native path, executable, arguments, host, payload/rule hashes phải khớp study.
 - start <= launch <= exit <= planned_end <= observed_end.
@@ -156,3 +156,13 @@ git diff --check
 Tất cả fixtures của test là synthetic; generator chỉ tạo kit test, không chạy
 payload, không SSH hoặc đọc exports lab. Kết quả test và giới hạn review xem
 [checkpoint](ISSUE_12_SAFE_DEMO_CHECKPOINT.md).
+
+## A03 và `rule_id exists`
+
+Từ kit 0.2.0, match của `SCN-001-A03` là `[file_path in canonical_paths, rule_id exists,
+rule_id eq <rule_id>]`. Bản ghi archive **không có** rule block (không rule nào nổ) vì thế
+là phủ định dứt khoát, không phải `unknown`. Không có điều này, script block PowerShell
+tự phát lúc tắt tiến trình (không `path`, không `rule`) làm mọi điều kiện của A03 đọc
+`unknown` và một vắng mặt không bao giờ kết luận được. Giới hạn: kết luận chỉ đúng khi
+đường thu thập không lược bỏ rule block khỏi bản ghi đã alert — đo được trên lab
+(alerts.json ↔ archives.json, 0 thiếu) nhưng không phải định lý về Wazuh.

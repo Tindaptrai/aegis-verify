@@ -46,7 +46,7 @@ def run_for(inputs, label, *, child_pid=4242):
     study = json.loads(inputs['study'])
     target, pins = study['target'], study['pins']
     index = 0 if label == 'A' else 1
-    revision = 'fixed' if label == 'C' else 'baseline'
+    revision = 'behavioral' if label == 'C' else 'baseline'
     path = target['native_directory'] + '\\' + FILENAMES[index]
     run_id = 'synthetic-' + label
     start = dict(
@@ -76,7 +76,7 @@ def run_for(inputs, label, *, child_pid=4242):
                          receipt=wire(receipt))
 
 
-def records_for(inputs, label, *, detected, alert_process_id=None, variant=None):
+def records_for(inputs, label, *, detected, alert_process_id=None, variant=None, companion=False):
     """Two synthetic decoded documents: process telemetry plus script telemetry."""
     hour = HOURS[label]
     index = (0 if label == 'A' else 1) if variant is None else variant
@@ -96,17 +96,30 @@ def records_for(inputs, label, *, detected, alert_process_id=None, variant=None)
                 win['system']['processID'] = str(alert_process_id)
             record['rule']['id'] = DEMO_RULE_ID if detected else PARENT_RULE_ID
         rows.append(wire(record))
+    if companion:
+        # PowerShell emits a script block for text that came from no file, so the
+        # record carries no path, and nothing matched it, so it carries no rule.
+        # Measured in the lab, every run produced one of these from its own child
+        # alongside the payload's own block.
+        extra = json.loads(rows[-1])
+        extra.pop('rule', None)
+        extra['data']['win']['system']['eventRecordID'] = '90001'
+        extra['data']['win']['eventdata'].pop('path', None)
+        extra['data']['win']['eventdata']['scriptBlockId'] = '00000000-0000-0000-0000-00000000000c'
+        extra['data']['win']['eventdata']['scriptBlockText'] = '$global:?'
+        rows.append(wire(extra))
     return rows
 
 
 def bundle_for(space, inputs, label, *, detected, alert_process_id=None, suffix='', variant=None,
-               ingested_minute=3):
+               ingested_minute=3, companion=False):
     hour = HOURS[label]
     checked = verify_run(**run_for(inputs, label))
     target = json.loads(inputs['study'])['target']
     source = space / f'source-{label}{suffix}.jsonl'
     source.write_bytes(b'\n'.join(records_for(inputs, label, detected=detected,
-                                              alert_process_id=alert_process_id, variant=variant)))
+                                              alert_process_id=alert_process_id, variant=variant,
+                                              companion=companion)))
     scope = ManagerSnapshotScope(target['agent_id'], target['hostname'], target['environment_id'],
                                  checked.context.start.isoformat(), checked.context.end.isoformat(),
                                  whole(hour, ingested_minute, 0))
@@ -186,6 +199,33 @@ def test_run_b_with_declaration_is_a_false_negative(run_b_attested):
     assert run_b_attested['evaluation']['final_status'] == 'False negative'
     assert outcomes(run_b_attested) == {'SCN-001-A01': 'satisfied', 'SCN-001-A02': 'satisfied',
                                         'SCN-001-A03': 'false_negative'}
+
+
+def test_pathless_script_block_does_not_block_an_attested_absence(space, inputs):
+    # A record carrying no rule at all is definitely not the detection this
+    # assertion looks for, so it must not turn an attested absence into an
+    # unevaluable one. Without this, a real run can never reach a false negative,
+    # because its own PowerShell always emits such a block.
+    bundle = bundle_for(space, inputs, 'B', detected=False, companion=True, suffix='-companion')
+    report = evaluate(inputs, 'B', bundle, attest(space, inputs, 'B', bundle, name='context-B-companion.json'))
+    assert report['evaluation']['final_status'] == 'False negative'
+    assert outcomes(report)['SCN-001-A03'] == 'false_negative'
+
+
+def test_pathless_script_block_does_not_disturb_a_detection(space, inputs):
+    # The same record alongside a real alert must leave the verdict untouched.
+    report = evaluate(inputs, 'A', bundle_for(space, inputs, 'A', detected=True,
+                                              companion=True, suffix='-companion'))
+    assert report['evaluation']['final_status'] == 'Detected'
+    assert outcomes(report)['SCN-001-A03'] == 'satisfied'
+
+
+def test_a_rule_that_fired_but_is_not_the_demo_rule_stays_a_definite_non_match(space, inputs):
+    # The guard must key on a rule being absent, never on the rule being wrong.
+    # Run B's own alert carries the parent rule, and that is still a non-match.
+    bundle = bundle_for(space, inputs, 'B', detected=False, suffix='-parent')
+    report = evaluate(inputs, 'B', bundle, attest(space, inputs, 'B', bundle, name='context-B-parent.json'))
+    assert report['evaluation']['final_status'] == 'False negative'
 
 
 def test_run_c_detects_the_same_renamed_script(run_c):
@@ -430,3 +470,32 @@ def test_report_without_attestation_records_no_review(space, inputs):
     report = evaluate(inputs, 'B', bundle_for(space, inputs, 'B', detected=False))
     assert report['collection_review'] is None
     assert report['evaluation']['final_status'] == 'Inconclusive'
+
+
+def test_report_pins_the_rule_chain_of_its_run(run_a):
+    demo = run_a['demo_run']
+    assert demo['run_label'] == 'A'
+    assert demo['applied_rule_revision_declared'] == 'baseline'
+    assert demo['rule_id'] == 119901 and demo['parent_sid'] == 91816
+
+
+def test_comparison_refuses_a_changed_parent_rule(run_b_attested, run_c):
+    """Re-parenting between B and C must not be credited to the content fix."""
+    reparented = json.loads(json.dumps(run_c))
+    reparented['demo_run']['parent_sid'] = 91802
+    with pytest.raises(DemoEvaluationError):
+        compare_demo_runs(before=run_b_attested, after=reparented)
+
+
+def test_comparison_refuses_a_changed_rule_id(run_b_attested, run_c):
+    renumbered = json.loads(json.dumps(run_c))
+    renumbered['demo_run']['rule_id'] = 118001
+    with pytest.raises(DemoEvaluationError):
+        compare_demo_runs(before=run_b_attested, after=renumbered)
+
+
+def test_comparison_allows_the_revision_to_differ(run_b_attested, run_c):
+    carried = compare_demo_runs(before=run_b_attested, after=run_c)
+    assert carried['demo_run']['before']['applied_rule_revision_declared'] == 'baseline'
+    assert carried['demo_run']['after']['applied_rule_revision_declared'] == 'behavioral'
+    assert carried['comparison']['status'] == 'Regression Passed'

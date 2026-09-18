@@ -66,6 +66,7 @@ def inputs(tmp_path):
                             scope=ps_scope, match=[{'field': 'file_path', 'op': 'in', 'values': paths}]),
                        dict(assertion_id='SCN-001-A03', role='detection', capability='supported', source_type='wazuh',
                             scope=ps_scope, match=[{'field': 'file_path', 'op': 'in', 'values': paths},
+                                                  {'field': 'rule_id', 'op': 'exists'},
                                                   {'field': 'rule_id', 'op': 'eq', 'value': '119901'}],
                             correlation=dict(anchor_assertion_id='SCN-001-A01',
                                              join_pairs=[dict(target_field=k, anchor_field=k) for k in ('hostname', 'asset_id', 'process_id')],
@@ -75,7 +76,8 @@ def inputs(tmp_path):
     study = dict(kind='scn001_study', version='0.1.0', study_id='synthetic-study',
                  pins=dict(scenario=sha(scenario_raw), profile=sha(profile_raw), kit=sha(kit_raw),
                            runner=sha(artifacts['Invoke-SafeDemo.ps1']), payload=sha(artifacts['lab_update.ps1']),
-                           baseline=sha(artifacts['baseline.xml']), fixed=sha(artifacts['fixed.xml'])),
+                           baseline=sha(artifacts['baseline.xml']), fixed=sha(artifacts['fixed.xml']),
+                           behavioral=sha(artifacts['behavioral.xml'])),
                  target=dict(environment_id='synthetic-env', hostname='synthetic-endpoint', agent_id='901',
                              account='SYNTHETIC\\operator', elevated=True, executable=native_executable,
                              canonical_executable=canonical_executable, collection_mode='direct',
@@ -171,7 +173,7 @@ def test_stale_or_incomplete_operator_receipt_rejected(api, inputs, field, value
         api.verify_run(**inputs)
 
 
-@pytest.mark.parametrize('name', ['Invoke-SafeDemo.ps1', 'lab_update.ps1', 'maintenance_check.ps1', 'baseline.xml', 'fixed.xml'])
+@pytest.mark.parametrize('name', ['Invoke-SafeDemo.ps1', 'lab_update.ps1', 'maintenance_check.ps1', 'baseline.xml', 'fixed.xml', 'behavioral.xml'])
 def test_artifact_tamper_never_passes(api, inputs, name):
     inputs['artifacts'][name] += b' '
     with pytest.raises(api.StudyRunError):
@@ -198,7 +200,7 @@ def test_window_one_nanosecond_drift_rejected_in_all_manifests(api, inputs):
 def test_labels_have_correct_payload_revision_and_fixed_bindings(api, inputs, label):
     original = api.verify_run(**inputs)
     study = json.loads(inputs['study'])
-    revision = 'fixed' if label == 'C' else 'baseline'
+    revision = 'behavioral' if label == 'C' else 'baseline'
     rule_hash = study['pins'][revision]
     for name in ('execution_start', 'execution_launched', 'execution'):
         obj = json.loads(inputs[name])

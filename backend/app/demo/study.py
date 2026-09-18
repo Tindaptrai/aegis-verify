@@ -12,11 +12,12 @@ from ..validation import EvaluationProfile, scenario_fingerprint
 from ._study_contracts import Study, StudyRunError
 
 
-PAYLOAD = b"Write-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $PID)\n"
+PAYLOAD = b"$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }\nWrite-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $facts.Pid)\n"
 FILENAMES = ('lab_update.ps1', 'maintenance_check.ps1')
-_CASES = ('comment-only', 'fragmented', 'marker-only', 'missing-counter', 'missing-text',
-          'original', 'renamed', 'unrelated', 'wrong-channel', 'wrong-event-id', 'wrong-host', 'wrong-provider')
-_ARTIFACTS = frozenset((*FILENAMES, 'baseline.xml', 'fixed.xml', 'Invoke-SafeDemo.ps1',
+_CASES = ('comment-only', 'env-only', 'fragmented', 'marker-only', 'missing-counter', 'missing-text',
+          'original', 'pid-only', 'renamed', 'reworded', 'unrelated', 'wrong-channel', 'wrong-event-id',
+          'wrong-host', 'wrong-provider')
+_ARTIFACTS = frozenset((*FILENAMES, 'baseline.xml', 'fixed.xml', 'behavioral.xml', 'Invoke-SafeDemo.ps1',
                        'logtest-cases/catalog.json', *(f'logtest-cases/{name}.synthetic.json' for name in _CASES)))
 _KIT_KEYS = frozenset(('kind', 'kit_version', 'scenario_id', 'scenario_version', 'target_host', 'lab_directory',
                        'filenames', 'rule_id', 'parent_sid', 'field_profile', 'occupied_ids_declared',
@@ -47,8 +48,16 @@ def _profile_rules(target):
                                   {'field': 'command_line', 'op': 'in', 'values': list(target.command_lines)}]),
         dict(assertion_id='SCN-001-A02', role='telemetry', capability='supported', source_type='wazuh',
              scope=ps, match=[path]),
+        # A manager archive record carries a rule block only when something
+        # matched it, so an absent one says no rule fired rather than leaving the
+        # question open. Without this the run's own PowerShell defeats the
+        # assertion: it emits script blocks for text that came from no file, and
+        # those carry neither path nor rule, so every condition here reads
+        # unknown and an absence can never be concluded. Keeping the equality
+        # below means a rule that did fire is still compared by its id.
         dict(assertion_id='SCN-001-A03', role='detection', capability='supported', source_type='wazuh',
-             scope=ps, match=[path, {'field': 'rule_id', 'op': 'eq', 'value': str(target.rule_id)}],
+             scope=ps, match=[path, {'field': 'rule_id', 'op': 'exists'},
+                              {'field': 'rule_id', 'op': 'eq', 'value': str(target.rule_id)}],
              correlation=dict(anchor_assertion_id='SCN-001-A01',
                               join_pairs=[dict(target_field=k, anchor_field=k) for k in ('hostname', 'asset_id', 'process_id')],
                               min_delta_ns=-5000000000, max_delta_ns=15000000000)),
@@ -84,7 +93,7 @@ def verify_study(study, *, study_sha256, scenario, profile, kit, artifacts):
         kit_data = decode_config(kit, stage='inputs')
         if set(kit_data) != _KIT_KEYS or type(artifacts) is not dict or set(artifacts) != _ARTIFACTS:
             raise StudyRunError()
-        expected = dict(kind='safe_demo_kit', kit_version='0.1.0', scenario_id='SCN-001', scenario_version='0.1.0',
+        expected = dict(kind='safe_demo_kit', kit_version='0.2.0', scenario_id='SCN-001', scenario_version='0.1.0',
                         target_host=target.hostname, lab_directory=target.native_directory, filenames=list(FILENAMES),
                         rule_id=target.rule_id, parent_sid=target.parent_sid, field_profile=target.field_profile,
                         payload_sha256=pins.payload)
@@ -104,7 +113,8 @@ def verify_study(study, *, study_sha256, scenario, profile, kit, artifacts):
         if any(artifacts[name] != PAYLOAD for name in FILENAMES):
             raise StudyRunError()
         for name, pin in (('Invoke-SafeDemo.ps1', pins.runner), ('baseline.xml', pins.baseline),
-                          ('fixed.xml', pins.fixed), ('lab_update.ps1', pins.payload)):
+                          ('fixed.xml', pins.fixed), ('behavioral.xml', pins.behavioral),
+                          ('lab_update.ps1', pins.payload)):
             if digest(artifacts[name]) != pin:
                 raise StudyRunError()
         return reviewed

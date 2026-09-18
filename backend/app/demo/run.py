@@ -54,8 +54,10 @@ def verify_run(*, study, study_sha256, scenario, profile, kit, artifacts,
         if type(label) is not str or label not in {'A', 'B', 'C', 'Rehearsal'}:
             raise StudyRunError()
         revision = first.get('applied_rule_revision_declared')
-        if (revision not in ('baseline', 'fixed') or (label in {'A', 'B'} and revision != 'baseline')
-                or (label == 'C' and revision != 'fixed')):
+        # Run C applies the behavioral revision. The content-matching `fixed`
+        # revision is still shipped and pinned, but no run label applies it.
+        if (revision not in ('baseline', 'fixed', 'behavioral') or (label in {'A', 'B'} and revision != 'baseline')
+                or (label == 'C' and revision != 'behavioral')):
             raise StudyRunError()
         rule_hash = getattr(reviewed.pins, revision)
         path = target.native_directory + '\\' + FILENAMES[0 if label == 'A' else 1]

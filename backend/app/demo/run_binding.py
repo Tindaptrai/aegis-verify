@@ -44,9 +44,44 @@ class _NativeReview(Closed):
     records: Annotated[list[_NativeRecord], Field(min_length=2, max_length=2)]
 
 
+# How far a companion script block may trail exit_observed_utc and still be read
+# as the child's own shutdown record. The timestamp that trails is the event's
+# systemTime, stamped by PowerShell as it logs the shutdown block; the one it
+# trails is exit_observed_utc, stamped by the runner when it saw the child go.
+# Those are two clocks on one host reading one moment from either side of it, so
+# a few milliseconds either way is the expected shape, not an anomaly. Measured
+# on real runs: -0.5 ms, +2.3 ms, -87 ms. The bound is deliberately far above
+# that and finite: past it a record is no longer explained by the exit race.
+COMPANION_EXIT_GRACE_NS = 1_000_000_000
+
+
 class RunBindingError(ValueError):
     def __init__(self):
         super().__init__('invalid_run_binding')
+
+
+def _blank(value):
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _provenance_required(doc):
+    """The provenance a document must carry to be looked up in the EVTX at all."""
+    provenance = doc.telemetry.provenance
+    if doc.parser == 'wazuh-sysmon1-v1':
+        return [provenance.windows_record_id, provenance.process_guid, provenance.parent_process_id]
+    return [provenance.windows_record_id, provenance.script_block_id,
+            provenance.message_number, provenance.message_total]
+
+
+def _companion_shape(doc, final):
+    """A script block the bound process emitted for text that came from no file.
+
+    Shape only. Whether it may actually fill the role is decided in `_roles`,
+    which also requires the provenance an operator would need to find it.
+    """
+    return (doc.parser == 'wazuh-powershell4104-v1'
+            and doc.telemetry.event.file_path is None
+            and doc.telemetry.event.process_id == final['child_pid'])
 
 
 def _candidates(documents, profile, context, final, target):
@@ -66,32 +101,82 @@ def _candidates(documents, profile, context, final, target):
                 continue
             group.append(doc)
             if truth is Truth.UNKNOWN:
-                unknown.add('missing_binding_metadata')
+                # A companion carries no path by nature, so the rule's condition
+                # cannot be decided for it. Saying that in its own words keeps it
+                # from reading as a bound record whose metadata went missing.
+                unknown.add('companion_record_unmatched' if _companion_shape(doc, final)
+                            else 'missing_binding_metadata')
             if event.process_id is None:
                 unknown.add('missing_binding_metadata')
             elif event.process_id != final['child_pid']:
                 conflicts.add('child_pid_mismatch')
             if not launch <= event.timestamp <= exit_time:
-                conflicts.add('outside_execution_interval')
+                # Only a companion of the bound child gets the grace, only after
+                # exit, only within the bound, and it is recorded rather than
+                # accepted silently. Bound records keep the strict interval, and a
+                # late record from any other process stays a conflict.
+                trailing_ns = event.timestamp.epoch_nanoseconds - exit_time.epoch_nanoseconds
+                if _companion_shape(doc, final) and 0 < trailing_ns <= COMPANION_EXIT_GRACE_NS:
+                    unknown.add('companion_after_exit')
+                else:
+                    conflicts.add('outside_execution_interval')
             expected = target['command_lines'][variant] if parser == 'wazuh-sysmon1-v1' else target['canonical_paths'][variant]
             actual = event.command_line if parser == 'wazuh-sysmon1-v1' else event.file_path
             if truth is Truth.FALSE or (actual is not None and actual != expected):
                 conflicts.add('payload_variant_mismatch')
-            required = [provenance.windows_record_id]
-            if parser == 'wazuh-sysmon1-v1':
-                required += [provenance.process_guid, provenance.parent_process_id]
-                if provenance.parent_process_id is not None and provenance.parent_process_id != final['runner_pid']:
-                    conflicts.add('parent_pid_mismatch')
-            else:
-                required += [provenance.script_block_id, provenance.message_number, provenance.message_total]
-            if any(v is None or (isinstance(v, str) and not v.strip()) for v in required):
+            if (parser == 'wazuh-sysmon1-v1' and provenance.parent_process_id is not None
+                    and provenance.parent_process_id != final['runner_pid']):
+                conflicts.add('parent_pid_mismatch')
+            if any(_blank(value) for value in _provenance_required(doc)):
                 unknown.add('missing_binding_metadata')
         if not group:
             unknown.add('missing_telemetry')
-        elif len(group) > 1:
-            conflicts.add('multiple_candidates')
         selected.extend(group)
     return selected, conflicts, unknown
+
+
+def _roles(selected, final):
+    """Say which document each parser's receipt entry describes.
+
+    A receipt names one event per parser: the process-create event for the run's
+    own child, and the script block carrying the payload's path. Those are the
+    two the operator can look up in the EVTX, so those are the two compared.
+
+    A process emits more than one script block. Measured across the lab runs,
+    each produced one for the payload file and one for script text that came
+    from no file and so carries no path at all. The second is the same child
+    speaking again, so it is kept as evidence and named a companion rather than
+    read as a rival answer to which launch this is.
+
+    A companion still has to be findable: without the record number and script
+    block id an operator cannot look it up, so it cannot be vouched for and does
+    not fill the role. Anything that fills neither role leaves the parser
+    unresolved, and the caller fails closed, because nothing here can say which
+    record the receipt meant.
+
+    Returns (bound, companions, reasons); a non-empty `reasons` is a conflict.
+    """
+    bound, companions, reasons = {}, [], set()
+    for parser in ('wazuh-sysmon1-v1', 'wazuh-powershell4104-v1'):
+        group = [doc for doc in selected if doc.parser == parser]
+        if not group:
+            continue
+        if parser == 'wazuh-sysmon1-v1':
+            named, kin = group, []
+        else:
+            named = [doc for doc in group if doc.telemetry.event.file_path is not None]
+            kin = [doc for doc in group if _companion_shape(doc, final)
+                   and not any(_blank(value) for value in _provenance_required(doc))]
+        # Every document must be accounted for, or the split is a guess. Name the
+        # failure found: nothing to bind to reads differently from too much.
+        if len(named) == 1 and len(named) + len(kin) == len(group):
+            bound[parser] = named[0]
+            companions.extend(kin)
+        elif not named:
+            reasons.add('bound_record_unidentified')
+        else:
+            reasons.add('multiple_candidates')
+    return bound, companions, reasons
 
 
 def _native_matches(receipt, documents):
@@ -152,6 +237,13 @@ def review_run_binding(bundle, *, run_inputs, native_review=None):
         final = decode_execution(run_inputs['execution'])
         study = decode_config(run_inputs['study'], stage='inputs')
         selected, conflicts, unknown = _candidates(parsed.documents, profile, context, final, study['target'])
+        bound, companions, role_conflicts = _roles(selected, final)
+        conflicts |= role_conflicts
+        # One shutdown block per run is the measured shape. More than one is
+        # still the child speaking, so it does not fail closed, but it is not
+        # the shape that was measured and must not pass in silence.
+        if len(companions) > 1:
+            unknown.add('multiple_companions')
         if native_review is None:
             unknown.add('native_review_missing')
         else:
@@ -162,11 +254,17 @@ def review_run_binding(bundle, *, run_inputs, native_review=None):
                 unknown.add('native_content_unconfirmed')
             if receipt.payload_path != final['payload_path'] or receipt.payload_sha256 != study['pins']['payload']:
                 conflicts.add('native_payload_mismatch')
-            if len(selected) == 2 and len({d.parser for d in selected}) == 2:
-                consistent, native_unknown = _native_matches(receipt, selected)
+            # The comparison runs on the documents the receipt describes. It is
+            # never skipped on a document count: when a role could not be filled
+            # the run has already failed closed above, and the reason below says
+            # the comparison could not be performed rather than leaving silence.
+            if len(bound) == 2:
+                consistent, native_unknown = _native_matches(receipt, tuple(bound.values()))
                 unknown |= native_unknown
                 if not consistent:
                     conflicts.add('native_metadata_mismatch')
+            else:
+                conflicts.add('native_comparison_unavailable')
         evidence = sorted((dict(event_id=d.telemetry.event.event_id, raw_event_ref=d.telemetry.event.raw_event_ref,
                                 raw_event_hash=d.telemetry.event.raw_event_hash) for d in selected), key=lambda r: r['event_id'])
         return config_bytes(dict(kind='scn001_run_binding', version='0.1.0', run_id=context.run_id,

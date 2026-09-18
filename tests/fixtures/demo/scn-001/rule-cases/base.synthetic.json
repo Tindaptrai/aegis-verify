@@ -17,7 +17,7 @@
       "scriptBlockId": "00000000-0000-0000-0000-000000000012",
       "messageNumber": "1",
       "messageTotal": "1",
-      "scriptBlockText": "Write-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $PID)\n"
+      "scriptBlockText": "$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }\nWrite-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $facts.Pid)\n"
     }
   }
 }

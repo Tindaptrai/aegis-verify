@@ -259,7 +259,10 @@ def test_101_selected_records_are_not_truncated_to_cli_limit(api, scope):
     rows = []
     for i in range(101):
         obj = source()
+        # A different archive id alone would leave 101 copies of one event, which
+        # is a duplicate rather than a distinct record. Vary the event too.
         obj['id'] = 'synthetic-' + str(i)
+        obj['data']['win']['system']['eventRecordID'] = str(1000 + i)
         rows.append(wire(obj))
     with pytest.raises(api.ManagerSnapshotError) as caught:
         parse(api, scope, b'\n'.join(rows))
@@ -415,6 +418,7 @@ def test_limit_of_100_selected_documents_is_accepted(api, scope):
     for i in range(100):
         obj = source()
         obj['id'] = 'synthetic-' + str(i)
+        obj['data']['win']['system']['eventRecordID'] = str(1000 + i)
         records.append(wire(obj))
     assert len(parse(api, scope, b'\n'.join(records)).documents) == 100
 
@@ -492,3 +496,51 @@ def test_wrapped_documents_run_through_existing_cli_without_claiming_gap(api, sc
     for entry in entries:
         row = next(r for r in result.ledger if r.document_source_ref + '#record=1' == entry['raw_event_ref'])
         assert entry['raw_event_hash'] == row.document_sha256
+
+
+def test_shared_archive_id_with_distinct_windows_events_is_kept(api, scope):
+    # Wazuh writes archives.json in batches and gives one `id` to every record
+    # flushed together, so distinct events share it. Measured on 4.14.4: a single
+    # archive id covered 30 records with 30 different eventRecordID values.
+    # Rejecting those would refuse real evidence, so identity comes from the
+    # Windows event itself when the record carries one.
+    a, b = source(), source()
+    b['data']['win']['system']['eventRecordID'] = '102'
+    b['data']['win']['eventdata']['processId'] = '4243'
+    assert a['id'] == b['id']
+    assert len(parse(api, scope, wire(a) + b'\n' + wire(b)).documents) == 2
+
+
+def test_same_windows_event_delivered_twice_is_still_rejected(api, scope):
+    # An agent can re-send an event it already delivered. That is a duplicate of
+    # the same event, and it stays rejected even though the manager gave the two
+    # copies different archive ids.
+    a, b = source(), source()
+    b['id'] = 'synthetic-sysmon-record-second-delivery'
+    assert a['data']['win']['system']['eventRecordID'] == b['data']['win']['system']['eventRecordID']
+    with pytest.raises(api.ManagerSnapshotError) as caught:
+        parse(api, scope, wire(a) + b'\n' + wire(b))
+    assert caught.value.diagnostic.code == 'duplicate_record'
+
+
+def test_same_event_record_id_on_another_channel_is_distinct(api, scope):
+    # eventRecordID is only unique within one channel, so the channel and the
+    # provider are part of the identity.
+    a, b = source(), source('powershell4104')
+    b['data']['win']['system']['eventRecordID'] = a['data']['win']['system']['eventRecordID']
+    result = parse(api, scope, wire(a) + b'\n' + wire(b))
+    assert len(result.documents) == 2
+
+
+def test_records_without_a_windows_event_still_use_the_archive_id(api, scope):
+    # Nothing else in the snapshot carries an event identity, so the previous
+    # rule has to keep applying there. Both records are excluded before parsing,
+    # which is where duplicate checks still have to run.
+    a, b = source(), source()
+    for record in (a, b):
+        record['agent']['id'] = '999'
+        record['data'] = {'synthetic': 'not-a-windows-event'}
+    b['rule']['id'] = 'different-rule'
+    with pytest.raises(api.ManagerSnapshotError) as caught:
+        parse(api, scope, wire(a) + b'\n' + wire(b))
+    assert caught.value.diagnostic.code == 'duplicate_record'

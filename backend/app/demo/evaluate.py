@@ -13,6 +13,7 @@ from ..intake.io import MAX_CONFIG_BYTES
 from ..validation import EvaluationContext
 from ._bundle_io import read_file, strict_path
 from ._bundle_render import digest
+from ._execution_json import decode_execution
 from .collection_review import approve_collection_request, prepare_collection_request
 from .run import verify_run
 from .run_binding import review_run_binding
@@ -136,6 +137,15 @@ def evaluate_demo_run(bundle, *, run_inputs, scenario, context=None, request=Non
             raise DemoEvaluationError()
         report['run_binding'] = binding
         report['collection_review'] = review
+        # The evaluation profile does not mention the parent rule, so two runs can
+        # differ in their rule chain while every fingerprint still matches. Carry
+        # the pinned identifiers forward, and compare_demo_runs requires them to
+        # be equal: otherwise re-parenting between B and C would be credited to
+        # the content fix.
+        final = decode_execution(run_inputs['execution'])
+        report['demo_run'] = {key: final[key] for key in (
+            'run_label', 'rule_id', 'parent_sid', 'applied_rule_revision_declared',
+            'applied_rule_sha256_declared')}
         return report
     except _ERRORS:
         raise DemoEvaluationError() from None
@@ -171,7 +181,23 @@ def compare_demo_runs(*, before, after):
                 raise DemoEvaluationError()
             bindings[side] = binding
 
+        # A changed rule chain is invisible to the evaluation profile and to the
+        # comparison contract, so an operator who re-parents between the two runs
+        # would see the content fix credited for it. The revision is expected to
+        # differ, which is the point of the demo; everything else must not.
+        runs = {}
+        for side, report in (('before', before), ('after', after)):
+            demo = report.get('demo_run')
+            if type(demo) is not dict or set(demo) != {
+                    'run_label', 'rule_id', 'parent_sid', 'applied_rule_revision_declared',
+                    'applied_rule_sha256_declared'}:
+                raise DemoEvaluationError()
+            runs[side] = demo
+        if any(runs['before'][key] != runs['after'][key] for key in ('rule_id', 'parent_sid')):
+            raise DemoEvaluationError()
+
         comparison = compare_reports(before=before, after=after)
+        comparison['demo_run'] = {side: runs[side] for side in ('before', 'after')}
         comparison['run_binding'] = {
             side: {key: bindings[side][key] for key in
                    ('run_id', 'status', 'reasons', 'both_sides_caller_declared',

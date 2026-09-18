@@ -94,7 +94,8 @@ def test_documented_native_hashtable_splat_preflight(ps, kit, tmp_path):
     assert not (tmp_path/'uncreated-run').exists()
 
 
-@pytest.mark.parametrize('label,revision', [('A', 'fixed'), ('B', 'fixed'), ('C', 'baseline'), ('x', 'baseline')])
+@pytest.mark.parametrize('label,revision', [('A', 'fixed'), ('B', 'fixed'), ('A', 'behavioral'), ('C', 'baseline'),
+                                            ('C', 'fixed'), ('x', 'baseline'), ('C', 'typo')])
 def test_wrong_revision_or_label_never_launches(ps, kit, tmp_path, label, revision):
     result = invoke(ps, kit, tmp_path, RunLabel=label, AppliedRuleRevision=revision)
     assert result.returncode == 2

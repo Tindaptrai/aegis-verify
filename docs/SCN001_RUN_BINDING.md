@@ -54,6 +54,7 @@ soạn, nên "khớp" chỉ có nghĩa là hai tài liệu của chính caller n
 Reason codes có thể xuất hiện: `native_review_missing`, `native_content_unconfirmed`,
 `native_parent_unconfirmed`, `missing_binding_metadata`, `missing_telemetry`,
 `child_pid_mismatch`, `parent_pid_mismatch`, `outside_execution_interval`,
+`bound_record_unidentified`, `native_comparison_unavailable`,
 `payload_variant_mismatch`, `multiple_candidates`, `native_payload_mismatch`,
 `native_metadata_mismatch`.
 
@@ -131,3 +132,29 @@ cd 'I:\AEGIS-VERIFY\.worktrees\issue-12-safe-demo'
 ```
 
 Tests synthetic, không thực thi runner/payload, không kết nối lab.
+
+## Companion và grace sau exit
+
+Một run thật sinh hơn một script block từ chính tiến trình con: block của file
+payload (có `path`) và block PowerShell ghi lúc tắt tiến trình (`$global:?`,
+không `path`). Block thứ hai được gán vai trò **companion**: cùng `child_pid`,
+không `path`, đủ provenance. Nó được giữ làm evidence, không phải ứng viên cạnh
+tranh, và điều kiện match không quyết định được cho nó nên lý do
+`companion_record_unmatched` luôn có mặt (`unknown`, không bao giờ `caller_reviewed`).
+
+`systemTime` của companion do PowerShell đóng dấu khi ghi block lúc tắt;
+`exit_observed_utc` do runner đóng dấu khi thấy child thoát. Hai đồng hồ trên cùng
+host đọc cùng một khoảnh khắc từ hai phía, nên chênh vài mili-giây là hình dạng
+bình thường (đo trên run thật: −0,5 ms, +2,3 ms, −87 ms). Vì thế companion được
+phép trễ sau `exit_observed_utc` tối đa `COMPANION_EXIT_GRACE_NS` = 1 s, và khi
+trễ thì lý do `companion_after_exit` được ghi (`unknown`). Ngoài ngưỡng, hoặc bản
+ghi trễ đến từ PID khác, hoặc là bản ghi bound (có `path`, hay Sysmon 1): vẫn
+`outside_execution_interval` (`conflict`). Grace không bỏ qua cross-check native:
+receipt vẫn được so với hai bản ghi bound. Nhiều hơn một companion vẫn là `unknown` nhưng được
+ghi `multiple_companions` — không phải hình dạng đã đo, không được lặng lẽ chấp nhận.
+
+Hệ quả phải nói rõ: vì mọi run thật đều có companion, `companion_record_unmatched` luôn có mặt
+và **`caller_reviewed` không thể đạt được trên run thật**; sàn là `unknown`. Ngoài ra rule
+`behavioral` khớp cả script block của chính runner `Invoke-SafeDemo.ps1` (preflight đọc
+`[Environment]::MachineName` và `$PID`) — bản ghi đó không thành witness chỉ vì scope path
+của A03 loại nó; đây là giới hạn của rule, được nêu chứ không giấu.
