@@ -51,7 +51,7 @@ Giữ kit/output trong thư mục riêng, ACL chỉ cho người vận hành tin
 Runner từ chối UNC, đường dẫn tương đối, ADS, dot-segments, tên DOS đặc biệt,
 symlink/reparse point; profile đường dẫn hiện tại chỉ nhận ASCII chữ/số,
 space, `_`, `-`, `.` và dấu phân cách `\`. Dùng tên dài, không dùng alias 8.3
-như `KUROH~1`. Thư mục lab tối đa 200 ký tự, không có dấu `\` cuối.
+như `ADMINI~1`. Thư mục lab tối đa 200 ký tự, không có dấu `\` cuối.
 RunDirectory hiện tối đa 206 ký tự: preflight kiểm tra cả các đường dẫn sau
 khi nối tên file output, giữ mỗi đường dẫn trong giới hạn 230 ký tự. Lỗi
 đường dẫn được từ chối trước khi tạo thư mục run hoặc khởi chạy child.

@@ -10,8 +10,10 @@ bộ nội dung đã review (chịu được đổi tên, **không phải** dete
 đổi tên lẫn viết lại. Checklist vận hành lặp lại được:
 [SCN001_OPERATOR_CHECKLIST.md](SCN001_OPERATOR_CHECKLIST.md).
 
-Các mục A/B/C bên dưới mô tả mục tiêu/kỳ vọng, **không phải kết quả lab đã đạt**.
-Export/attestation và evaluation profile còn cần kế hoạch riêng. Manifest
+Các mục A/B/C bên dưới mô tả mục tiêu/kỳ vọng. Kết quả lab đã đạt của bộ v2
+(2026-09-18: A Detected, B False negative caller-attested, C Detected, B→C
+Regression Passed), evidence ID, pins và bản ghi duyệt payload nằm ở
+[SCN001_V2_APPROVAL_AND_PINS.md](SCN001_V2_APPROVAL_AND_PINS.md). Manifest
 execution và synthetic logtest không thay canonical evidence hay kết luận CLI.
 
 ## Goal
@@ -54,7 +56,14 @@ Replace the fragile filename match with reviewed behavioral conditions. The ship
 two behaviors the payload actually performs in one script block — an environment or
 machine-identity read and a process-identity read — in any wording, and is tested
 against benign cases (env-only, pid-only, marker-only) plus a reworded equivalent.
-Its known limit is stated in the kit catalog: commented-out code still matches.
+Its known limits are stated, not hidden: commented-out code still matches (kit
+catalog), and the demo runner's own preflight function reads the machine name and
+`$PID` in one script block, so on the real engine it also fires 118001 (Run C,
+Windows record 12921). That record is excluded from the verdict only by the A03
+path scope; on baseline the same block already fires stock rule 91815. The rule is
+a lab demo artifact under group `aegis_safe_demo` and must not be deployed outside
+the lab until an explicit tooling exception is added and re-tested (assessment and
+recommendation in SCN001_V2_APPROVAL_AND_PINS.md, section 5).
 
 ## Run C — Re-test
 

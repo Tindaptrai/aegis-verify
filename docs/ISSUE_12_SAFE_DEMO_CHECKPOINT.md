@@ -4615,7 +4615,7 @@ Thống nhất số liệu: **5/15** case catalog đã qua engine thật (`origi
 
 ### Artifacts private (ngoài Git) — scratchpad phiên này
 
-`C:\Users\KUROH~1.DES\AppData\Local\Temp\claude\I--AEGIS-VERIFY\727e3635-7f3e-4258-95ff-194c08c71f4d\scratchpad\`:
+`<scratchpad phiên>\` (thư mục scratchpad của phiên Claude Code, ngoài repo):
 `runs-v2/{A,B,C}/`, `snapshots-v2/`, `report-v2-{A,B,C}.json`, `comparison-v2-B-to-C.json`, `collection-request-B-v2.json`, `collection-approval-B-v2.json`, `context-B-v2-attested.json`, `controls-v2/`, `kit-lab-118001-v2/`, `evidence-v2-raw/` (probe logtest, manager-B-v2, endpoint-B-v2), `pr/PR_ISSUE_12.md`, driver `lab_eval_v2.py`. Thí nghiệm v1 (content matching): `official/`, `baseline/`, `attested-defective/`, `runs/`, `snapshots/`. Evidence thô có IP/hostname lab → **không đưa vào Git**.
 
 Trên endpoint: `C:\AEGIS-Lab\{SCN001,SCN001-v2,runs,runs-v2,controls-v2}` **chưa xoá** (đã sao chép về scratchpad; xoá là quyết định chủ dự án). Trên manager: staging `~/aegis-v2/`, backup `~/aegis-rule-backup-v2/` (pre-lab, baseline v2, behavioral).
@@ -4637,7 +4637,7 @@ Trên endpoint: `C:\AEGIS-Lab\{SCN001,SCN001-v2,runs,runs-v2,controls-v2}` **ch�
 | --- | --- |
 | AC 1 payload approved | partially — duyệt payload mới chỉ có trong chat/checkpoint, không artifact ký |
 | AC 4 revisions version-controlled | template đã trong commit `e603efb`; pin kit/study chỉ ở evidence private |
-| AC 6 sanitize | hostname lab đã gỡ khỏi checkpoint; evidence thô có IP giữ private; `demos/scn-001/README.md` còn `KUROH~1` từ trước (HEAD cũ) |
+| AC 6 sanitize | hostname lab đã gỡ khỏi checkpoint; evidence thô có IP giữ private; `demos/scn-001/README.md` còn alias 8.3 của hồ sơ người dùng từ trước (HEAD cũ; thay bằng ví dụ chung ở commit sau) |
 | Rule behavioral khớp cả runner | script block preflight của `Invoke-SafeDemo.ps1` (đọc `[Environment]::MachineName` + `$PID`) nổ 118001 (C recID 12921); chỉ bị loại khỏi verdict nhờ scope path của A03. Đã công bố trong `SCN001_RUN_BINDING.md` và PR; thu hẹp rule hay chấp nhận: **chờ chủ dự án** |
 | Run binding | `caller_reviewed` không thể đạt trên run thật (mọi run có companion); không EVTX native review; caller-attested ≠ lab-verified |
 | Logtest | `wazuh-logtest` (CLI lẫn socket) trên 4.14.4 không tái tạo decoder `windows_eventchannel` — probe 10/10 ra `json`; bằng chứng engine thật đến từ đường agent |
@@ -4648,3 +4648,45 @@ Trên endpoint: `C:\AEGIS-Lab\{SCN001,SCN001-v2,runs,runs-v2,controls-v2}` **ch�
 2. Rule behavioral khớp runner: thu hẹp (follow-up) hay chấp nhận có công bố.
 3. Artifact duyệt payload (AC 1) và cách lưu pin kit/study (AC 4) — có đưa bản sanitized vào repo không.
 4. Xoá `C:\AEGIS-Lab` và staging/backup trên manager sau khi xác nhận evidence đã lưu đủ.
+
+## 2026-09-18 — Chốt AC theo yêu cầu gốc, tài liệu duyệt/pins sanitize, đánh giá rule khớp runner
+
+### Đối chiếu AC gốc của Issue #12 (không tự thêm yêu cầu)
+
+Issue #12 có 8 AC; **không** AC nào đòi artifact ký cho payload. Reviewer trước đó xếp AC 1/4 "partially" theo tiêu chí tự đặt (artifact ký; pin trong repo). Đối chiếu lại theo chữ của issue:
+
+| AC | Trạng thái | Căn cứ |
+| --- | --- | --- |
+| 1 payload/target approved, non-destructive | **met** | duyệt Phương án B trong chat 2026-09-18; bản ghi + phân tích payload ở `docs/SCN001_V2_APPROVAL_AND_PINS.md` §1 (không ký thay ai; chủ dự án xác nhận bằng duyệt PR) |
+| 2 cùng scenario/hành vi | met | `scenarios/` sạch, kit 0.2.0 scenario 0.1.0, hai tên cùng bytes |
+| 3 evidence IDs + raw refs | met | §3.2 + `docs/evidence/scn001-v2-pins.json` `runs.*.assertions` |
+| 4 revisions version-controlled | **met** | template trong git; hash render pin ở §2 kèm lệnh tái sinh kit; bytes render không vào git vì chứa hostname |
+| 5 comparison / ground truth | met | Regression Passed, cùng profile fingerprint |
+| 6 sanitize | met | file mới quét rò rỉ (hostname → `<lab-endpoint>`, tài khoản lược); README: ví dụ alias 8.3 đổi thành `ADMINI~1`; hostname lab vốn có trong hai docs trên `main` (PR #25) — không sửa ở đây, quyết định riêng |
+| 7 script + checklist | met | checklist, README, DEMO.md |
+| 8 tests xanh | met | `pytest backend/tests` sau thay đổi docs: **2580 passed, 1 skipped** (201 s, venv worktree) |
+
+### Tài liệu mới (sanitize, reviewer kiểm được không cần evidence private)
+
+- `docs/SCN001_V2_APPROVAL_AND_PINS.md`: bản ghi duyệt payload/target, pins + lệnh tái sinh kit, evidence theo assertion, **mọi** cảnh báo 4104 trên engine thật, đánh giá rule khớp runner, danh sách artifact private.
+- `docs/evidence/scn001-v2-pins.json`: sinh bằng `scratchpad/write_pins_doc.py` trực tiếp từ study/kit/report/snapshot/controls private; script dừng nếu output chứa hostname hay tài khoản.
+- Không công bố `profile.json` (sạch hostname, `08a8fc0b…`): lệnh copy từ scratchpad vào repo bị permission classifier chặn; hash đã pin, chủ dự án quyết định có đưa vào sau.
+- `docs/DEMO.md`: trỏ tới kết quả v2 và nêu giới hạn runner. `demos/scn-001/README.md`: ví dụ alias 8.3 đổi thành `ADMINI~1`.
+
+### Sự kiện engine thật bổ sung (từ snapshot v2, chưa ghi trước đây)
+
+| Run | recID | Block | Rule nổ |
+| --- | --- | --- | --- |
+| A, B (baseline) | 11268 / 12068 | runner `Get-AegisPreflight` | stock **91815** L4 (T1057) |
+| A, B, C | 11413 / 12213 / 13066 | runner `Invoke-AegisExecution` | stock 91816 L4 |
+| C (behavioral) | 12921 | runner `Get-AegisPreflight` | **118001** L5 |
+
+Nghĩa là runner sinh 2 cảnh báo stock mỗi run từ trước; behavioral chỉ nâng block preflight từ 91815 L4 lên 118001 L5, không tạo lớp cảnh báo mới. Bộ v2 có **một control lành tính không dự kiến bị khớp** (block preflight), bên cạnh ba control dự kiến đúng kỳ vọng.
+
+### Đánh giá rule khớp runner — khuyến nghị
+
+Scope A03 loại bản ghi khỏi verdict nhưng rule vẫn nổ level 5 trên script lành tính: hạn chế precision của rule, không phải lỗi comparison. **Khuyến nghị: chấp nhận cho phạm vi demo Issue #12 với công bố rõ, không thu hẹp trước merge, không triển khai rule ngoài lab, mở follow-up** (rule ngoại lệ tường minh cho tooling + bộ run mới). Căn cứ: AC không đòi rule không FP; không có lớp cảnh báo mới; rule hẹp hơn parent (hai control live); mọi cách thu hẹp có sẵn (allowlist theo path, sửa runner) đổi bytes đã pin → phải chạy lại lab, điều đã quyết định không làm vòng này; allowlist theo tên file lặp lại chính anti-pattern demo phơi bày. Chi tiết §5 tài liệu mới; draft follow-up: `scratchpad/pr/FOLLOWUP_RULE_PRECISION.md` (chưa tạo issue).
+
+### Trình duyệt
+
+PR description cuối: `scratchpad/pr/PR_ISSUE_12.md` (AC → status → nơi kiểm; limits; khuyến nghị). Chờ chủ dự án duyệt **push + mở PR**; chưa merge, chưa đóng issue; artifacts và backup giữ nguyên.
