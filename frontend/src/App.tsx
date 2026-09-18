@@ -1,19 +1,29 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AnyReport, ApiClient, LoadState } from './api';
-import type { IndexEntry, ReportIndex } from './contracts';
+import type { ReportIndex } from './contracts';
 import { ComparisonView } from './components/ComparisonView';
-import { RunView } from './components/RunView';
-import { StateNotice } from './components/StateNotice';
+import { EmptyState, ErrorPanel, Skeleton } from './components/Feedback';
+import { RunView, type RunTab } from './components/RunView';
+import { orderEntries, Sidebar } from './components/Sidebar';
 import { StatusBadge } from './components/StatusBadge';
+import { text } from './format';
+import { readRoute, writeRoute } from './route';
 
 export interface AppProps {
   api: ApiClient;
 }
 
+function initialTab(value: string | null): RunTab {
+  return value === 'timeline' ? 'timeline' : 'assertions';
+}
+
 export function App({ api }: AppProps) {
   const [index, setIndex] = useState<LoadState<ReportIndex>>({ status: 'loading' });
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() => readRoute().report);
+  const [tab, setTab] = useState<RunTab>(() => initialTab(readRoute().tab));
   const [report, setReport] = useState<LoadState<AnyReport> | null>(null);
+  const [query, setQuery] = useState('');
+  const [reportTick, setReportTick] = useState(0);
 
   const loadIndex = useCallback(() => {
     setIndex({ status: 'loading' });
@@ -23,6 +33,20 @@ export function App({ api }: AppProps) {
   useEffect(() => {
     loadIndex();
   }, [loadIndex]);
+
+  // Keep the selection meaningful: a stale name is dropped, and with nothing
+  // chosen the first readable report opens so the page is useful at once.
+  useEffect(() => {
+    if (index.status !== 'ready') return;
+    const ordered = orderEntries(index.value.reports);
+    if (selected !== null && ordered.some((entry) => entry.name === selected)) return;
+    const first = ordered.find((entry) => entry.error === null && entry.kind !== null) ?? null;
+    setSelected(first === null ? null : first.name);
+  }, [index, selected]);
+
+  useEffect(() => {
+    writeRoute({ report: selected, tab: selected === null ? null : tab });
+  }, [selected, tab]);
 
   useEffect(() => {
     if (selected === null) {
@@ -37,129 +61,175 @@ export function App({ api }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [api, selected]);
+  }, [api, selected, reportTick]);
+
+  const refresh = () => {
+    loadIndex();
+    setReportTick((value) => value + 1);
+  };
 
   return (
-    <div className="layout">
-      <aside className="sidebar" aria-label="Danh sách report">
-        <header className="brand">
-          <h1>AEGIS Verify</h1>
-          <p>Kết quả validation offline, chỉ đọc. Mọi giá trị hiển thị nguyên như backend trả.</p>
-          <button type="button" onClick={loadIndex} className="link">
-            Tải lại danh sách
-          </button>
-        </header>
-        <IndexPanel state={index} selected={selected} onSelect={setSelected} />
-      </aside>
-      <main className="content">
-        {selected === null ? (
-          <StateNotice tone="neutral" title="Chưa chọn report">
-            Chọn một report ở cột trái. Report `evaluation` hiện một run; report `comparison` hiện trước/sau.
-          </StateNotice>
-        ) : (
-          <ReportPanel name={selected} state={report} />
-        )}
+    <div className="app">
+      <Sidebar state={index} selected={selected} query={query} onQuery={setQuery} onSelect={setSelected} onRetry={loadIndex} />
+      <main className="main">
+        <Content
+          index={index}
+          selected={selected}
+          report={report}
+          tab={tab}
+          onTab={setTab}
+          onRefresh={refresh}
+          onRetryReport={() => setReportTick((value) => value + 1)}
+        />
       </main>
     </div>
   );
 }
 
-function IndexPanel({
-  state,
+function Content({
+  index,
   selected,
-  onSelect,
+  report,
+  tab,
+  onTab,
+  onRefresh,
+  onRetryReport,
 }: {
-  state: LoadState<ReportIndex>;
+  index: LoadState<ReportIndex>;
   selected: string | null;
-  onSelect: (name: string) => void;
+  report: LoadState<AnyReport> | null;
+  tab: RunTab;
+  onTab: (tab: RunTab) => void;
+  onRefresh: () => void;
+  onRetryReport: () => void;
 }) {
-  if (state.status === 'loading') return <StateNotice tone="neutral" title="Đang tải danh sách report…" />;
-  if (state.status === 'backend-error') {
+  if (index.status === 'loading') {
     return (
-      <StateNotice tone="error" title="Không lấy được danh sách từ backend">
-        {state.reason} Chạy <code>aegis dashboard --reports &lt;thư mục&gt;</code> rồi tải lại.
-      </StateNotice>
+      <>
+        <Header title="Đang tải" subtitle={null} status={null} onRefresh={onRefresh} />
+        <Skeleton lines={5} label="Đang tải report" />
+      </>
     );
   }
-  if (state.status === 'malformed') {
+  if (index.status !== 'ready') {
     return (
-      <StateNotice tone="warning" title="Danh sách report không đúng contract">
-        {state.reason}
-      </StateNotice>
+      <>
+        <Header title="Không kết nối được backend" subtitle={null} status={null} onRefresh={onRefresh} />
+        <EmptyState title="Dashboard cần server report">
+          <p>
+            Chạy <code>aegis dashboard --reports &lt;thư mục&gt; --static frontend/dist</code> rồi bấm Tải lại. Chi tiết lỗi ở cột
+            trái.
+          </p>
+        </EmptyState>
+      </>
     );
   }
-  if (state.value.reports.length === 0) {
+  if (selected === null) {
     return (
-      <StateNotice tone="neutral" title="Thư mục report trống">
-        Không có file <code>*.json</code> nào. Tạo report bằng <code>aegis validate --format json</code> hoặc{' '}
-        <code>aegis compare --format json</code>.
-      </StateNotice>
+      <>
+        <Header title="Chưa có report" subtitle={null} status={null} onRefresh={onRefresh} />
+        <EmptyState title="Chưa có report nào để hiển thị">
+          <p>
+            Tạo report bằng <code>aegis validate --format json</code> hoặc <code>aegis compare --format json</code>, lưu vào thư
+            mục <code>--reports</code> rồi bấm Tải lại.
+          </p>
+        </EmptyState>
+      </>
     );
   }
+  if (report === null || report.status === 'loading') {
+    return (
+      <>
+        <Header title={selected} subtitle="Đang tải report…" status={null} onRefresh={onRefresh} />
+        <Skeleton lines={6} label={`Đang tải ${selected}`} />
+      </>
+    );
+  }
+  if (report.status === 'backend-error') {
+    return (
+      <>
+        <Header title={selected} subtitle="Backend lỗi" status={null} onRefresh={onRefresh} />
+        <ErrorPanel
+          title="Không đọc được report từ backend"
+          message="Server không phản hồi hoặc trả lỗi. Kiểm tra server đang chạy rồi thử lại."
+          details={report.reason}
+          onRetry={onRetryReport}
+        />
+      </>
+    );
+  }
+  if (report.status === 'malformed') {
+    return (
+      <>
+        <Header title={selected} subtitle="Report không đúng contract" status={null} onRefresh={onRefresh} />
+        <ErrorPanel
+          title="Report không đúng contract, không hiển thị một phần"
+          message="File không phải report evaluation/comparison hợp lệ. Tạo lại bằng `aegis validate` hoặc `aegis compare --format json`."
+          details={report.reason}
+          onRetry={onRetryReport}
+        />
+      </>
+    );
+  }
+  if (report.value.kind === 'evaluation') {
+    const { scenario, evaluation } = report.value.report;
+    return (
+      <>
+        <Header
+          eyebrow="Run"
+          title={evaluation.run_id}
+          mono
+          subtitle={`${scenario.id} — ${text(scenario.name)} · v${scenario.version} · ${selected}`}
+          status={evaluation.final_status}
+          onRefresh={onRefresh}
+        />
+        <RunView report={report.value.report} tab={tab} onTab={onTab} />
+      </>
+    );
+  }
+  const { scenario, before, after, comparison } = report.value.report;
   return (
-    <ul className="report-list">
-      {state.value.reports.map((entry) => (
-        <li key={entry.name}>
-          <button
-            type="button"
-            className={`report-item${selected === entry.name ? ' selected' : ''}`}
-            aria-current={selected === entry.name ? 'true' : undefined}
-            onClick={() => onSelect(entry.name)}
-          >
-            <span className="report-name">{entry.name}</span>
-            <IndexSummary entry={entry} />
-          </button>
-        </li>
-      ))}
-    </ul>
+    <>
+      <Header
+        eyebrow="Comparison"
+        title={`${scenario.id} · ${text(scenario.name)}`}
+        subtitle={`${before.run_id} → ${after.run_id} · v${scenario.version} · ${selected}`}
+        status={comparison.status}
+        onRefresh={onRefresh}
+      />
+      <ComparisonView report={report.value.report} />
+    </>
   );
 }
 
-function IndexSummary({ entry }: { entry: IndexEntry }) {
-  if (entry.error !== null) {
-    return (
-      <span className="report-meta bad">
-        malformed · {entry.error.code}
-        {entry.error.field ? ` (${entry.error.field})` : ''}
-      </span>
-    );
-  }
-  if (entry.kind === 'evaluation') {
-    return (
-      <span className="report-meta">
-        run · {entry.scenario_id ?? 'scenario?'} · {entry.run_id ?? 'run_id: null'} ·{' '}
-        <StatusBadge value={entry.final_status} />
-      </span>
-    );
-  }
-  if (entry.kind === 'comparison') {
-    return (
-      <span className="report-meta">
-        comparison · {entry.scenario_id ?? 'scenario?'} · <StatusBadge value={entry.comparison_status} />
-      </span>
-    );
-  }
-  return <span className="report-meta">kind: null</span>;
-}
-
-function ReportPanel({ name, state }: { name: string; state: LoadState<AnyReport> | null }) {
-  if (state === null || state.status === 'loading') {
-    return <StateNotice tone="neutral" title={`Đang tải ${name}…`} />;
-  }
-  if (state.status === 'backend-error') {
-    return (
-      <StateNotice tone="error" title={`Backend lỗi khi đọc ${name}`}>
-        {state.reason}
-      </StateNotice>
-    );
-  }
-  if (state.status === 'malformed') {
-    return (
-      <StateNotice tone="warning" title={`${name} không đúng contract report`}>
-        {state.reason} Dashboard không hiển thị một phần report để tránh kết luận sai.
-      </StateNotice>
-    );
-  }
-  if (state.value.kind === 'evaluation') return <RunView name={name} report={state.value.report} />;
-  return <ComparisonView name={name} report={state.value.report} />;
+function Header({
+  eyebrow,
+  title,
+  mono = false,
+  subtitle,
+  status,
+  onRefresh,
+}: {
+  eyebrow?: string;
+  title: string;
+  mono?: boolean;
+  subtitle: string | null;
+  status: string | null;
+  onRefresh: () => void;
+}) {
+  return (
+    <header className="page-header">
+      <div className="page-heading">
+        {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
+        <h1 className={mono ? 'mono' : undefined}>{title}</h1>
+        {subtitle ? <p className="page-sub">{subtitle}</p> : null}
+      </div>
+      <div className="page-actions">
+        {status !== null ? <StatusBadge value={status} /> : null}
+        <button type="button" className="btn" onClick={onRefresh}>
+          Tải lại
+        </button>
+      </div>
+    </header>
+  );
 }

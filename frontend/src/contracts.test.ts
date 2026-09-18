@@ -27,6 +27,18 @@ describe('parseEvaluationReport', () => {
     expect(detection?.collection_assurance).toBe('caller-attested');
   });
 
+  it('copies optional scenario details from comparison_inputs and leaves them null otherwise', () => {
+    const parsed = parseEvaluationReport(afterFixture);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.scenario_details?.status).toBe('draft');
+    expect(parsed.value.scenario_details?.assertion_descriptions['SCN-999-A01']).toBe('Synthetic activity exists.');
+    const { comparison_inputs: _omitted, ...bare } = afterFixture;
+    const withoutInputs = parseEvaluationReport(bare);
+    expect(withoutInputs.ok).toBe(true);
+    if (withoutInputs.ok) expect(withoutInputs.value.scenario_details).toBeNull();
+  });
+
   it('treats a missing timeline as null rather than inventing one', () => {
     const { timeline: _omitted, ...withoutTimeline } = afterFixture;
     const parsed = parseEvaluationReport(withoutTimeline);

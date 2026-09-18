@@ -73,10 +73,22 @@ export interface Timeline {
   events: TimelineEvent[];
 }
 
+/**
+ * Optional context copied from `comparison_inputs.scenario` when the report
+ * carries it. Every field is null when absent; nothing is inferred.
+ */
+export interface ScenarioDetails {
+  status: string | null;
+  description: string | null;
+  expected_outcome: string | null;
+  assertion_descriptions: Record<string, string>;
+}
+
 export interface EvaluationReport {
   kind: 'evaluation';
   cli_report_version: string;
   scenario: { id: string; name: string; version: string };
+  scenario_details: ScenarioDetails | null;
   evaluation: {
     run_id: string;
     final_status: FinalStatus;
@@ -255,6 +267,27 @@ function timeline(value: unknown): Timeline | null {
   };
 }
 
+function scenarioDetails(value: unknown): ScenarioDetails | null {
+  if (!isRecord(value) || !isRecord(value['scenario'])) return null;
+  const source = value['scenario'];
+  const assertion_descriptions: Record<string, string> = {};
+  const list = source['assertions'];
+  if (Array.isArray(list)) {
+    for (const item of list) {
+      if (isRecord(item) && isString(item['id']) && isString(item['description'])) {
+        assertion_descriptions[item['id']] = item['description'];
+      }
+    }
+  }
+  const optional = (key: string): string | null => (isString(source[key]) ? (source[key] as string) : null);
+  return {
+    status: optional('status'),
+    description: optional('description'),
+    expected_outcome: optional('expected_outcome'),
+    assertion_descriptions,
+  };
+}
+
 function counts(value: unknown): OutcomeCounts {
   const record = requireRecord(value, 'evaluation.counts');
   const read = (key: keyof OutcomeCounts): number => {
@@ -302,6 +335,7 @@ export function parseEvaluationReport(input: unknown): Parsed<EvaluationReport> 
         kind: 'evaluation',
         cli_report_version: requireString(record, 'cli_report_version', 'report'),
         scenario: scenario(record['scenario']),
+        scenario_details: scenarioDetails(record['comparison_inputs']),
         evaluation: {
           run_id: requireString(evaluation, 'run_id', 'evaluation'),
           final_status: finalStatus(evaluation['final_status'], 'evaluation.final_status'),
