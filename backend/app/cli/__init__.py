@@ -130,6 +130,7 @@ def _parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--host", default=DEFAULT_HOST)
     dashboard.add_argument("--port", type=int, default=DEFAULT_PORT)
     dashboard.add_argument("--static")
+    dashboard.add_argument("--operations-config")
     return parser
 
 
@@ -156,6 +157,7 @@ def _duplicates(arguments: list[str]) -> bool:
         "--host",
         "--port",
         "--static",
+        "--operations-config",
     ):
         if sum(item == option or item.startswith(option + "=") for item in arguments) > 1:
             return True
@@ -184,7 +186,7 @@ def main(argv=None) -> int:
             return 2 if _emit_error(error, "text") else 4
         try:
             return serve(options.reports, host=options.host, port=options.port,
-                         static_dir=options.static,
+                         static_dir=options.static, operations_config=options.operations_config,
                          announce=lambda text: _write_stream("stdout", text + "\n"))
         except IntakeError as error:
             return 2 if _emit_error(error, "text") else 4

@@ -14,6 +14,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
+import os
 from pathlib import Path
 import re
 
@@ -106,13 +107,18 @@ def _error_body(error: IntakeError) -> dict:
                                        "field": error.field, "hint": error.hint}}
 
 
-def _handler(store: ReportStore, static_dir):
+def _handler(store: ReportStore, static_dir, operations=None):
     static_root = None if static_dir is None else local_path(static_dir, directory=True, stage="inputs")
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "AegisDashboard/0.1.0"
         sys_version = ""
         protocol_version = "HTTP/1.1"
+
+        def setup(self):
+            super().setup()
+            if operations is not None:
+                self.connection.settimeout(5)
 
         def log_message(self, *_args):
             return None
@@ -181,6 +187,9 @@ def _handler(store: ReportStore, static_dir):
             self._send(HTTPStatus.OK, body, content_type)
 
         def do_GET(self):
+            if operations is not None and self.path.startswith('/api/operations/'):
+                self._operations()
+                return
             path = self.path.split("?", 1)[0].split("#", 1)[0]
             try:
                 if path == "/api" or path.startswith("/api/"):
@@ -197,21 +206,71 @@ def _handler(store: ReportStore, static_dir):
             self.send_header("Content-Length", "0")
             self.end_headers()
 
-        do_POST = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_HEAD
+        def _operations(self):
+            from .operations_config import OperationsError
+            from .operations_api import error_response
+            from .operations_security import body_length
+            # Close every operations connection: rejected/unread payloads cannot
+            # become a second request on a reused connection.
+            self.close_connection = True
+            try:
+                operations.authorize(self.command, self.path, self.headers)
+                length = body_length(self.command, self.headers)
+                body = self.rfile.read(length) if length else b''
+                if len(body) != length:
+                    raise OperationsError('invalid_request')
+                status, payload = operations.dispatch(self.command, self.path, self.headers, body)
+            except OperationsError as exc:
+                status, payload = error_response(str(exc))
+            except (OSError, ValueError):
+                status, payload = error_response('invalid_request')
+            self._json(status, payload)
+
+        def do_POST(self):
+            if operations is not None and self.path.startswith('/api/operations/'):
+                self._operations()
+            else:
+                self.do_HEAD()
+
+        do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_HEAD
 
     return Handler
 
 
-def make_server(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir=None):
+def make_server(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir=None, operations_config=None):
     """Build the loopback server; ``port=0`` picks a free port (tests)."""
+    operations = None
+    if operations_config is not None:
+        from .operations_config import load_operations_config, OperationsError
+        from .operations_storage import JobStore
+        from .operations_jobs import JobService, _collect
+        from .operations_api import OperationsAPI
+        if host != '127.0.0.1':
+            raise OperationsError('loopback_required')
+        config = load_operations_config(operations_config, environ=os.environ,
+            reports_root=Path(reports_dir), static_root=None if static_dir is None else Path(static_dir),
+            source_root=Path(__file__).resolve().parents[3])
+        jobs = JobService(config, JobStore(config.output_root), collect_fn=_collect)
+        operations = OperationsAPI(config, jobs)
     store = ReportStore(reports_dir)
-    server = ThreadingHTTPServer((host, port), _handler(store, static_dir))
+
+    class DashboardServer(ThreadingHTTPServer):
+        def server_close(self):
+            if operations is not None:
+                operations.jobs.shutdown()
+            super().server_close()
+
+    server = DashboardServer((host, port), _handler(store, static_dir, operations))
     server.daemon_threads = True
+    if operations is not None:
+        operations.authority = f'{server.server_address[0]}:{server.server_address[1]}'
     return server
 
 
-def serve(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir=None, announce=print):
-    server = make_server(reports_dir, host=host, port=port, static_dir=static_dir)
+def serve(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir=None, announce=print,
+          operations_config=None):
+    server = make_server(reports_dir, host=host, port=port, static_dir=static_dir,
+                         operations_config=operations_config)
     bound_host, bound_port = server.server_address[:2]
     announce(f"dashboard: http://{bound_host}:{bound_port}/ (reports: {len(ReportStore(reports_dir).names())}, "
              f"static: {'yes' if static_dir else 'no'}); Ctrl+C to stop")
