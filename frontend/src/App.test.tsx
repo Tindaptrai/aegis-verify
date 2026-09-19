@@ -135,6 +135,19 @@ describe('Sidebar', () => {
 });
 
 describe('Run view', () => {
+  it('renders a prototype-named assertion without crashing or inventing a description', async () => {
+    const report = structuredClone(afterFixture);
+    report.evaluation.assertions[0]!.assertion_id = '__proto__';
+    renderApp({ ...allReports, '/api/reports/after-detected.json': { status: 200, body: report } });
+    expect(await within(main()).findByText('__proto__')).toBeInTheDocument();
+  });
+
+  it('rejects negative counts before showing charts', async () => {
+    const report = structuredClone(afterFixture);
+    report.evaluation.counts.false_negative = -1;
+    renderApp({ ...allReports, '/api/reports/after-detected.json': { status: 200, body: report } });
+    expect(await within(main()).findByRole('alert')).toHaveTextContent('Report không đúng contract');
+  });
   it('shows header, overview numbers, assertion descriptions and expandable details', async () => {
     renderApp(allReports);
     const content = main();
@@ -237,6 +250,15 @@ describe('Run view', () => {
 });
 
 describe('Comparison view', () => {
+  it('uses a neutral before label even when the earlier run was detected', async () => {
+    const report = structuredClone(comparisonFixture);
+    report.before.final_status = 'Detected';
+    window.history.replaceState(null, '', '/#report=comparison-regression-passed.json');
+    renderApp({ ...allReports, '/api/reports/comparison-regression-passed.json': { status: 200, body: report } });
+    const sides = await within(main()).findByRole('region', { name: 'Trước và sau' });
+    expect(within(sides).getByText('Trước', { exact: true })).toBeInTheDocument();
+    expect(within(sides).queryByText('Trước · gap', { exact: true })).not.toBeInTheDocument();
+  });
   it('renders before/after side by side, backend counts and per-assertion transitions', async () => {
     window.history.replaceState(null, '', '/#report=comparison-regression-passed.json');
     renderApp(allReports);

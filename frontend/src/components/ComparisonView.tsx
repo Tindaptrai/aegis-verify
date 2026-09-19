@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { ComparisonAssertion, ComparisonReport, ComparisonSide } from '../contracts';
 import { MISSING, shortId } from '../format';
 import { StatusBadge } from './StatusBadge';
+import { BindingNotice } from './BindingNotice';
 
 const STATE_ORDER = [
   'improvement',
@@ -24,7 +25,7 @@ export function ComparisonView({ report }: { report: ComparisonReport }) {
     <div className="comparison">
       <section className="before-after" aria-label="Trước và sau">
         <div className="side">
-          <p className="side-label">Trước · gap</p>
+          <p className="side-label">Trước</p>
           <p className="side-run mono">{before.run_id}</p>
           <StatusBadge value={before.final_status} />
         </div>
@@ -59,6 +60,16 @@ export function ComparisonView({ report }: { report: ComparisonReport }) {
       </section>
 
       <section aria-labelledby="transitions-heading">
+        <div className="notices">
+          <section aria-label="Run binding — Trước">
+            <p className="side-label">Trước</p>
+            <BindingNotice binding={report.run_binding.before} />
+          </section>
+          <section aria-label="Run binding — Sau">
+            <p className="side-label">Sau</p>
+            <BindingNotice binding={report.run_binding.after} />
+          </section>
+        </div>
         <h2 id="transitions-heading" className="section-title">
           Chuyển trạng thái từng assertion
         </h2>

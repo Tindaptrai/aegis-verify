@@ -43,6 +43,13 @@ cụt và một file `kind` không hỗ trợ để thấy trạng thái malform
 
 ## Acceptance criteria → nơi kiểm
 
+Màn hình run có hai biểu đồ từ số đếm backend: vòng phân bố bốn outcome
+assertion và thanh ngang cho parsed/referenced/skipped. Các thanh dùng cùng
+thang đo và là số đếm độc lập (referenced không phải nhóm tách biệt khỏi parsed).
+Biểu đồ không suy luận coverage toàn hệ thống hay tạo kết luận detection mới.
+Số liệu có nhãn văn bản, hỗ trợ screen reader và trạng thái không có dữ liệu.
+Không thêm thư viện biểu đồ hoặc dependency.
+
 | AC | Nơi kiểm |
 | --- | --- |
 | Scenario, run ID, final result, classification, evidence count | `RunView` mục "Tổng quan"; test `renders scenario, run ID, final result…` |
@@ -54,8 +61,46 @@ cụt và một file `kind` không hỗ trợ để thấy trạng thái malform
 | Tests tập trung | `frontend/src/*.test.ts(x)`, `backend/tests/test_dashboard_server.py`, `backend/tests/test_cli_timeline.py` |
 | Tests hiện có xanh | `pytest backend/tests`; `npm test` |
 
+## Run binding (bổ sung hiển thị)
+
+Màn hình run và comparison hiển thị `run_binding.status`, `reasons`, run ID và
+`both_sides_caller_declared` từ report. Hai phía comparison được trình bày riêng.
+Report cũ thiếu attachment được ghi "chưa có dữ liệu", không suy ra đã review.
+Attachment có status không hỗ trợ, reasons sai kiểu hoặc run ID khác report
+bị từ chối bởi structural reader. Không thay verdict detection/comparison,
+collection assurance hoặc tự suy ra `lab_verified` từ `caller_reviewed`.
+
+Phần này không nhập native review và không sửa cơ chế companion/backend.
+Các findings native thu riêng không tự cập nhật report lịch sử; reason cũ như
+`native_review_missing` vẫn phản ánh chính input của report đó.
+Tests: `frontend/src/binding.test.tsx`; toàn frontend 59 tests và build đã qua
+ngày 2026-09-19. Chỉ dùng synthetic fixtures trong tests, không đưa log lab vào Git.
+
 ## Ngoài phạm vi (theo issue)
 
 Không auth, không multi-tenant, không billing, không production hosting, không
 live connector (#11). Server chỉ dành cho máy của người vận hành với report đã
 review; không expose ra mạng.
+
+## Review hardening (2026-09-19)
+
+- Các số đếm phải là số nguyên không âm trong miền safe integer của JavaScript;
+  report sai cấu trúc bị từ chối trước khi vẽ biểu đồ. Đây không phải tính lại
+  kết quả validation.
+- Bảng mô tả assertion dùng map không có prototype; ID như `__proto__` không
+  làm React lỗi hoặc hiển thị một mô tả chưa có trong dữ liệu.
+- Nhãn so sánh dùng “Trước”, không tự gọi mọi run trước là detection gap.
+- Bảng giữ cuộn ngang bên trong wrapper; nhãn ẩn cho screen reader không làm
+  tràn toàn trang trên mobile. Kiểm tra browser 390px: lỗi tràn 636px trước sửa,
+  sau sửa document 375px khi bảng đã tải; desktop 1440px không tràn ngang.
+- 45 test frontend đạt; TypeScript/build production đạt. Có regression test cho
+  malformed counts, prototype-named IDs, và nhãn so sánh trung lập.
+- Backend toàn bộ: **2595 passed, 1 skipped** (FIFO không hỗ trợ Windows).
+  Lượt đầu lỗi setup do thiếu thư mục cha của pytest basetemp; đã tạo thư mục
+  build/verification và chạy lại toàn bộ đạt. Review độc lập sau sửa không còn
+  phát hiện Critical/Important.
+
+Giao diện kiểm tra bằng fixture synthetic, không phải báo cáo detection của lab
+live. Human review vẫn cần trước merge; không tự đóng Issue #10.
+PR #27 đã merge; các bổ sung charts/hardening/run binding được bàn giao qua
+nhánh follow-up `codex/issue-10-dashboard-polish`, không cập nhật PR đã merge.

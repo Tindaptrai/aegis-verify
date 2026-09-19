@@ -6,6 +6,8 @@ import { Notice } from './Feedback';
 import { StatusBadge } from './StatusBadge';
 import { Tabs, TabPanel } from './Tabs';
 import { Timeline } from './Timeline';
+import { RunCharts } from './RunCharts';
+import { BindingNotice } from './BindingNotice';
 
 export type RunTab = 'assertions' | 'timeline';
 
@@ -67,7 +69,10 @@ export function RunView({
         </div>
       </section>
 
+      <RunCharts outcomes={evaluation.counts} intake={counts} />
+
       <div className="notices">
+        <BindingNotice binding={report.run_binding} />
         {scenario_details && (scenario_details.status !== null || scenario_details.description !== null) ? (
           <Notice tone="info" title={`Scenario status: ${scenario_details.status ?? MISSING}`}>
             <p>{scenario_details.description ?? MISSING}</p>
