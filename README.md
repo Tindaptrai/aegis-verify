@@ -6,19 +6,13 @@ AEGIS Verify replays safe security scenarios, normalizes telemetry from open-sou
 security controls, and verifies every security conclusion against raw evidence. Its
 core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
-> Status: Canonical Event v1.0 and read-only Scenario YAML validation are merged.
-> Canonical Event v2.0 lossless timestamps are merged via PR #16.
-> The fixture-only Wazuh Windows 4688 profile is merged via PR #17.
-> Suricata A (Wazuh-exported alert) is merged via PR #18.
-> This branch adds two offline Cowrie profiles. Direction A parses Wazuh-exported
-> search hits; nine reviewed derivatives cover all six supported event types, and
-> only its two command records are a real same-session pair. Direction B parses
-> native Cowrie JSONL; its audited real derivative has seven parsed records from
-> one session plus one explicit unsupported `client.size` skip. Both still require
-> human/lab validation.
-> The first 14-day milestone is a fixture-driven CLI;
-> the dashboard and GitHub Pages are intentionally deferred until the validation core
-> works end to end.
+> Status (2026-09-19): controlled demo/lab V1 is integrated through PRs #28–#30.
+> The fixture-driven CLI, regression comparison, read-only dashboard, optional
+> native-review input and bounded live Wazuh Indexer collector are available.
+> This is not production certification or live fleet monitoring. Historical run
+> binding remains unknown; successful reads do not prove least-privilege access.
+> Start with the [V1 handoff/runbook](docs/V1_HANDOFF.md) and
+> [draft release notes](docs/V1_RELEASE_NOTES.md). No release tag is declared here.
 
 ## MVP
 
@@ -34,7 +28,7 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
 ```text
 docs/          Product, architecture, threat model, and demo documentation
-backend/       Future validation engine, CLI, API, and unit tests
+backend/       Validation engine, CLI, read-only dashboard server, and tests
 frontend/      Read-only results dashboard (Vite + React), see docs/DASHBOARD.md
 connectors/    Fixture-first adapters for four telemetry sources
 scenarios/     Safe, repeatable scenario manifests
