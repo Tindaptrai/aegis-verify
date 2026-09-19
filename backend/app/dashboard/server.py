@@ -257,6 +257,7 @@ def make_server(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir
     class DashboardServer(ThreadingHTTPServer):
         def server_close(self):
             if operations is not None:
+                operations.inventory.shutdown()
                 operations.jobs.shutdown()
             super().server_close()
 

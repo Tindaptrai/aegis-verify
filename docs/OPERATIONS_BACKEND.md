@@ -1,7 +1,7 @@
 # Local operations backend (issue #36)
 
-This opt-in backend is not the completed operations UI. Agents inventory and
-launcher integration follow in separate issues. Collection never evaluates a
+This opt-in backend is not the completed operations UI. Inventory is added by
+issue #37; UI and launcher integration follow separately. Collection never evaluates a
 scenario or creates a security verdict. Default dashboard behavior stays read-only.
 
 ## Local configuration
@@ -39,8 +39,29 @@ disable collection. TLS remains verified; no insecure option is provided.
 
 Do not use a network share, symlink, junction, mapped provider syntax, traversal
 or an output folder within source/reports/static. Bind remains `127.0.0.1` only.
-Indexer credentials do not grant Server API access; inventory is not configured
-by this backend delivery.
+Indexer credentials do not grant Server API access. To opt into inventory, add a
+`server_api` object with its own `endpoint` and `ca_file`, and provide
+`WAZUH_API_USERNAME` and `WAZUH_API_PASSWORD` to the backend process. Never reuse
+Indexer credentials implicitly. The Server API identity needs `agent:read` for
+the configured allowlist, not administrative rights. Protocol is checked against
+the [Wazuh v4.14.4 API specification](https://github.com/wazuh/wazuh/blob/v4.14.4/api/api/spec/spec.yaml).
+
+Inventory is administrative metadata, not canonical security evidence. GET
+`/api/operations/agents` never contacts Wazuh; POST `/api/operations/agents/refresh`
+with `{}` requests one bounded refresh. Only configured agents are requested.
+Authentication tokens remain in memory. Refreshes have a 30-second cooldown,
+50-item pages, ten-page limit, 1 MiB response limit and 5 MiB cumulative limit.
+The adapter checks a 60-second deadline before and after requests; a blocking
+socket read may finish later (10-second socket timeout), but late results are
+not published. One expired-token reauthentication is permitted per refresh.
+
+Snapshots older than 60 seconds or retained after a refresh failure are `stale`.
+Missing/duplicate agents or partial pages reject the whole refresh; the last
+complete snapshot remains visible. Source status and source keepalive are kept
+separate from fetch time. Failure never turns an agent into `disconnected`.
+Wazuh pagination is not an atomic point-in-time snapshot: status can change
+between valid pages. Membership checks cannot detect every such source change.
+Unconfigured inventory does not disable collection, and vice versa.
 
 ## Request boundary
 
