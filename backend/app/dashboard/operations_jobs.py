@@ -11,6 +11,7 @@ from ..models import PreciseTimestamp
 from ..connectors.wazuh.live import Config, LiveError, collect, collect_adaptive
 from .operations_config import OperationsError
 from .operations_storage import ERROR_CODES, valid_uuid, validate_record
+from .operations_lease import RootLease
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class JobService:
                  now=lambda: datetime.now(timezone.utc),
                  free_bytes=lambda path: shutil.disk_usage(path).free):
         self.config, self.store = config, store
+        self._lease = RootLease(config)
         self._collect, self._now, self._free = collect_fn, now, free_bytes
         self._lock = RLock()
         self._worker = None
@@ -156,3 +158,4 @@ class JobService:
             worker = self._worker
         if worker is not None:
             worker.join()  # Collector controls its bounded requests/attempts; never cancel mid-write.
+        self._lease.close()

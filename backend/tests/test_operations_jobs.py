@@ -220,3 +220,28 @@ def test_job_limit_at_service(factory, tmp_path):
     with pytest.raises(OperationsError, match='job_limit'):
         service.submit(request())
     assert len(service.list_jobs()) == 100
+
+
+def test_second_service_cannot_recover_active_jobs(factory):
+    create, release = factory
+    def collect(*args, **kwargs):
+        release.wait(10)
+        return RESULT.copy()
+    first = create(collect)
+    job = first.submit(request())
+    with pytest.raises(OperationsError, match='root_in_use'):
+        create()
+    assert first.get_job(job['id'])['state'] == 'running'
+    release.set()
+    first.shutdown()
+    restarted = create()
+    assert restarted.get_job(job['id'])['state'] == 'completed'
+
+
+def test_root_cannot_be_reused_for_different_environment(factory, tmp_path):
+    create, _ = factory
+    first = create()
+    first.shutdown()
+    changed = OperationsConfig('different', ('012',), 'wazuh-alerts-*', tmp_path)
+    with pytest.raises(OperationsError, match='root_scope_mismatch'):
+        create(cfg=changed)
