@@ -166,6 +166,9 @@ root ownership, corruption handling and scope binding.
 
 ## Acceptance boundary
 
+Xem [hồ sơ nghiệm thu và các gate còn mở](OPERATIONS_ACCEPTANCE.md) để đối chiếu
+phiên bản đã kiểm thử, bằng chứng live riêng và giới hạn so với PRD gốc.
+
 Fixture tests and UI previews are not live-lab proof. Human review and a real
 read-only inventory refresh plus short historical collection are required before
 calling this the final operational MVP. No merge/tag/release is implied by this
