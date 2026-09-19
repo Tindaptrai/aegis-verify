@@ -1,6 +1,38 @@
 /* AEGIS Verify results dashboard — charcoal workspace, indigo accent,
    green/red/amber reserved for states. No gradients, no glow. */
 
+.operations-nav { display: flex; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.operations-nav button { padding: 9px 10px; border: 1px solid transparent; border-radius: 6px; color: var(--text-2); background: transparent; cursor: pointer; }
+.operations-nav button[aria-current="page"] { color: var(--accent); background: var(--accent-bg); border-color: var(--accent-strong); }
+.operations-page { max-width: 1320px; margin: 0 auto; padding: 28px; }
+.operations-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
+.operations-header h1 { margin: 6px 0 10px; font-size: 30px; letter-spacing: -.03em; }
+.operations-header p { color: var(--text-2); max-width: 700px; line-height: 1.6; }
+.operations-page .eyebrow { color: var(--accent); font-size: 11px; letter-spacing: .1em; }
+.operations-grid { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 20px; margin-bottom: 20px; }
+.operations-card, .operations-confirm { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 24px; overflow-wrap: anywhere; }
+.operations-card h2, .operations-confirm h2 { font-size: 17px; margin: 0 0 20px; }
+.operations-card fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.operations-card label { display: block; margin: 14px 0; color: var(--text-2); font-size: 13px; }
+.operations-card input:not([type="checkbox"]), .operations-card select { display: block; width: 100%; margin-top: 8px; padding: 11px 12px; background: var(--bg); color: var(--text); border: 1px solid var(--line-strong); border-radius: 6px; font: 13px var(--mono); }
+.operations-page .button { background: var(--accent-bg); color: var(--text); border: 1px solid var(--accent-strong); border-radius: 6px; padding: 10px 15px; cursor: pointer; }
+.operations-page :disabled { opacity: .5; cursor: not-allowed; }
+.operations-page :focus-visible, .operations-nav :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.operations-meta { color: var(--text-3); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.operations-checkbox input { margin-right: 8px; accent-color: var(--accent-strong); }
+.operations-warning { background: var(--warn-bg); color: var(--warn); padding: 12px 16px; border-radius: 6px; line-height: 1.6; }
+.operations-chip { display: inline-block; border: 1px solid var(--line-strong); border-radius: 5px; padding: 6px 10px; color: var(--text-2); font-size: 12px; white-space: normal; }
+.operations-chip.is-active { background: var(--ok-bg); color: var(--ok); border-color: transparent; }
+.operations-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.operations-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+.operations-table th { color: var(--text-3); font-weight: 500; background: var(--panel); }
+.operations-table td, .operations-table th { padding: 16px; border-bottom: 1px solid var(--line); }
+.operations-table small { display: block; color: var(--text-3); margin-top: 6px; }
+.operations-confirm { border-color: var(--accent-strong); margin-bottom: 20px; }
+.operations-jobs { list-style: none; padding: 0; }
+.operations-jobs button { width: 100%; text-align: left; color: var(--text-2); background: transparent; border: 0; border-bottom: 1px solid var(--line); padding: 14px 0; cursor: pointer; overflow-wrap: anywhere; }
+@media (max-width: 850px) { .operations-grid { grid-template-columns: 1fr; } .operations-header { flex-direction: column; } .operations-page { padding: 18px; } }
+
 :root {
   color-scheme: dark;
   --bg: #16181d;

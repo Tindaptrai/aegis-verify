@@ -63,7 +63,7 @@ def test_missing_reports_are_rejected_without_creation(shell, layout):
 
 @pytest.mark.parametrize('value', [r'\\example.invalid\share', '//example.invalid/share',
                                   'https://example.invalid/report', 'FileSystem::C:/reports'])
-@pytest.mark.parametrize('parameter', ['Reports', 'PythonPath'])
+@pytest.mark.parametrize('parameter', ['Reports', 'PythonPath', 'OperationsConfig'])
 def test_nonlocal_paths_rejected_before_filesystem_probe(shell, layout, value, parameter):
     # Shadow the filesystem boundary so a regression cannot contact a real share.
     script = str(layout[0]).replace("'", "''")
@@ -71,10 +71,11 @@ def test_nonlocal_paths_rejected_before_filesystem_probe(shell, layout, value, p
     python = sys.executable.replace("'", "''")
     if parameter == 'Reports':
         reports = value
-    else:
+    elif parameter == 'PythonPath':
         python = value
+    extra = f" -OperationsConfig '{value}'" if parameter == 'OperationsConfig' else ''
     expression = ("function Test-Path { throw 'UNEXPECTED_FILESYSTEM_PROBE' }; "
-                  f"& '{script}' -Reports '{reports}' -PythonPath '{python}'")
+                  f"& '{script}' -Reports '{reports}' -PythonPath '{python}'{extra}")
     result = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-Command', expression],
                             capture_output=True, text=True, timeout=20)
     assert result.returncode != 0
@@ -101,6 +102,32 @@ def test_missing_python_has_actionable_error(shell, layout):
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
     assert result.returncode != 0
     assert 'python_missing' in result.stdout
+
+
+def test_missing_operations_config_is_not_created(shell, layout):
+    path = layout[1].parent / 'missing config.json'
+    result = run(shell, layout, '-OperationsConfig', str(path))
+    assert result.returncode != 0
+    assert 'operations_config_missing' in result.stdout
+    assert not path.exists()
+
+
+def test_operations_config_forwarded_as_one_argument(shell, layout):
+    path = layout[1].parent / 'operations config.json'
+    path.write_text('{}')
+    fake = layout[1].parent / 'python boundary.ps1'
+    fake.write_text("if ($args -contains '-u') { ConvertTo-Json -InputObject @($args) -Compress }; $global:LASTEXITCODE = 0")
+    cmd = command(shell, layout)
+    cmd[-1] = str(fake)
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    result = subprocess.run(cmd + ['-Port', str(port), '-OperationsConfig', str(path)],
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    args = json.loads(result.stdout.splitlines()[-1])
+    assert args[args.index('--operations-config') + 1] == str(path)
+    assert args[args.index('--reports') + 1] == str(layout[1])
 
 
 def test_missing_default_venv_does_not_fall_back_to_path(shell, layout):

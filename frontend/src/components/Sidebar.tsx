@@ -3,6 +3,7 @@ import type { IndexEntry, ReportIndex } from '../contracts';
 import { text } from '../format';
 import { EmptyState, ErrorPanel, Notice, Skeleton } from './Feedback';
 import { StatusBadge } from './StatusBadge';
+import type { ReactNode } from 'react';
 
 export function orderEntries(entries: IndexEntry[]): IndexEntry[] {
   const runs = entries.filter((entry) => entry.error === null && entry.kind === 'evaluation');
@@ -33,6 +34,7 @@ export function Sidebar({
   onQuery,
   onSelect,
   onRetry,
+  operationsNav,
 }: {
   state: LoadState<ReportIndex>;
   selected: string | null;
@@ -40,6 +42,7 @@ export function Sidebar({
   onQuery: (value: string) => void;
   onSelect: (name: string) => void;
   onRetry: () => void;
+  operationsNav?: ReactNode;
 }) {
   return (
     <aside className="sidebar" aria-label="Danh sách report">
@@ -50,6 +53,7 @@ export function Sidebar({
           <p className="brand-sub">Results dashboard · chỉ đọc</p>
         </div>
       </div>
+      {operationsNav}
       <label className="search">
         <span className="visually-hidden">Tìm report</span>
         <input
