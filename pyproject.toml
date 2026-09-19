@@ -16,7 +16,7 @@ aegis = "aegis_verify.cli:main"
 test = ["pytest==9.1.1"]
 
 [tool.setuptools]
-packages = ["aegis_verify", "aegis_verify.models", "aegis_verify.validation", "aegis_verify.intake", "aegis_verify.cli", "aegis_verify.compare", "aegis_verify.demo", "aegis_verify.connectors", "aegis_verify.connectors.wazuh", "aegis_verify.connectors.suricata", "aegis_verify.connectors.pfsense", "aegis_verify.connectors.cowrie"]
+packages = ["aegis_verify", "aegis_verify.models", "aegis_verify.validation", "aegis_verify.intake", "aegis_verify.cli", "aegis_verify.compare", "aegis_verify.demo", "aegis_verify.dashboard", "aegis_verify.connectors", "aegis_verify.connectors.wazuh", "aegis_verify.connectors.suricata", "aegis_verify.connectors.pfsense", "aegis_verify.connectors.cowrie"]
 package-dir = { aegis_verify = "backend/app", "aegis_verify.connectors" = "connectors" }
 
 [tool.pytest.ini_options]

@@ -8,6 +8,7 @@ from ..intake import IntakeError
 from .reporting import render_error, render_report
 from .service import evaluate_bundle
 from ..compare import compare_runs
+from ..dashboard import DEFAULT_HOST, DEFAULT_PORT, serve
 
 
 class _ArgumentError(Exception):
@@ -123,6 +124,12 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("--before", required=True)
     compare.add_argument("--after", required=True)
     compare.add_argument("--format", choices=("text", "json"), default="text")
+
+    dashboard = commands.add_parser("dashboard", allow_abbrev=False)
+    dashboard.add_argument("--reports", required=True)
+    dashboard.add_argument("--host", default=DEFAULT_HOST)
+    dashboard.add_argument("--port", type=int, default=DEFAULT_PORT)
+    dashboard.add_argument("--static")
     return parser
 
 
@@ -145,6 +152,10 @@ def _duplicates(arguments: list[str]) -> bool:
         "--before",
         "--after",
         "--format",
+        "--reports",
+        "--host",
+        "--port",
+        "--static",
     ):
         if sum(item == option or item.startswith(option + "=") for item in arguments) > 1:
             return True
@@ -166,6 +177,23 @@ def main(argv=None) -> int:
     except _ArgumentError:
         error = IntakeError("invalid_arguments")
         return 2 if _emit_error(error, error_format) else 4
+
+    if options.command == "dashboard":
+        if not 0 <= options.port <= 65535:
+            error = IntakeError("invalid_arguments")
+            return 2 if _emit_error(error, "text") else 4
+        try:
+            return serve(options.reports, host=options.host, port=options.port,
+                         static_dir=options.static,
+                         announce=lambda text: _write_stream("stdout", text + "\n"))
+        except IntakeError as error:
+            return 2 if _emit_error(error, "text") else 4
+        except OSError:
+            _emit_error(IntakeError("output_error", stage="output"), "text")
+            return 4
+        except Exception:
+            _emit_error(IntakeError("internal_error"), "text")
+            return 4
 
     try:
         if options.command == "validate":
