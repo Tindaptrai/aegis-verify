@@ -1,6 +1,7 @@
 # V1 demo/lab — dự thảo ghi chú phát hành
 
-Trạng thái: chờ chủ dự án duyệt; chưa tạo tag/GitHub Release.
+Trạng thái: chủ dự án đã duyệt push và tạo PR tài liệu; chưa duyệt merge PR này
+hoặc tạo tag/GitHub Release.
 Baseline code: `a3990089d7a05b6f59a0ef7a35b5eafa7da10944`.
 Tài liệu bàn giao bổ sung chưa nằm trong baseline này.
 
@@ -24,14 +25,16 @@ Tài liệu bàn giao bổ sung chưa nằm trong baseline này.
 
 - Dashboard chỉ đọc báo cáo, không phải bộ điều phối scenario hoặc fleet monitor.
 - Historical binding unknown; collection declaration không phải xác minh độc lập.
-- Audit quyền thực tế của tài khoản Indexer chưa được xác nhận.
+- Quyền tài khoản Indexer đã được operator review qua giao diện: chỉ role đọc
+  được review, không role khác theo xác nhận của chủ dự án. Chưa có kiểm chứng
+  tự động toàn bộ quyền hiệu lực/action groups; không gọi đây là chứng nhận bảo mật.
 - Không công bố dữ liệu lab riêng, credential, certificate hoặc raw telemetry.
 - Rule demo có giới hạn precision; cần follow-up riêng trước dùng ngoài lab.
 - Chưa chọn license phân phối. Không tự thay version package hay scenario ground truth.
 
 ## Cần duyệt trước phát hành
 
-1. Review thay đổi tài liệu bàn giao và quyết định commit/PR.
+1. Review và duyệt merge PR tài liệu bàn giao (push/tạo PR đã được duyệt).
 2. Xác nhận phạm vi demo/lab cùng các giới hạn trên.
 3. Chọn tag, ví dụ `v0.1.0-lab.1`, và commit cuối cùng sau khi tài liệu được merge.
 4. Quyết định nơi backup riêng được phép nhận evidence; không upload mặc định.

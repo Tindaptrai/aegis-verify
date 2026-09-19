@@ -87,7 +87,11 @@ hay search thành công không chứng minh tài khoản không có quyền dư.
   không chứng minh tính xác thực hay collection đầy đủ.
 - Sao lưu mã nguồn và dữ liệu riêng thành hai phần; chỉ chia sẻ evidence qua
   kênh được chủ dự án duyệt. Bản lưu cùng ổ không thay thế backup độc lập.
-- Effective least-privilege audit: chờ operator có quyền đọc cấu hình security.
+- Review quyền: operator đã xác nhận qua giao diện rằng tài khoản collector chỉ
+  được map vào role đọc đã review, không có role khác. Ảnh được cung cấp hiển thị
+  read trên index alerts, scroll/clear-scroll, không tenant permissions và backend
+  roles trống. Đây là operator-reviewed, không phải kiểm chứng tự động toàn bộ
+  quyền hiệu lực hoặc định nghĩa action groups; ảnh gốc giữ ngoài Git.
 - Historical run binding: unknown; không tự ký approval hoặc đổi thành lab_verified.
 - Behavioral demo rule có thể khớp runner lành tính; không triển khai production.
 - Chờ chủ dự án duyệt ghi chú/tên tag trước khi tạo tag hoặc GitHub Release.
