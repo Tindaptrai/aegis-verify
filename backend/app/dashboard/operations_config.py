@@ -45,7 +45,7 @@ def local_path(value, *, directory=False):
         raise OperationsError('invalid_path') from None
 
 
-def validate_windows_acl(data):
+def validate_windows_acl(data, *, directory=True):
     try:
         owner, current, rules = data['owner'], data['current'], data['rules']
         if not isinstance(owner, str) or owner != current or not isinstance(rules, list) or not rules:
@@ -54,8 +54,8 @@ def validate_windows_acl(data):
         for rule in rules:
             if rule['allow'] is not True or rule['sid'] != owner:
                 raise ValueError
-            if (rule['rights'] & 2032127 == 2032127 and rule['inherit'] == 3
-                    and rule['propagate'] == 0):
+            if (rule['rights'] & 2032127 == 2032127 and rule['propagate'] == 0
+                    and (not directory or rule['inherit'] == 3)):
                 inherited_owner_control = True
         if not inherited_owner_control:
             raise ValueError
@@ -66,13 +66,20 @@ def validate_windows_acl(data):
 def _check_private_acl(path):
     if os.name != 'nt':
         info = path.stat()
-        if info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_mode & 0o700 != 0o700:
+        required = 0o700 if path.is_dir() else 0o600
+        if info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_mode & required != required:
             raise OperationsError('private_root_required')
         return
     # Static code only. The literal path is child-process environment data, never
     # interpolated PowerShell source; no profile, policy changes or visible window.
-    script = """+$ErrorActionPreference = 'Stop'
-$acl = Get-Acl -LiteralPath $env:AEGIS_OPERATIONS_ACL_PATH
+    script = """
+$ErrorActionPreference = 'Stop'
+$directory = [System.IO.Directory]::Exists($env:AEGIS_OPERATIONS_ACL_PATH)
+if ($directory) {
+    $acl = [System.IO.Directory]::GetAccessControl($env:AEGIS_OPERATIONS_ACL_PATH)
+} else {
+    $acl = [System.IO.File]::GetAccessControl($env:AEGIS_OPERATIONS_ACL_PATH)
+}
 $sidType = [System.Security.Principal.SecurityIdentifier]
 $owner = $acl.GetOwner($sidType).Value
 $current = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -81,7 +88,7 @@ $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
       rights=[int]$_.FileSystemRights; inherit=[int]$_.InheritanceFlags;
       propagate=[int]$_.PropagationFlags}
 })
-@{owner=$owner; current=$current; rules=$rules} | ConvertTo-Json -Depth 4 -Compress
+@{owner=$owner; current=$current; rules=$rules; directory=$directory} | ConvertTo-Json -Depth 4 -Compress
 """
     executable = Path(os.environ.get('SystemRoot', '')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
     try:
@@ -91,7 +98,8 @@ $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
             timeout=10, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), check=True)
         if len(result.stdout) > 65536:
             raise ValueError
-        validate_windows_acl(json.loads(result.stdout))
+        data = json.loads(result.stdout)
+        validate_windows_acl(data, directory=data['directory'])
     except (OSError, ValueError, subprocess.SubprocessError):
         raise OperationsError('private_root_required') from None
 
@@ -103,6 +111,13 @@ def verify_private_root(root, *, excluded_roots):
         other = Path(excluded).resolve()
         if selected.is_relative_to(other) or other.is_relative_to(selected):
             raise OperationsError('invalid_output_root')
+    _check_private_acl(selected)
+
+
+def verify_private_file(path):
+    selected = local_path(path)
+    if selected.stat().st_nlink != 1:
+        raise OperationsError('private_root_required')
     _check_private_acl(selected)
 
 

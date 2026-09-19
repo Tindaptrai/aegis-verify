@@ -9,7 +9,7 @@ from uuid import UUID
 from ..intake.io import decode_config, read_local
 from ..intake.errors import IntakeError
 from ..models import PreciseTimestamp
-from .operations_config import OperationsError, local_path
+from .operations_config import OperationsError, local_path, verify_private_root, verify_private_file
 
 ERROR_CODES = frozenset({'interrupted', 'collection_failed', 'incomplete_collection',
     'authentication_failed', 'permission_denied', 'rate_limited', 'connection_or_tls_failed',
@@ -67,7 +67,7 @@ class JobStore:
         try:
             for name in ('metadata', 'jobs'):
                 (self.root / name).mkdir(mode=0o700, exist_ok=True)
-                local_path(self.root / name, directory=True)
+                verify_private_root(self.root / name, excluded_roots=())
         except OSError:
             raise OperationsError('storage_failed') from None
 
@@ -76,11 +76,13 @@ class JobStore:
         requests = set()
         try:
             directory = local_path(self.root / 'metadata', directory=True)
+            verify_private_root(directory, excluded_roots=())
             for path in directory.iterdir():
                 if len(result) >= 100 or path.suffix != '.json' or not valid_uuid(path.stem):
                     raise OperationsError('invalid_job_metadata')
                 if local_path(path).stat().st_nlink != 1:
                     raise OperationsError('invalid_job_metadata')
+                verify_private_file(path)
                 record = decode_config(read_local(path, limit=16384, stage='inputs'), stage='inputs')
                 validate_record(record)
                 if record['id'] != path.stem or record['request_id'] in requests:
@@ -126,6 +128,7 @@ class JobStore:
             raise OperationsError('invalid_job_metadata')
         try:
             parent = local_path(self.root / 'jobs', directory=True)
+            verify_private_root(parent, excluded_roots=())
             path = parent / job_id
             path.mkdir(mode=0o700, exist_ok=False)
             return path

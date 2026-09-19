@@ -140,3 +140,52 @@ def test_windows_acl_rejects_public_or_noninheriting_permissions(acl):
 def test_windows_acl_owner_inheriting_full_control():
     config.validate_windows_acl({'owner': 'S-1', 'current': 'S-1', 'rules': [
         {'sid': 'S-1', 'allow': True, 'rights': 2032127, 'inherit': 3, 'propagate': 0}]})
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows ACL integration')
+def test_real_windows_private_acl_preflight(tmp_path):
+    import base64
+    import subprocess
+    root = tmp_path / "literal '$; private"
+    root.mkdir()
+    # Only this newly-created test directory is changed, not the user's ACLs.
+    setup = """
+$ErrorActionPreference = 'Stop'
+$sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$acl = New-Object System.Security.AccessControl.DirectorySecurity
+$acl.SetOwner($sid)
+$acl.SetAccessRuleProtection($true, $false)
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+$acl.AddAccessRule($rule)
+[System.IO.Directory]::SetAccessControl($env:AEGIS_TEST_PRIVATE_ROOT, $acl)
+"""
+    executable = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    result = subprocess.run([str(executable), '-NoProfile', '-NonInteractive', '-EncodedCommand',
+        base64.b64encode(setup.encode('utf-16le')).decode()],
+        env={**os.environ, 'AEGIS_TEST_PRIVATE_ROOT': str(root)}, capture_output=True,
+        creationflags=subprocess.CREATE_NO_WINDOW, timeout=10)
+    assert result.returncode == 0, result.stderr.decode(errors='replace')
+    config.verify_private_root(root, excluded_roots=())
+    from aegis_verify.dashboard.operations_storage import JobStore
+    from test_operations_storage import record
+    store = JobStore(root)
+    store.save(record())
+    assert store.load() == [record()]
+    # A protected, publicly-readable child remains unsafe even under private root.
+    broaden_child = """
+$ErrorActionPreference = 'Stop'
+$path = [System.IO.Path]::Combine($env:AEGIS_TEST_PRIVATE_ROOT, 'jobs')
+$acl = [System.IO.Directory]::GetAccessControl($path)
+$acl.SetAccessRuleProtection($true, $true)
+$everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
+$rule = New-Object System.Security.AccessControl.FileSystemAccessRule($everyone, 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
+$acl.AddAccessRule($rule)
+[System.IO.Directory]::SetAccessControl($path, $acl)
+"""
+    result = subprocess.run([str(executable), '-NoProfile', '-NonInteractive', '-EncodedCommand',
+        base64.b64encode(broaden_child.encode('utf-16le')).decode()],
+        env={**os.environ, 'AEGIS_TEST_PRIVATE_ROOT': str(root)}, capture_output=True,
+        creationflags=subprocess.CREATE_NO_WINDOW, timeout=10)
+    assert result.returncode == 0, result.stderr.decode(errors='replace')
+    with pytest.raises(config.OperationsError, match='private_root_required'):
+        JobStore(root)

@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python >=3.11, stdlib HTTP/threading, existing Pydantic, React/TypeScript/Vitest, PowerShell launcher. No new runtime dependencies.
 
-**Spec:** [Approved design](../specs/2026-09-20-operations-mode-design.md). User approved the written spec on 2026-09-20; this plan still requires review and execution-method selection.
+**Spec:** [Approved design](../specs/2026-09-20-operations-mode-design.md). User approved the written spec, this plan and native execution on 2026-09-20. Implementation starts with issue #36 (tasks 1–3).
 
 ## Global Constraints
 

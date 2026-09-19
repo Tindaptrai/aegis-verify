@@ -1,7 +1,7 @@
 # V1.1 — chế độ vận hành local: collection và Agents
 
-Trạng thái: dự thảo để chủ dự án review. Hướng chế độ vận hành bật riêng đã
-được duyệt trong hội thoại; bản đặc tả này chưa được duyệt triển khai.
+Trạng thái: chủ dự án đã duyệt đặc tả trong hội thoại ngày 2026-09-20.
+Kế hoạch triển khai cũng đã được duyệt, thực hiện trực tiếp trong task hiện tại.
 Baseline: main `03a6fbb2293e56145cc6742085cdc315c9df00c9`.
 
 ## 1. Mục tiêu và ranh giới

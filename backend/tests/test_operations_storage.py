@@ -6,6 +6,33 @@ import pytest
 
 from aegis_verify.dashboard.operations_config import OperationsError
 from aegis_verify.dashboard import operations_storage as storage
+from aegis_verify.dashboard import operations_config as config
+
+
+@pytest.fixture(autouse=True)
+def isolated_acl(monkeypatch):
+    monkeypatch.setattr(config, '_check_private_acl', lambda path: None)
+
+
+def test_existing_public_child_rejected(tmp_path, monkeypatch):
+    (tmp_path / 'jobs').mkdir()
+    def check(path):
+        if path.name == 'jobs':
+            raise OperationsError('private_root_required')
+    monkeypatch.setattr(config, '_check_private_acl', check)
+    with pytest.raises(OperationsError, match='private_root_required'):
+        storage.JobStore(tmp_path)
+
+
+def test_public_persisted_metadata_rejected(tmp_path, monkeypatch):
+    store = storage.JobStore(tmp_path)
+    store.save(record())
+    def check(path):
+        if path.suffix == '.json':
+            raise OperationsError('private_root_required')
+    monkeypatch.setattr(config, '_check_private_acl', check)
+    with pytest.raises(OperationsError, match='private_root_required'):
+        store.load()
 
 
 def record(n=1):

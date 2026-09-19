@@ -24,7 +24,9 @@ def request(**changes):
 
 
 @pytest.fixture
-def factory(tmp_path):
+def factory(tmp_path, monkeypatch):
+    from aegis_verify.dashboard import operations_config
+    monkeypatch.setattr(operations_config, '_check_private_acl', lambda path: None)
     services = []
     release = Event()
     def create(collector=None, cfg=None, free=2 * 1024**3, store=None):
