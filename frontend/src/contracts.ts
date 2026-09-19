@@ -84,7 +84,15 @@ export interface ScenarioDetails {
   assertion_descriptions: Record<string, string>;
 }
 
+export interface RunBinding {
+  run_id: string;
+  status: 'unknown' | 'conflict' | 'caller_reviewed';
+  reasons: string[];
+  both_sides_caller_declared: boolean;
+}
+
 export interface EvaluationReport {
+  run_binding: RunBinding | null;
   kind: 'evaluation';
   cli_report_version: string;
   scenario: { id: string; name: string; version: string };
@@ -120,6 +128,7 @@ export interface ComparisonAssertion {
 }
 
 export interface ComparisonReport {
+  run_binding: { before: RunBinding | null; after: RunBinding | null };
   kind: 'comparison';
   cli_report_version: string;
   scenario: { id: string; name: string; version: string };
@@ -156,7 +165,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isString = (value: unknown): value is string => typeof value === 'string';
 const isNullableString = (value: unknown): value is string | null => value === null || isString(value);
-const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const isCount = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
 const stringList = (value: unknown, where: string): string[] => {
   if (!Array.isArray(value) || !value.every(isString)) throw new Error(`${where}: expected a list of strings`);
@@ -270,7 +280,7 @@ function timeline(value: unknown): Timeline | null {
 function scenarioDetails(value: unknown): ScenarioDetails | null {
   if (!isRecord(value) || !isRecord(value['scenario'])) return null;
   const source = value['scenario'];
-  const assertion_descriptions: Record<string, string> = {};
+  const assertion_descriptions: Record<string, string> = Object.create(null);
   const list = source['assertions'];
   if (Array.isArray(list)) {
     for (const item of list) {
@@ -292,7 +302,7 @@ function counts(value: unknown): OutcomeCounts {
   const record = requireRecord(value, 'evaluation.counts');
   const read = (key: keyof OutcomeCounts): number => {
     const item = record[key];
-    if (!isNumber(item)) throw new Error(`evaluation.counts.${key}: expected a number`);
+    if (!isCount(item)) throw new Error(`evaluation.counts.${key}: expected a nonnegative safe integer`);
     return item;
   };
   return {
@@ -300,6 +310,29 @@ function counts(value: unknown): OutcomeCounts {
     missing_telemetry: read('missing_telemetry'),
     false_negative: read('false_negative'),
     inconclusive: read('inconclusive'),
+  };
+}
+
+function runBinding(value: unknown, runId: string): RunBinding | null {
+  if (value === undefined || value === null) return null;
+  const record = requireRecord(value, 'run_binding');
+  const status = record['status'];
+  if (status !== 'unknown' && status !== 'conflict' && status !== 'caller_reviewed') {
+    throw new Error('run_binding.status: unknown status');
+  }
+  const run_id = requireString(record, 'run_id', 'run_binding');
+  if (run_id !== runId) throw new Error('run_binding.run_id: does not match report');
+  const declared = record['both_sides_caller_declared'];
+  if (typeof declared !== 'boolean') throw new Error('run_binding.both_sides_caller_declared: expected a boolean');
+  return { run_id, status, reasons: stringList(record['reasons'], 'run_binding.reasons'), both_sides_caller_declared: declared };
+}
+
+function comparisonBinding(value: unknown, beforeId: string, afterId: string): ComparisonReport['run_binding'] {
+  if (value === undefined || value === null) return { before: null, after: null };
+  const record = requireRecord(value, 'run_binding');
+  return {
+    before: runBinding(requireRecord(record['before'], 'run_binding.before'), beforeId),
+    after: runBinding(requireRecord(record['after'], 'run_binding.after'), afterId),
   };
 }
 
@@ -326,13 +359,14 @@ export function parseEvaluationReport(input: unknown): Parsed<EvaluationReport> 
     const topCounts = requireRecord(record['counts'], 'counts');
     const readCount = (key: 'parsed' | 'skipped' | 'referenced'): number => {
       const item = topCounts[key];
-      if (!isNumber(item)) throw new Error(`counts.${key}: expected a number`);
+      if (!isCount(item)) throw new Error(`counts.${key}: expected a nonnegative safe integer`);
       return item;
     };
     return {
       ok: true,
       value: {
         kind: 'evaluation',
+        run_binding: runBinding(record['run_binding'], requireString(evaluation, 'run_id', 'evaluation')),
         cli_report_version: requireString(record, 'cli_report_version', 'report'),
         scenario: scenario(record['scenario']),
         scenario_details: scenarioDetails(record['comparison_inputs']),
@@ -381,13 +415,13 @@ export function parseComparisonReport(input: unknown): Parsed<ComparisonReport> 
     const assertionsRaw = comparison['assertions'];
     if (!Array.isArray(assertionsRaw)) throw new Error('comparison.assertions: expected a list');
     const countsRaw = requireRecord(comparison['assertion_state_counts'], 'comparison.assertion_state_counts');
-    const assertion_state_counts: Record<string, number> = {};
+    const assertion_state_counts: Record<string, number> = Object.create(null);
     for (const [key, item] of Object.entries(countsRaw)) {
-      if (!isNumber(item)) throw new Error(`comparison.assertion_state_counts.${key}: expected a number`);
+      if (!isCount(item)) throw new Error(`comparison.assertion_state_counts.${key}: expected a nonnegative safe integer`);
       assertion_state_counts[key] = item;
     }
     const assertionCount = comparison['assertion_count'];
-    if (!isNumber(assertionCount)) throw new Error('comparison.assertion_count: expected a number');
+    if (!isCount(assertionCount)) throw new Error('comparison.assertion_count: expected a nonnegative safe integer');
     const assertions = assertionsRaw.map((item, index) => {
       const where = `comparison.assertions[${index}]`;
       const entry = requireRecord(item, where);
@@ -408,6 +442,7 @@ export function parseComparisonReport(input: unknown): Parsed<ComparisonReport> 
       ok: true,
       value: {
         kind: 'comparison',
+        run_binding: comparisonBinding(record['run_binding'], run(record['before'], 'before').run_id, run(record['after'], 'after').run_id),
         cli_report_version: requireString(record, 'cli_report_version', 'report'),
         scenario: scenario(record['scenario']),
         before: run(record['before'], 'before'),

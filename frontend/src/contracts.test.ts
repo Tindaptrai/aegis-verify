@@ -5,6 +5,17 @@ import beforeFixture from '../../tests/fixtures/dashboard/before-false-negative.
 import comparisonFixture from '../../tests/fixtures/dashboard/comparison-regression-passed.json';
 
 describe('parseEvaluationReport', () => {
+  it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1])('rejects invalid count %s', (value) => {
+    expect(parseEvaluationReport({ ...afterFixture, counts: { ...afterFixture.counts, parsed: value } }).ok).toBe(false);
+    expect(parseEvaluationReport({ ...afterFixture, evaluation: { ...afterFixture.evaluation,
+      counts: { ...afterFixture.evaluation.counts, satisfied: value } } }).ok).toBe(false);
+  });
+
+  it('does not inherit assertion descriptions from Object.prototype', () => {
+    const parsed = parseEvaluationReport(afterFixture);
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) expect(parsed.value.scenario_details?.assertion_descriptions['__proto__']).toBeUndefined();
+  });
   it('reads the backend fixture and preserves the timeline order it was given', () => {
     const parsed = parseEvaluationReport(afterFixture);
     expect(parsed.ok).toBe(true);
@@ -68,6 +79,12 @@ describe('parseEvaluationReport', () => {
 });
 
 describe('parseComparisonReport', () => {
+  it.each([-1, 0.5, Number.MAX_SAFE_INTEGER + 1])('rejects invalid comparison count %s', (value) => {
+    expect(parseComparisonReport({ ...comparisonFixture, comparison: { ...comparisonFixture.comparison,
+      assertion_count: value } }).ok).toBe(false);
+    expect(parseComparisonReport({ ...comparisonFixture, comparison: { ...comparisonFixture.comparison,
+      assertion_state_counts: { improvement: value } } }).ok).toBe(false);
+  });
   it('reads the Regression Passed fixture with per-assertion states', () => {
     const parsed = parseComparisonReport(comparisonFixture);
     expect(parsed.ok).toBe(true);
