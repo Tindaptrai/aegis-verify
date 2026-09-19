@@ -158,6 +158,7 @@ $acl.SetAccessRuleProtection($true, $false)
 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow')
 $acl.AddAccessRule($rule)
 [System.IO.Directory]::SetAccessControl($env:AEGIS_TEST_PRIVATE_ROOT, $acl)
+@{default_owner=[System.Security.Principal.WindowsIdentity]::GetCurrent().Owner.Value; current=$sid.Value} | ConvertTo-Json -Compress
 """
     executable = Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
     result = subprocess.run([str(executable), '-NoProfile', '-NonInteractive', '-EncodedCommand',
@@ -168,14 +169,23 @@ $acl.AddAccessRule($rule)
     config.verify_private_root(root, excluded_roots=())
     from aegis_verify.dashboard.operations_storage import JobStore
     from test_operations_storage import record
-    store = JobStore(root)
-    store.save(record())
-    assert store.load() == [record()]
+    identity = json.loads(result.stdout)
+    if identity['default_owner'] != identity['current']:
+        # Elevated CI creates children owned by Administrators, not the operator.
+        # The supported non-elevated mode must not silently accept that ownership.
+        with pytest.raises(config.OperationsError, match='private_root_required'):
+            JobStore(root)
+    else:
+        store = JobStore(root)
+        store.save(record())
+        assert store.load() == [record()]
+    (root / 'jobs').mkdir(exist_ok=True)
     # A protected, publicly-readable child remains unsafe even under private root.
     broaden_child = """
 $ErrorActionPreference = 'Stop'
 $path = [System.IO.Path]::Combine($env:AEGIS_TEST_PRIVATE_ROOT, 'jobs')
 $acl = [System.IO.Directory]::GetAccessControl($path)
+$acl.SetOwner([System.Security.Principal.WindowsIdentity]::GetCurrent().User)
 $acl.SetAccessRuleProtection($true, $true)
 $everyone = New-Object System.Security.Principal.SecurityIdentifier('S-1-1-0')
 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($everyone, 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')

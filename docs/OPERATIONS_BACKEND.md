@@ -11,6 +11,9 @@ report directory and static assets. POSIX requires current owner and mode 0700;
 Windows requires current-user ownership and only current-user allow ACEs, including
 inheritable FullControl for files and subdirectories. The backend checks ACLs but
 does not change them. Run it as the operator, not as a different privileged user.
+Elevated Windows sessions whose default object owner is Administrators are not
+supported: new child objects fail the current-user ownership check. Use a normal
+non-elevated operator session; do not loosen the ACL check to work around this.
 
 Create a private JSON file (replace the illustrative local paths and endpoint):
 
