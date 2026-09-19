@@ -21,7 +21,7 @@ def server_factory(tmp_path, monkeypatch):
         'collection_assurance': 'unknown', 'cleanup_failed': False})
     monkeypatch.setenv('WAZUH_INDEXER_USERNAME', 'reader')
     monkeypatch.setenv('WAZUH_INDEXER_PASSWORD', 'private-marker')
-    def create(enabled=True):
+    def create(enabled=True, inventory=False):
         root = tmp_path / str(uuid4())
         root.mkdir()
         reports, output = root / 'reports', root / 'private'
@@ -30,9 +30,14 @@ def server_factory(tmp_path, monkeypatch):
         ca = root / 'ca.pem'
         ca.write_text('synthetic-ca')
         path = root / 'config.json'
-        path.write_text(json.dumps(dict(version=1, environment_id='fixture', agent_ids=['012'],
+        data = dict(version=1, environment_id='fixture', agent_ids=['012'],
             index='wazuh-alerts-*', output_root=str(output), indexer={
-                'endpoint': 'https://indexer.invalid', 'ca_file': str(ca)})))
+                'endpoint': 'https://indexer.invalid', 'ca_file': str(ca)})
+        if inventory:
+            data['server_api'] = {'endpoint': 'https://server.invalid', 'ca_file': str(ca)}
+            monkeypatch.setenv('WAZUH_API_USERNAME', 'api-reader')
+            monkeypatch.setenv('WAZUH_API_PASSWORD', 'api-private-marker')
+        path.write_text(json.dumps(data))
         kwargs = {'operations_config': path} if enabled else {}
         server = make_server(reports, port=0, **kwargs)
         thread = Thread(target=server.serve_forever, daemon=True)
@@ -164,3 +169,31 @@ def test_incomplete_body_is_rejected(server_factory):
         connection.sendall(request.encode())
         connection.shutdown(socket.SHUT_WR)
         assert b' 400 ' in connection.recv(4096).split(b'\r\n')[0]
+
+
+def test_inventory_api_refresh_is_explicit(server_factory, monkeypatch):
+    import time
+    from aegis_verify.dashboard import operations_inventory
+    from aegis_verify.connectors.wazuh.inventory import parse_agent
+    calls = []
+    def fetch(*args):
+        calls.append(args[2])
+        return (parse_agent({'id': '012', 'status': 'active'},
+                environment_id='fixture', fetched_at='2026-01-01T00:00:00Z'),)
+    monkeypatch.setattr(operations_inventory, 'fetch_agents', fetch)
+    server, _ = server_factory(inventory=True)
+    boot = call(server)[2]
+    assert boot['capabilities']['inventory'] is True
+    token = boot['session_token']
+    headers = mutation_headers(server, token)
+    assert call(server, route='agents', headers=headers)[2]['state'] == 'unavailable'
+    assert calls == []
+    assert call(server, 'POST', 'agents/refresh', '{}', headers)[0] == 202
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        snapshot = call(server, route='agents', headers=headers)[2]
+        if not snapshot['refreshing']:
+            break
+        time.sleep(0.01)
+    assert snapshot['state'] == 'ready' and calls == [('012',)]
+    assert call(server, 'POST', 'agents/refresh', '{}', headers)[0] == 429
