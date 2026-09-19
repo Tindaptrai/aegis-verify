@@ -130,6 +130,23 @@ cd frontend; npm install; npm run build; cd ..
 .\.venv\Scripts\python.exe -m aegis_verify dashboard --reports tests\fixtures\dashboard --static frontend\dist
 ```
 
+## Opt-in local operations workspace
+
+The owner-approved milestone is **SCN-001 local lab MVP**, including the
+SCN-001 workflow and Reports/Agents/Collections. SCN-002/003 remain draft
+manifests without live acceptance and are deferred to a later milestone.
+This is not full-PRD live acceptance or a production-readiness claim.
+
+Reports remain read-only by default. The optional Operations mode adds manual
+Wazuh agent inventory and bounded historical collection; it does not run
+scenarios, change rules, or automatically evaluate collected evidence.
+
+Start with the [Vietnamese operator guide](docs/OPERATIONS.md) and
+[private configuration requirements](docs/OPERATIONS_BACKEND.md). Server API
+and Indexer credentials are separate and must stay outside Git and browser UI.
+See the [acceptance record and remaining release gates](docs/OPERATIONS_ACCEPTANCE.md)
+for tested revisions, live proof references and original PRD limitations.
+
 ## Security and data handling
 
 - Never commit credentials, tokens, webhooks, certificates, `.env` files, or raw
