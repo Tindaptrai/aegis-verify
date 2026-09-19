@@ -1,4 +1,4 @@
-# Operations MVP — nghiệm thu và bàn giao
+# SCN-001 local lab MVP — nghiệm thu và bàn giao
 
 Ngày ghi nhận: 2026-09-20 (Asia/Saigon). Phạm vi: local single-operator,
 read-only source inventory/collection; không phải dịch vụ production hay bộ tự
@@ -6,9 +6,17 @@ read-only source inventory/collection; không phải dịch vụ production hay 
 
 ## Trạng thái quyết định
 
-**Đã kiểm chứng hai luồng live chính; chưa merge/tag/release.** Quyết định chốt
-MVP cần review bộ PR phụ thuộc, CI của đúng commit và bằng chứng riêng. Không
-đánh đồng việc có file scenario với ba scenario đã chạy live thành công.
+**Chủ dự án đã chốt phạm vi SCN-001 local lab MVP ngày 2026-09-20;
+chưa merge/tag/release.** Milestone gồm workflow demo/evidence/evaluation và
+so sánh trước–sau của SCN-001, Reports cùng hai luồng live Agents/Collections
+đã kiểm chứng bên dưới. Việc tích hợp vẫn cần review bộ PR phụ thuộc, CI của
+đúng commit và bằng chứng riêng.
+
+SCN-002/003 chỉ có manifest draft, chưa nghiệm thu live; chủ dự án đồng ý để
+giai đoạn sau. Chúng **không phải điều kiện đóng milestone SCN-001 này**.
+Quyết định thu hẹp milestone không sửa PRD gốc, manifest, ground truth hoặc
+nâng mức bảo đảm của evidence. Đây không phải nghiệm thu toàn bộ PRD hay
+tuyên bố production-ready.
 
 
 ## Phiên bản và kiểm chứng
@@ -25,9 +33,10 @@ MVP cần review bộ PR phụ thuộc, CI của đúng commit và bằng chứn
 - Frontend: **78 passed**, TypeScript/Vite production build đạt; launcher suite
   riêng **52 passed**. `pip check` và isolated wheel build đạt; `git diff --check`
   không có lỗi whitespace.
-- CI PR #40/#41: bốn matrix Windows/Linux Python3.11/3.12, frontend và
-  GitGuardian đều pass tại lúc kiểm tra. CI của commit UI #42 và PR tài liệu
-  nghiệm thu phải được kiểm riêng; tại lúc soạn mục này còn **pending**.
+- CI PR #40/#41 đã pass tại lần kiểm trước. Kiểm lại ngày 2026-09-20:
+  UI #42 tại `3fa2ab1` và tài liệu #43 tại `4b5e814` đều pass bốn matrix
+  Windows/Linux Python3.11/3.12, frontend và GitGuardian. Mọi commit tài liệu
+  sau đó vẫn phải có CI riêng; kết quả này không đại diện cho HEAD mới.
 - Issue39 chỉ thay tài liệu/README, không sửa runtime, tests, ground truth hoặc
   evidence. Commit tài liệu và trạng thái hosted CI cuối cùng nằm trong PR
   nghiệm thu; phải kiểm đúng HEAD trước merge, không dựa vào snapshot cũ này.
@@ -74,9 +83,9 @@ nhân. Không đổi quyền hoặc tắt TLS để vượt lỗi. Helper này k
 | Demo Gap → Rule Fix → Re-test | Hồ sơ lịch sử [SCN-001 v2](SCN001_V2_APPROVAL_AND_PINS.md) và [pins](evidence/scn001-v2-pins.json) chứa references/hash. Không chạy lại payload hoặc đổi rule trong đợt Operations. |
 | Run binding / collection assurance | Report lịch sử vẫn có unknown/native_review_missing; không sửa ground truth hoặc tự nâng thành lab_verified. |
 
-Do đó có thể trình review **local operational MVP** đã thống nhất, nhưng chưa
-được gọi toàn bộ PRD là đã nghiệm thu live đầy đủ. Nếu yêu cầu cả ba scenario
-live, cần quyết định phạm vi/approval riêng; không tự mở rộng issue này.
+Milestone được trình review là **SCN-001 local lab MVP** theo quyết định trên,
+không phải toàn bộ PRD đã nghiệm thu live đầy đủ. Live SCN-002/003 sẽ cần issue,
+phạm vi và approval riêng ở giai đoạn sau; không tự mở rộng issue này.
 
 ## Checklist bàn giao còn mở
 

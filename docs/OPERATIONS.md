@@ -1,5 +1,10 @@
 # Local operations workspace
 
+Milestone được chủ dự án chốt là **SCN-001 local lab MVP**: workflow SCN-001
+và Reports/Agents/Collections. SCN-002/003 chưa nghiệm thu live, để giai đoạn
+sau; Operations không tự chạy bất kỳ scenario nào. Xem
+[phạm vi và bằng chứng nghiệm thu](OPERATIONS_ACCEPTANCE.md).
+
 ## Hướng dẫn nhanh cho người vận hành
 
 ### Phân biệt nơi thực hiện

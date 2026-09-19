@@ -132,6 +132,11 @@ cd frontend; npm install; npm run build; cd ..
 
 ## Opt-in local operations workspace
 
+The owner-approved milestone is **SCN-001 local lab MVP**, including the
+SCN-001 workflow and Reports/Agents/Collections. SCN-002/003 remain draft
+manifests without live acceptance and are deferred to a later milestone.
+This is not full-PRD live acceptance or a production-readiness claim.
+
 Reports remain read-only by default. The optional Operations mode adds manual
 Wazuh agent inventory and bounded historical collection; it does not run
 scenarios, change rules, or automatically evaluate collected evidence.
