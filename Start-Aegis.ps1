@@ -11,7 +11,9 @@ param(
     [ValidateRange(1, 65535)]
     [int]$Port = 8766,
     [ValidateNotNullOrEmpty()]
-    [string]$PythonPath
+    [string]$PythonPath,
+    [ValidateNotNullOrEmpty()]
+    [string]$OperationsConfig
 )
 
 Set-StrictMode -Version Latest
@@ -26,7 +28,9 @@ function Stop-AegisLaunch([string]$Code, [string]$Hint) {
 }
 
 # Reject network/provider syntax before Test-Path can access a remote filesystem.
-foreach ($candidate in @($Reports, $PythonPath)) {
+$localCandidates = @($Reports, $PythonPath)
+if ($PSBoundParameters.ContainsKey('OperationsConfig')) { $localCandidates += $OperationsConfig }
+foreach ($candidate in $localCandidates) {
     $normalized = $candidate.Replace('\', '/')
     $driveAbsolute = $normalized -match '^[A-Za-z]:/'
     if ($normalized.StartsWith('//') -or $normalized.Contains('::') -or
@@ -38,6 +42,9 @@ foreach ($candidate in @($Reports, $PythonPath)) {
     }
 }
 
+if ($PSBoundParameters.ContainsKey('OperationsConfig') -and -not (Test-Path -LiteralPath $OperationsConfig -PathType Leaf)) {
+    Stop-AegisLaunch 'operations_config_missing' 'Choose an existing private local JSON file with -OperationsConfig.'
+}
 if (-not (Test-Path -LiteralPath $Reports -PathType Container)) {
     Stop-AegisLaunch 'reports_missing' 'Choose an existing reviewed report directory with -Reports.'
 }
@@ -74,7 +81,13 @@ try {
     $probe.Stop()
 }
 
-Write-Output "AEGIS: http://127.0.0.1:$Port/ - read-only reports; Ctrl+C to stop. No scenario will run."
+$operationsArguments = @()
+if ($PSBoundParameters.ContainsKey('OperationsConfig')) {
+    $operationsArguments = @('--operations-config', $OperationsConfig)
+    Write-Output "AEGIS: http://127.0.0.1:$Port/ - opt-in operations; Ctrl+C drains active work. No scenario will run."
+} else {
+    Write-Output "AEGIS: http://127.0.0.1:$Port/ - read-only reports; Ctrl+C to stop. No scenario will run."
+}
 # The server itself binds the port again; a race is reported by the existing CLI.
-& $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port
+& $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port @operationsArguments
 exit $LASTEXITCODE

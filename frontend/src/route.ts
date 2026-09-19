@@ -4,17 +4,25 @@
 export interface Route {
   report: string | null;
   tab: string | null;
+  page?: 'reports' | 'agents' | 'collections';
+  job?: string | null;
 }
 
 export function readRoute(hash: string = window.location.hash): Route {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
-  return { report: params.get('report'), tab: params.get('tab') };
+  const page = params.get('page');
+  const job = params.get('job');
+  return { report: params.get('report'), tab: params.get('tab'),
+    page: page === 'agents' || page === 'collections' ? page : 'reports',
+    job: job && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(job) ? job : null };
 }
 
 export function routeHash(route: Route): string {
   const params = new URLSearchParams();
   if (route.report) params.set('report', route.report);
   if (route.tab) params.set('tab', route.tab);
+  if (route.page === 'agents' || route.page === 'collections') params.set('page', route.page);
+  if (route.page === 'collections' && route.job && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(route.job)) params.set('job', route.job);
   const encoded = params.toString();
   return encoded === '' ? '' : `#${encoded}`;
 }

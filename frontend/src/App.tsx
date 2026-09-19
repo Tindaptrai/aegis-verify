@@ -8,22 +8,39 @@ import { orderEntries, Sidebar } from './components/Sidebar';
 import { StatusBadge } from './components/StatusBadge';
 import { text } from './format';
 import { readRoute, writeRoute } from './route';
+import { createOperationsClient, type OperationsClient } from './operations/api';
+import type { Bootstrap } from './operations/contracts';
+import { AgentsView } from './operations/AgentsView';
+import { CollectionsView } from './operations/CollectionsView';
 
 export interface AppProps {
   api: ApiClient;
+  operationsClient?: OperationsClient;
 }
 
 function initialTab(value: string | null): RunTab {
   return value === 'timeline' ? 'timeline' : 'assertions';
 }
 
-export function App({ api }: AppProps) {
+export function App({ api, operationsClient }: AppProps) {
+  const [operations] = useState(() => operationsClient ?? createOperationsClient());
+  const [capabilities, setCapabilities] = useState<Bootstrap | null>(null);
+  const [page, setPage] = useState(() => readRoute().page ?? 'reports');
+  const [jobId, setJobId] = useState(() => readRoute().job ?? null);
   const [index, setIndex] = useState<LoadState<ReportIndex>>({ status: 'loading' });
   const [selected, setSelected] = useState<string | null>(() => readRoute().report);
   const [tab, setTab] = useState<RunTab>(() => initialTab(readRoute().tab));
   const [report, setReport] = useState<LoadState<AnyReport> | null>(null);
   const [query, setQuery] = useState('');
   const [reportTick, setReportTick] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void operations.bootstrap(controller.signal).then(data => {
+      if (!controller.signal.aborted) setCapabilities(data);
+    }).catch(() => { if (!controller.signal.aborted) { setCapabilities(null); setPage('reports'); } });
+    return () => controller.abort();
+  }, [operations]);
 
   const loadIndex = useCallback(() => {
     setIndex({ status: 'loading' });
@@ -45,8 +62,8 @@ export function App({ api }: AppProps) {
   }, [index, selected]);
 
   useEffect(() => {
-    writeRoute({ report: selected, tab: selected === null ? null : tab });
-  }, [selected, tab]);
+    writeRoute({ report: selected, tab: selected === null ? null : tab, page, job: jobId });
+  }, [selected, tab, page, jobId]);
 
   useEffect(() => {
     if (selected === null) {
@@ -70,9 +87,15 @@ export function App({ api }: AppProps) {
 
   return (
     <div className="app">
-      <Sidebar state={index} selected={selected} query={query} onQuery={setQuery} onSelect={setSelected} onRetry={loadIndex} />
+      <Sidebar state={index} selected={selected} query={query} onQuery={setQuery}
+        onSelect={name => { setSelected(name); setPage('reports'); }} onRetry={loadIndex}
+        operationsNav={capabilities && <nav className="operations-nav" aria-label="Workspace">
+          {(['reports', 'collections', 'agents'] as const).map(item => <button key={item} aria-current={page === item ? 'page' : undefined}
+            onClick={() => setPage(item)}>{({ reports: 'Reports', collections: 'Collections', agents: 'Agents' })[item]}</button>)}
+        </nav>} />
       <main className="main">
-        <Content
+        {capabilities && page === 'agents' ? <AgentsView client={operations} config={capabilities} /> :
+          capabilities && page === 'collections' ? <CollectionsView client={operations} config={capabilities} initialJobId={jobId} onJob={setJobId} /> : <Content
           index={index}
           selected={selected}
           report={report}
@@ -80,7 +103,7 @@ export function App({ api }: AppProps) {
           onTab={setTab}
           onRefresh={refresh}
           onRetryReport={() => setReportTick((value) => value + 1)}
-        />
+        />}
       </main>
     </div>
   );
