@@ -9,4 +9,10 @@ Public API: `aegis_verify.connectors.wazuh.parse_wazuh_document` and
 
 Read [the Vietnamese guide](../../docs/WAZUH_FIXTURE_PARSER.md) for runnable examples,
 mapping, limits, collection topology and human lab comparison. Other profiles,
-CSV, multi-record exports and live API/Indexer access are not implemented.
+CSV and generic multi-record exports are not implemented by that parser.
+
+Issue #11 adds a bounded read-only Indexer collector for the reviewed Windows
+4688, Sysmon 1 and PowerShell 4104 profiles. It reuses the fixture parsers and
+retains original response bytes plus traceable hit derivatives. See
+[setup, limits and lab validation](../../docs/WAZUH_LIVE_CONNECTOR.md).
+Live lab validation and human review remain pending.
