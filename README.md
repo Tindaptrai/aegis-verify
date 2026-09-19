@@ -113,6 +113,10 @@ path only, not lab coverage. Human review and local/lab validation remain pendin
 
 ## Current implementation: results dashboard
 
+Windows: after preparing the venv and frontend build, use
+`./Start-Aegis.ps1 -Reports '<reviewed-report-directory>' -Port 8766`.
+See [the one-command launcher guide](docs/START_AEGIS.md) for prerequisites and errors.
+
 [The results dashboard](docs/DASHBOARD.md) is a read-only React page over the
 CLI's JSON reports, served by `aegis dashboard --reports <dir>` (standard-library
 HTTP on loopback, no new Python dependency). It shows scenario, run ID, final
