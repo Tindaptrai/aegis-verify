@@ -58,8 +58,25 @@ Reason codes có thể xuất hiện: `native_review_missing`, `native_content_u
 `payload_variant_mismatch`, `multiple_candidates`, `native_payload_mismatch`,
 `native_metadata_mismatch`.
 
-Đường đánh giá demo (`evaluate_demo_run`) gọi hàm này **không kèm** native review,
-nên trên đường đó status không bao giờ đạt `caller_reviewed` và luôn kèm lý do.
+Đường đánh giá demo (`evaluate_demo_run`) mặc định gọi hàm này **không kèm** native
+review, nên mặc định không đạt `caller_reviewed`. Caller có thể truyền tùy chọn
+`native_review` là JSON bytes theo schema ở dưới. API kiểm lại review bằng cùng
+`review_run_binding`: sai request hash/schema hoặc metadata conflict bị từ chối
+bằng `DemoEvaluationError: invalid_demo_evaluation`. Không nhận dict hoặc đường
+dẫn thay cho bytes, không tự tạo/chỉnh review. Hash bytes review được giữ trong
+`run_binding.native_review_sha256` và truyền sang comparison.
+
+Review hợp lệ không thay evaluation, collection assurance hay approval collection.
+`caller_reviewed` chỉ có thể xuất hiện khi checker không còn lý do unknown;
+companion vẫn giữ nguyên các lý do và trạng thái unknown theo chính sách hiện có.
+Không có `lab_verified`, xác minh EVTX độc lập hoặc tự nâng mức assurance.
+
+```python
+report = evaluate_demo_run(
+    bundle_path, run_inputs=run_inputs, scenario=scenario_path,
+    native_review=review_bytes,  # hồ sơ operator đã review; không tự sinh từ manager
+)
+```
 Status `conflict` khiến việc đánh giá bị từ chối; các trạng thái khác được gắn
 vào report tại khoá `run_binding`.
 

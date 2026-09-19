@@ -189,6 +189,60 @@ def test_run_a_reports_detected_with_a_correlated_witness(run_a):
     assert outcomes(run_a) == {'SCN-001-A01': 'satisfied', 'SCN-001-A02': 'satisfied', 'SCN-001-A03': 'satisfied'}
 
 
+@pytest.mark.parametrize('companion', [False, True])
+def test_optional_native_review_preserves_evaluation_and_companion_limits(space, inputs, companion):
+    from test_scn001_run_binding import native
+    from aegis_verify.demo.snapshot_bundle import verify_snapshot_bundle
+    bundle = bundle_for(space, inputs, 'A', detected=True, companion=companion)
+    run_inputs = run_for(inputs, 'A')
+    receipt = native(run_inputs, bundle)
+    # Synthetic review names the bound payload, not the pathless companion.
+    payload = next(d for d in verify_snapshot_bundle(bundle).documents
+                   if d.parser == 'wazuh-powershell4104-v1' and d.telemetry.event.file_path is not None)
+    receipt['records'][1]['evidence_id'] = payload.telemetry.event.event_id
+    original = evaluate(inputs, 'A', bundle)
+    reviewed = evaluate(inputs, 'A', bundle, native_review=wire(receipt))
+    assert reviewed['evaluation'] == original['evaluation']
+    assert reviewed['collection_review'] == original['collection_review']
+    assert reviewed['input_fingerprints'] == original['input_fingerprints']
+    assert reviewed['run_binding']['native_review_sha256'] == sha(wire(receipt))
+    assert reviewed['run_binding']['status'] == ('unknown' if companion else 'caller_reviewed')
+    assert reviewed['run_binding']['reasons'] == (['companion_record_unmatched'] if companion else [])
+    compared = compare_demo_runs(before=reviewed, after=reviewed)
+    assert compared['run_binding']['after']['native_review_sha256'] == sha(wire(receipt))
+
+
+@pytest.mark.parametrize('change', ['hash', 'pid', 'malformed', 'wrong_type'])
+def test_optional_native_review_rejects_bad_or_conflicting_inputs(space, inputs, change):
+    from test_scn001_run_binding import native
+    bundle = bundle_for(space, inputs, 'A', detected=True)
+    receipt = native(run_for(inputs, 'A'), bundle)
+    if change == 'hash':
+        receipt['request_sha256'] = '0' * 64
+    if change == 'pid':
+        receipt['records'][0]['process_id'] = 9999
+    raw = b'{' if change == 'malformed' else receipt if change == 'wrong_type' else wire(receipt)
+    with pytest.raises(DemoEvaluationError, match='^invalid_demo_evaluation$'):
+        evaluate(inputs, 'A', bundle, native_review=raw)
+
+
+def test_native_review_does_not_attest_missing_alert_collection(space, inputs):
+    from test_scn001_run_binding import native
+    bundle = bundle_for(space, inputs, 'B', detected=False)
+    run_inputs = run_for(inputs, 'B')
+    receipt = native(run_inputs, bundle)
+    receipt['payload_path'] = r'C:\Synthetic\AEGIS\maintenance_check.ps1'
+    receipt['reviewed_at'] = '2026-01-01T01:04:00Z'
+    for record in receipt['records']:
+        record['event_time'] = '2026-01-01T01:00:10.223456789Z'
+    original = evaluate(inputs, 'B', bundle)
+    reviewed = evaluate(inputs, 'B', bundle, native_review=wire(receipt))
+    assert reviewed['run_binding']['status'] == 'caller_reviewed'
+    assert reviewed['evaluation'] == original['evaluation']
+    assert reviewed['evaluation']['final_status'] == 'Inconclusive'
+    assert reviewed['collection_review'] is None
+
+
 def test_run_b_without_declaration_stays_inconclusive(space, inputs):
     report = evaluate(inputs, 'B', bundle_for(space, inputs, 'B', detected=False))
     assert report['evaluation']['final_status'] == 'Inconclusive'

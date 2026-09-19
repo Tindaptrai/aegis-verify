@@ -122,6 +122,13 @@ Nó **không** biến approval thành bằng chứng thu thập đầy đủ.
 
 ## So sánh hai run của demo
 
+`evaluate_demo_run` cũng nhận `native_review` tùy chọn là JSON bytes theo
+[SCN001_RUN_BINDING.md](SCN001_RUN_BINDING.md). Đây là review riêng, không thay
+`request`/`approval` collection. Nếu thiếu collection attestation, native review
+hợp lệ không biến alert vắng mặt thành False negative. Default `None` giữ hành vi
+cũ; review sai schema, stale request hoặc mâu thuẫn metadata bị từ chối. Companion
+vẫn được giữ và có thể khiến binding tiếp tục unknown.
+
 ```python
 comparison = compare_demo_runs(before=report_b, after=report_c)
 ```

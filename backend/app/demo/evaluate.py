@@ -63,7 +63,8 @@ def _attested(raw, checked, *, bundle, run_inputs, request, approval):
     return context
 
 
-def evaluate_demo_run(bundle, *, run_inputs, scenario, context=None, request=None, approval=None):
+def evaluate_demo_run(bundle, *, run_inputs, scenario, context=None, request=None, approval=None,
+                      native_review=None):
     """Evaluate one reviewed SCN-001 run and return the standard CLI report.
 
     ``context`` is an optional path to a context produced by
@@ -75,9 +76,16 @@ def evaluate_demo_run(bundle, *, run_inputs, scenario, context=None, request=Non
     review is re-run from them and must reproduce the context exactly, so an
     attested context cannot reach this path without having gone through the
     collection review for this run, study and snapshot.
+
+    ``native_review`` optionally supplies operator review JSON bytes to the
+    existing binding checker. This compares caller declarations, not EVTX
+    authenticity or collection completeness. Its hash is retained in run_binding;
+    companion limitations and detection outcomes are unchanged.
     """
     try:
         if type(run_inputs) is not dict:
+            raise DemoEvaluationError()
+        if native_review is not None and type(native_review) is not bytes:
             raise DemoEvaluationError()
         checked = verify_run(**run_inputs)
         root = local_path(strict_path(bundle), directory=True)
@@ -128,10 +136,11 @@ def evaluate_demo_run(bundle, *, run_inputs, scenario, context=None, request=Non
         # The profile deliberately accepts either reviewed payload variant, so the
         # evaluation alone cannot tell one run's telemetry from another's. Only run
         # binding can. Refuse a conflicting binding outright, and attach the result
-        # otherwise so nobody reads a verdict without it. native_review is not
-        # passed: a caller-declared "reviewed" flag is not evidence, so the status
-        # here never reaches caller_reviewed and always carries its reasons.
-        binding = decode_config(review_run_binding(bundle, run_inputs=run_inputs), stage='inputs')
+        # otherwise so nobody reads a verdict without it. Optional native review
+        # remains a caller declaration, never independent verification. The
+        # binding checker retains all unresolved reasons, including companions.
+        binding = decode_config(review_run_binding(
+            bundle, run_inputs=run_inputs, native_review=native_review), stage='inputs')
         if binding['status'] == 'conflict' or binding['request_sha256'] != digest(
                 prepare_collection_request(bundle, run_inputs=run_inputs)):
             raise DemoEvaluationError()
