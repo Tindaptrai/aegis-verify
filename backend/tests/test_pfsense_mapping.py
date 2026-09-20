@@ -66,6 +66,29 @@ def test_pass_mapping_and_provenance(context):
     assert provenance.nat_context is None
 
 
+def test_hostname_less_tcp_block_preserves_source_action(context):
+    fields, metadata, reason = map_filterlog_line(
+        SYNTHETIC_TCP.replace("fixture-fw ", ""), context
+    )
+    assert reason is None
+    assert fields["hostname"] is None
+    assert fields["protocol"] == "tcp"
+    assert fields["event_action"] == "blocked"
+    assert fields["dst_port"] == 443
+    assert metadata["direction"] == "out"
+
+
+@pytest.mark.parametrize("header", [
+    "Sep 10 21:01:41 filterlog[abc]: ",
+    "Sep 10 21:01:41 otherprogram[1]: ",
+    "Sep 10 21:01:41 filterlog[1] ",
+    "Sep 10 21:01:41 host extra filterlog[1]: ",
+])
+def test_hostname_less_support_does_not_accept_malformed_headers(context, header):
+    with pytest.raises(PfSenseParseError, match="malformed_header"):
+        map_filterlog_line(header + SYNTHETIC_PASS[len(HEADER):], context)
+
+
 @pytest.mark.parametrize("line, protocol", [(SYNTHETIC_TCP, "tcp"), (changed(**{"6": "block"}), "udp")])
 def test_block_maps_only_observed_action(context, line, protocol):
     fields, _, reason = map_filterlog_line(line, context)
