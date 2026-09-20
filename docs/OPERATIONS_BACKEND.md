@@ -98,3 +98,56 @@ same ID only for the identical input; do not automatically resubmit a failed job
 
 Fixture tests are not live-lab acceptance. No release/tag or permission change is
 authorized by enabling this option.
+
+### Operator recovery checklist
+
+1. **Source or SSH tunnel unavailable:** retain the current evidence root. Check
+   the configured tunnel and TLS trust locally without disabling verification.
+   Inventory `stale` means the displayed source status is from an older snapshot;
+   `unavailable` means no successful snapshot exists in this process. Neither
+   means the endpoint itself is disconnected. After restoring connectivity, use
+   **Refresh inventory** once (respect the 30-second cooldown), then check the
+   new fetch time and error status. Restoring a tunnel alone does not refresh it.
+2. **Collection failed:** inspect the job's fixed error code and preserve any
+   partial bundle. A restored connection does not resume or replay that job.
+   Review the target and UTC window before explicitly submitting another job
+   with a new request ID. Reusing the old ID returns the existing job, not a retry.
+3. **Normal stop:** use Ctrl+C and allow the bounded worker to drain. Do not
+   start a second process against that root while the first still owns it.
+4. **Process forcibly stopped:** restart with the same reviewed configuration
+   and private evidence root. Previously running jobs should become `interrupted`,
+   with no automatic collection. Review the retained bundle as potentially
+   incomplete, even if it contains files; do not change metadata to `completed`.
+5. **Storage recovery blocked:** if metadata is corrupt or `.pending-*` files
+   remain, stop and preserve the entire root for review. Make any backup only
+   after the writer has stopped, to another owner-only private local directory.
+   Do not delete lock/metadata files or move selected files into a live root to
+   bypass the safeguard. A new root starts separate history; it is not a repair
+   of the old evidence. Keep raw evidence and credentials out of Git and chat.
+6. **`disk_space`:** check free space on the volume containing `output_root`,
+   not just the source checkout. Admission requires at least 2 GiB. Preserve
+   evidence; do not lower the safety threshold to force collection. Before
+   choosing a new local output root, verify both available space and owner-only
+   ACL support under the actual operator account. A volume can have ample free
+   space while refusing the required ACL operations. Changing roots does not
+   transfer existing job history or certify a backup.
+
+The P2 fixture checks exercise an actual test-owned process termination, OS
+lease release, two fresh recovery processes, unchanged completed metadata and
+partial/completed fixture bytes, and no collector replay. Inventory checks cover
+source loss both before and after a successful snapshot, followed by explicit
+manual recovery. These tests replace source calls with fixtures and bypass ACL
+inspection in the recovery subprocess; they do **not** establish live TLS,
+Windows ACL correctness, physical power-loss durability, arbitrary crash timing,
+backup/restore acceptance, or SCN-001 detection correctness.
+
+### Gate for expanding beyond SCN-001
+
+Keep the current SCN-001 acceptance baseline while reviewing P2 tests and doing
+a separately approved SCN-001 lab rerun with evidence-linked conclusions. Then
+start SCN-002 as its own issue: review its draft ground truth, controlled
+destination and non-sensitive payload, routing, clock alignment, and required
+Wazuh/Suricata/pfSense evidence before execution. SCN-003 follows after SCN-002
+acceptance, adding the explicitly allowlisted decoy/Cowrie and NAT evidence.
+Neither draft manifest is live acceptance or authorization to execute a scenario.
+No scenario ground truth is changed by this recovery work.
