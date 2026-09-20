@@ -1,0 +1,30 @@
+{
+  "id": "synthetic-archive-record",
+  "timestamp": "2026-01-01T00:00:04Z",
+  "agent": {"id": "901", "name": "synthetic-endpoint"},
+  "manager": {"name": "synthetic-manager"},
+  "data": {
+    "win": {
+      "system": {
+        "providerName": "Microsoft-Windows-Sysmon",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "eventID": "3",
+        "eventRecordID": "101",
+        "computer": "synthetic-endpoint",
+        "systemTime": "2026-01-01T00:00:03.1234567Z"
+      },
+      "eventdata": {
+        "utcTime": "2026-01-01 00:00:01.123",
+        "protocol": "udp",
+        "sourceIp": "192.0.2.10",
+        "sourcePort": "49152",
+        "destinationIp": "198.51.100.20",
+        "destinationPort": "45002",
+        "processId": "4242",
+        "image": "C:\\Synthetic\\sender.exe",
+        "user": "SYNTHETIC\\operator",
+        "processGuid": "{00000000-0000-0000-0000-000000000001}"
+      }
+    }
+  }
+}

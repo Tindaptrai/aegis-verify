@@ -13,6 +13,14 @@ _CODES = frozenset({
 })
 _FIELDS = frozenset({
     'source_ref', 'environment_id', 'ingested_at', 'collection_mode',
+    'id', 'agent', 'agent.id', 'agent.name', 'manager', 'manager.name',
+    'rule', 'rule.id', 'rule.level', 'data', 'data.win',
+    'data.win.system', 'data.win.eventdata',
+    *('data.win.system.' + field for field in
+      ('providerName', 'channel', 'eventID', 'computer', 'eventRecordID')),
+    *('data.win.eventdata.' + field for field in
+      ('utcTime', 'protocol', 'sourceIp', 'destinationIp', 'sourcePort',
+       'destinationPort', 'processId', 'image', 'user', 'processGuid')),
     '_source', '_source.id', '_source.agent', '_source.agent.id', '_source.agent.name',
     '_source.manager', '_source.manager.name', '_source.rule', '_source.rule.id',
     '_source.rule.level', '_source.data', '_source.data.win',
