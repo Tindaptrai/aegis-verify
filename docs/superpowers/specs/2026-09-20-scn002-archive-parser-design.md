@@ -1,6 +1,6 @@
 # SCN-002 — parser Sysmon 3 từ Wazuh archives (offline)
 
-Trạng thái: owner đã duyệt hướng archives offline; bản thiết kế này chờ review.
+Trạng thái: owner đã duyệt bản thiết kế ngày 2026-09-20; cho phép viết plan.
 Đây là phần tiếp theo sau source readiness #49, không phải hoàn tất #49 hoặc
 phê duyệt thay ground truth. Issue triển khai riêng sẽ chốt theo acceptance dưới.
 
