@@ -13,7 +13,9 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$PythonPath,
     [ValidateNotNullOrEmpty()]
-    [string]$OperationsConfig
+    [string]$OperationsConfig,
+    [ValidateSet('Inventory', 'Collections', 'Both')]
+    [string]$PromptCredentials
 )
 
 Set-StrictMode -Version Latest
@@ -25,6 +27,10 @@ if (-not $PSBoundParameters.ContainsKey('PythonPath')) {
 function Stop-AegisLaunch([string]$Code, [string]$Hint) {
     Write-Output "AEGIS: $Code - $Hint"
     exit 1
+}
+
+if ($PSBoundParameters.ContainsKey('PromptCredentials') -and -not $PSBoundParameters.ContainsKey('OperationsConfig')) {
+    Stop-AegisLaunch 'operations_config_required' 'Credential prompts require -OperationsConfig.'
 }
 
 # Reject network/provider syntax before Test-Path can access a remote filesystem.
@@ -88,6 +94,61 @@ if ($PSBoundParameters.ContainsKey('OperationsConfig')) {
 } else {
     Write-Output "AEGIS: http://127.0.0.1:$Port/ - read-only reports; Ctrl+C to stop. No scenario will run."
 }
-# The server itself binds the port again; a race is reported by the existing CLI.
-& $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port @operationsArguments
-exit $LASTEXITCODE
+if (-not $PSBoundParameters.ContainsKey('PromptCredentials')) {
+    # Preserve the existing environment-driven path without prompting or changing credentials.
+    & $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port @operationsArguments
+    exit $LASTEXITCODE
+}
+
+$credentialNames = @('WAZUH_API_USERNAME', 'WAZUH_API_PASSWORD', 'WAZUH_INDEXER_USERNAME', 'WAZUH_INDEXER_PASSWORD')
+$savedEnvironment = @{}
+foreach ($name in $credentialNames) {
+    $savedEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+$securePassword = $null
+$credential = $null
+$exitCode = 1
+$stage = 'credential_input_failed'
+try {
+    # An unselected source must not inherit an unrelated credential from the caller.
+    foreach ($name in $credentialNames) { Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue }
+    $sources = @()
+    if ($PromptCredentials -in @('Inventory', 'Both')) {
+        $sources += @{ Label = 'Server API (inventory)'; Prefix = 'WAZUH_API' }
+    }
+    if ($PromptCredentials -in @('Collections', 'Both')) {
+        $sources += @{ Label = 'Indexer (collections; separate account)'; Prefix = 'WAZUH_INDEXER' }
+    }
+    Write-Output 'AEGIS: Enter credentials in this terminal. Password input is hidden; Ctrl+C cancels. No source authentication or collection is performed at startup.'
+    foreach ($source in $sources) {
+        $username = Read-Host ($source.Label + ' username')
+        if ([string]::IsNullOrWhiteSpace($username)) { throw 'Invalid credential input' }
+        $securePassword = Read-Host ($source.Label + ' password') -AsSecureString
+        if ($null -eq $securePassword -or $securePassword.Length -eq 0) { throw 'Invalid credential input' }
+        $credential = [System.Management.Automation.PSCredential]::new($username, $securePassword)
+        [Environment]::SetEnvironmentVariable(($source.Prefix + '_USERNAME'), $credential.UserName, 'Process')
+        [Environment]::SetEnvironmentVariable(($source.Prefix + '_PASSWORD'), $credential.GetNetworkCredential().Password, 'Process')
+        $credential = $null
+        $securePassword.Dispose()
+        $securePassword = $null
+    }
+    $stage = 'launcher_start_failed'
+    # The server binds again; the existing CLI reports a port race or invalid config.
+    & $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port @operationsArguments
+    $exitCode = $LASTEXITCODE
+} catch {
+    # Never print an exception containing credential input or process environment.
+    Write-Output "AEGIS: $stage - Input cancelled/invalid or startup failed. No automatic retry; check configuration and retry explicitly."
+} finally {
+    $credential = $null
+    if ($null -ne $securePassword) { $securePassword.Dispose() }
+    foreach ($name in $credentialNames) {
+        if ($null -eq $savedEnvironment[$name]) {
+            Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+        } else {
+            [Environment]::SetEnvironmentVariable($name, $savedEnvironment[$name], 'Process')
+        }
+    }
+    $savedEnvironment.Clear()
+}
+exit $exitCode

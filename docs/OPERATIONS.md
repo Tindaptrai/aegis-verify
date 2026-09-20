@@ -94,6 +94,39 @@ the operations navigation.
 
 ### Nhập credential trong terminal (Windows PowerShell)
 
+Launcher hỗ trợ nhập trực tiếp, không cần helper riêng:
+
+```powershell
+.\Start-Aegis.ps1 -Reports 'C:/AEGIS-reviewed/reports' -Port 8771 -OperationsConfig 'C:/AEGIS-private/operations.json' -PromptCredentials Both
+```
+
+Thay đường dẫn ví dụ bằng đường dẫn thật và chọn cổng trống. Chạy từ checkout
+đã chuẩn bị Python/frontend trong PowerShell thường. Chọn `Inventory` để chỉ
+nhập Server API, `Collections` để chỉ nhập Indexer, hoặc `Both` để nhập cả hai.
+Launcher hỏi username và mật khẩu ẩn riêng từng nguồn; không có username mặc
+định, không dùng tài khoản admin. Credential nguồn không chọn bị loại khỏi môi
+trường của tiến trình con trong phiên này.
+
+Đường dẫn, Python/build và cổng được kiểm tra trước lời nhắc. Cấu trúc/ACL của
+Operations config vẫn do backend kiểm tra khi khởi động; vượt bước nhập không
+chứng minh config hay credential hợp lệ. Startup không đăng nhập vào Wazuh và
+không tự refresh/collection. Xác thực được kiểm khi operator refresh inventory
+hoặc xác nhận collection. Mật khẩu sai vì vậy vẫn có thể mở dashboard.
+
+Không truyền mật khẩu qua tham số hoặc lưu vào JSON. Credential chỉ nằm trong
+môi trường tiến trình khi server chạy; không chống được tiến trình độc hại cùng
+tài khoản. Khi thoát bình thường, lỗi hoặc hủy nhập, launcher khôi phục bốn biến
+credential như trước khi gọi (xóa biến vốn không tồn tại). Không bảo đảm xóa sạch
+mọi bản sao trong bộ nhớ; dừng cưỡng bức không bảo đảm khối cleanup chạy.
+
+Ctrl+C hủy lời nhắc hoặc dừng server theo cơ chế hiện có. `credential_input_failed`
+báo nhập rỗng/không hợp lệ hoặc lời nhắc bị lỗi, không in exception chứa input.
+`launcher_start_failed` báo lỗi gọi tiến trình, khác lỗi đăng nhập nguồn. Không
+tự thử lại và không dừng dashboard khác.
+
+Không dùng `-PromptCredentials` thì đường chạy dựa trên biến môi trường cũ
+được giữ nguyên. Mẫu thủ công dưới đây vẫn dùng được:
+
 Sau khi chuẩn bị config/root đúng quyền, chạy từ thư mục repo trong một cửa sổ
 PowerShell thường dành riêng cho AEGIS. Hai username có thể khác nhau; không nhập
 tài khoản admin. Mẫu này không tạo tài khoản, không lưu mật khẩu và không tự thu
