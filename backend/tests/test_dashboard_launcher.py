@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+import uuid
 
 import pytest
 
@@ -222,3 +223,99 @@ def test_launches_real_read_only_server_from_other_directory(shell, layout):
             subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
                            capture_output=True, timeout=10)
         process.communicate(timeout=10)
+
+
+def credential_launch(shell, layout, mode, *, failure='', busy=False, config=True):
+    """Exercise the real launcher; replace only terminal input and long-running server."""
+    script, reports, _ = layout
+    root = reports.parent
+    config_path = root / 'operations.json'
+    config_path.write_text('{}')
+    boundary = root / 'python boundary.ps1'
+    boundary.write_text("""
+if ($args -contains '-u') {
+    $api = $env:WAZUH_API_USERNAME -ceq 'inventory-test' -and $env:WAZUH_API_PASSWORD -ceq $env:TEST_SECRET
+    $idx = $env:WAZUH_INDEXER_USERNAME -ceq 'indexer-test' -and $env:WAZUH_INDEXER_PASSWORD -ceq $env:TEST_SECRET
+    $apiAbsent = $null -eq $env:WAZUH_API_USERNAME -and $null -eq $env:WAZUH_API_PASSWORD
+    $idxAbsent = $null -eq $env:WAZUH_INDEXER_USERNAME -and $null -eq $env:WAZUH_INDEXER_PASSWORD
+    Write-Output "BOUNDARY:$api,$idx,$apiAbsent,$idxAbsent"
+    if ($env:TEST_FAILURE -eq 'server') { throw $env:TEST_SECRET }
+    $global:LASTEXITCODE = 7
+} else { $global:LASTEXITCODE = 0 }
+""")
+    wrapper = root / 'invoke.ps1'
+    quote = lambda value: str(value).replace("'", "''")
+    with socket.socket() as listener:
+        listener.bind(('127.0.0.1', 0))
+        port = listener.getsockname()[1]
+        if busy:
+            listener.listen()
+        else:
+            listener.close()
+        config_arg = f"-OperationsConfig '{quote(config_path)}'" if config else ''
+        wrapper.write_text(f"""
+$global:prompts = 0
+function Read-Host {{
+    param([string]$Prompt, [switch]$AsSecureString)
+    $global:prompts++
+    if ($env:TEST_FAILURE -eq 'cancel') {{ throw $env:TEST_SECRET }}
+    if ($env:TEST_FAILURE -eq 'second_cancel' -and $global:prompts -eq 4) {{ throw $env:TEST_SECRET }}
+    if ($AsSecureString) {{
+        if ($env:TEST_FAILURE -eq 'empty') {{ return [Security.SecureString]::new() }}
+        $value = [Security.SecureString]::new()
+        foreach ($character in $env:TEST_SECRET.ToCharArray()) {{ $value.AppendChar($character) }}
+        return $value
+    }}
+    if ($env:TEST_FAILURE -eq 'blank_user') {{ return ' ' }}
+    if ($Prompt -like '*Server API*') {{ return 'inventory-test' }}
+    return 'indexer-test'
+}}
+& '{quote(script)}' -Reports '{quote(reports)}' -PythonPath '{quote(boundary)}' -Port {port} {config_arg} -PromptCredentials {mode}
+$code = $LASTEXITCODE
+$restored = $env:WAZUH_API_USERNAME -ceq 'previous-user' -and $env:WAZUH_API_PASSWORD -ceq $env:TEST_PREVIOUS_SECRET -and $null -eq $env:WAZUH_INDEXER_USERNAME -and $null -eq $env:WAZUH_INDEXER_PASSWORD
+Write-Output "AFTER:$restored;PROMPTS:$global:prompts;EXIT:$code"
+""")
+        env = dict(os.environ)
+        for key in ('WAZUH_API_USERNAME', 'WAZUH_API_PASSWORD', 'WAZUH_INDEXER_USERNAME', 'WAZUH_INDEXER_PASSWORD'):
+            env.pop(key, None)
+        secret = uuid.uuid4().hex + '!$; space'
+        previous_secret = uuid.uuid4().hex
+        env.update(TEST_SECRET=secret, TEST_PREVIOUS_SECRET=previous_secret, TEST_FAILURE=failure,
+                   WAZUH_API_USERNAME='previous-user', WAZUH_API_PASSWORD=previous_secret)
+        result = subprocess.run([shell, '-NoProfile', '-NonInteractive', '-File', str(wrapper)],
+                                capture_output=True, text=True, env=env, timeout=20)
+    assert secret not in result.stdout + result.stderr
+    assert previous_secret not in result.stdout + result.stderr
+    return result.stdout + result.stderr
+
+
+@pytest.mark.parametrize('mode,expected,prompts', [
+    ('Inventory', 'True,False,False,True', 2),
+    ('Collections', 'False,True,True,False', 2),
+    ('Both', 'True,True,False,False', 4),
+])
+def test_prompted_credentials_scope_and_restore(shell, layout, mode, expected, prompts):
+    output = credential_launch(shell, layout, mode)
+    assert f'BOUNDARY:{expected}' in output
+    assert f'AFTER:True;PROMPTS:{prompts};EXIT:7' in output
+
+
+@pytest.mark.parametrize('failure', ['empty', 'blank_user', 'cancel', 'second_cancel', 'server'])
+def test_prompt_failure_restores_environment_without_secret_output(shell, layout, failure):
+    output = credential_launch(shell, layout, 'Both', failure=failure)
+    assert 'AFTER:True;' in output
+    assert 'EXIT:1' in output
+    if failure != 'server':
+        assert 'BOUNDARY:' not in output
+
+
+def test_prompt_preflight_rejects_busy_port_without_asking(shell, layout):
+    output = credential_launch(shell, layout, 'Both', busy=True)
+    assert 'port_unavailable' in output
+    assert 'AFTER:True;PROMPTS:0;EXIT:1' in output
+
+
+def test_prompt_requires_operations_config(shell, layout):
+    output = credential_launch(shell, layout, 'Both', config=False)
+    assert 'operations_config_required' in output
+    assert 'AFTER:True;PROMPTS:0;EXIT:1' in output
