@@ -70,6 +70,7 @@ lấy giờ hiện tại, không cho context khai báo lại environment/source_
 | `wazuh-win4688-v2` | Một JSON search-hit/document Windows 4688; `collection_mode`: `direct`/`forwarded`/`unknown` |
 | `wazuh-sysmon1-v1` | Một Wazuh JSON search-hit Sysmon Event 1; cùng context `collection_mode` như 4688 |
 | `wazuh-powershell4104-v1` | Một Wazuh JSON search-hit PowerShell 4104, chỉ đoạn `1/1` có script text không rỗng; cùng context `collection_mode` |
+| `wazuh-sysmon3-archive-v1` | Một bản ghi **archive** của manager cho Sysmon Event 3, chỉ UDP/IPv4; từ chối search-hit có `_source`; cùng context `collection_mode` |
 | `suricata-wazuh-alert-v1` | Một Wazuh-exported Suricata alert; `deployment_mode`: `ids`/`ips`/`unknown` |
 | `suricata-eve-jsonl-v1` | EVE JSONL alert/flow; `sensor_id`, `deployment_mode` |
 | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | BSD filterlog IPv4 TCP/UDP; `sensor_id`, `source_year`, `source_utc_offset` |
