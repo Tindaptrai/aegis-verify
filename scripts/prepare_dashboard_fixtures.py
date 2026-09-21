@@ -88,15 +88,22 @@ def bundle(directory: Path, *, run_id: str, with_alert: bool, attested: bool):
     context = {"run_id": run_id, "environment_id": "synthetic-lab", "start": "2026-01-01T00:00:00Z",
                "end": "2026-01-01T00:01:00Z", "bindings": [{"name": "target", "value": "synthetic-host"}],
                "declarations": []}
-    files = [("activity.json", "synthetic-activity", record("synthetic-activity", "900001", 1))]
+    # The label is the operator's configured name for a source. It is synthetic
+    # here, like everything else in this fixture, and is not an observed hostname.
+    files = [("activity.json", "synthetic-activity", "Synthetic endpoint",
+              record("synthetic-activity", "900001", 1))]
     if with_alert:
-        files.append(("alert.json", "synthetic-alert", record("synthetic-alert", "900002", 2)))
+        files.append(("alert.json", "synthetic-alert", None,
+                      record("synthetic-alert", "900002", 2)))
     entries = []
-    for name, ref, raw in files:
+    for name, ref, label, raw in files:
         (directory / name).write_bytes(raw)
-        entries.append({"path": name, "source_ref": ref, "parser": "wazuh-win4688-v2",
-                        "sha256": sha256(raw).hexdigest(),
-                        "context": {"ingested_at": "2026-01-01T00:00:03Z", "collection_mode": "direct"}})
+        entry = {"path": name, "source_ref": ref, "parser": "wazuh-win4688-v2",
+                 "sha256": sha256(raw).hexdigest(),
+                 "context": {"ingested_at": "2026-01-01T00:00:03Z", "collection_mode": "direct"}}
+        if label is not None:
+            entry["display_label"] = label
+        entries.append(entry)
     inputs = {"bundle_schema_version": "0.1.0", "environment_id": "synthetic-lab", "files": entries}
     (directory / "inputs.json").write_bytes(encode(inputs))
     (directory / "profile.json").write_bytes(encode(profile))

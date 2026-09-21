@@ -1,5 +1,6 @@
 """Closed contracts for an explicit offline evidence bundle."""
 
+import unicodedata
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -40,12 +41,31 @@ def _utc_offset(value: str) -> str:
     return value
 
 
+def _display_label(value: str) -> str:
+    """Accept a readable source name; refuse anything that can deceive a reader.
+
+    The label is written by whoever assembled the bundle and is shown beside
+    evidence, so it stays printable text on one line. Control, format and
+    separator characters are refused because they can hide or reorder what a
+    reviewer sees. The rejected value is never echoed back in the error.
+    """
+    if not value.strip():
+        raise ValueError("blank display label")
+    if len(value) > 64:
+        raise ValueError("display label too long")
+    for character in value:
+        if character != " " and unicodedata.category(character)[0] in {"C", "Z"}:
+            raise ValueError("display label has a non-printable character")
+    return value
+
+
 SafeLabel = Annotated[
     StrictStr, Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 ]
 EnvironmentId = Annotated[StrictStr, AfterValidator(_environment)]
 Digest = Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]
 BundlePath = Annotated[StrictStr, Field(min_length=1, max_length=4096)]
+DisplayLabel = Annotated[StrictStr, AfterValidator(_display_label)]
 
 
 class _Context(BaseModel):
@@ -128,6 +148,10 @@ class BundleFile(BaseModel):
     parser: ParserKey
     sha256: Digest
     context: ParserContext
+    # Presentation only: the name an operator configured for this source. It is
+    # never read out of the evidence, never an observed hostname, and never part
+    # of an evidence identity or of any fingerprint an attestation binds to.
+    display_label: DisplayLabel | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -180,6 +204,7 @@ def _field_from_location(location: tuple[object, ...]) -> str | None:
         "parser",
         "sha256",
         "context",
+        "display_label",
     }
     for item in reversed(location):
         if type(item) is str and item in allowed:

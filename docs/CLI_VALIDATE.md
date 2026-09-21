@@ -37,7 +37,18 @@ tương đối dùng `/`, `source_ref` duy nhất, `parser`, `sha256` lowercase 
 của toàn bộ bytes file và `context` riêng của parser. Xem
 [manifest mẫu](../tests/fixtures/cli/synthetic-detected/inputs.json).
 `source_ref` là nhãn ASCII theo `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`; giữ nhãn
-ổn định khi di chuyển bundle để giữ evidence identity. Không sửa newline/BOM sau
+ổn định khi di chuyển bundle để giữ evidence identity.
+
+Mỗi mục có thêm một trường tùy chọn `display_label`: tên do người dựng bundle
+cấu hình cho nguồn đó, ví dụ `pfSense lab`. Đây là thông tin trình bày, **không
+phải** hostname quan sát được trong log; hostname thiếu vẫn là `null`. Nhãn dài
+tối đa 64 ký tự, không được rỗng và không chứa ký tự điều khiển, định dạng hay
+ngắt dòng. Nhãn gắn theo từng `source_ref` nên hai thiết bị cùng `source_type`
+vẫn có nhãn riêng; hai nguồn được phép trùng nhãn vì nhãn không phải định danh.
+Thêm hoặc đổi nhãn **không** làm đổi evidence ID, raw hash, canonical field hay
+`profile_fingerprint`/`scope_fingerprint`/`event_set_fingerprint`, nên một
+collection attestation đã ký vẫn còn hiệu lực; chỉ hash bytes của `inputs.json`
+đổi, đúng với sự thật là manifest đã đổi. Không sửa newline/BOM sau
 khi tính hash. PowerShell: `(Get-FileHash -Algorithm SHA256 -LiteralPath <file>).Hash.ToLowerInvariant()`.
 
 Mọi parser context cần `ingested_at` có timezone, do caller cung cấp. CLI không
@@ -98,10 +109,12 @@ Text in scenario/run, từng assertion, reason, evidence IDs/unevaluable IDs,
 final status, counts, warnings và assurance. JSON có `cli_report_version`,
 `kind`, `scenario`, `evaluation` nguyên kết quả engine, `counts`, `intake`
 (inventory/ledger), `input_fingerprints` của bytes cấu hình đã chọn và, từ
-Issue #10, `timeline` (version `0.1.0`): các event được `evidence_index` tham
+Issue #10, `timeline` (version `0.2.0`): các event được `evidence_index` tham
 chiếu, sắp theo `timestamp` rồi `event_id`, sao chép nguyên trường canonical
-(`null` giữ `null`) để [dashboard](DASHBOARD.md) hiển thị. `evaluation`,
-fingerprints và `compare` không đổi.
+(`null` giữ `null`) để [dashboard](DASHBOARD.md) hiển thị. Từ `0.2.0` mỗi event
+mang thêm `source_ref` và `source_label` lấy từ manifest, tra qua ledger; event
+không tra được giữ `null` cho cả hai. `evaluation`, fingerprints và `compare`
+không đổi.
 Parsed count không phải proof count; kết luận phải tham chiếu evidence IDs.
 
 | Exit | Ý nghĩa |
