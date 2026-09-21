@@ -161,6 +161,34 @@ WAN.
 rule. Nó không nói signature sẽ khớp gói thật. Chỉ một alert thu được từ lượt
 probe mới chứng minh điều đó, và đó là bước kế tiếp.
 
+## 6c. Alert đầu tiên thu được, ngày 2026-09-21
+
+Sau khi rule được lưu qua giao diện web trên instance LAN và Suricata của
+interface đó được khởi động lại, một probe đối chứng theo đúng hợp đồng một
+datagram đã sinh ra alert ở cả hai tầng. Địa chỉ lab và các file bằng chứng
+được giữ ngoài Git.
+
+| Mục | Giá trị |
+| --- | --- |
+| Run UUID | `12a20fb5c65c45cf8eb66d6d599a1dcd`, nhãn `control` |
+| Payload | 68 byte, marker + run UUID + nhãn |
+| Suricata | alert trên instance LAN, `signature_id` 1000010, `action` `allowed` |
+| Thời điểm sự kiện | 2026-09-21T19:52:33.411629+07:00 theo Suricata |
+| Wazuh | rule 86601, description mang đúng `msg` của rule |
+| Tuple | năm trường trong alert khớp receipt phía gửi, giao thức UDP |
+| eve.json trích ra | SHA-256 `ab3840e0a413693a63ccef51fe80ee6f4f38721a49a231f4ad7e70c7b873477e` |
+| Wazuh alert trích ra | SHA-256 `3554f2fe24934824eba821429c6fc5258c610620a84956af996a72bff1a141bc` |
+| Wazuh archive trích ra | SHA-256 `9989e6e9ae913497da5a9e2cb2f16b9f6bce46e6b9f75246010c84a73d136cbc` |
+
+Điểm ràng buộc quan trọng: `payload_printable` trong alert chứa đúng run UUID
+của lần gửi, nên alert này thuộc về chính probe đó chứ không phải một gói nào
+khác tình cờ mang marker.
+
+Kết quả này cho A02 bằng chứng đầu tiên: Suricata thấy datagram tại LAN, sinh
+alert, và Wazuh ghi nhận alert cho cùng tuple. Nó **không** chứng minh chặn, và
+**không** thay đổi câu hỏi câu chữ của A04 ở mục 7. Đây là một lượt đối chứng
+được phép; lượt Block vẫn chưa thực hiện.
+
 ## 7. Rule này chứng minh gì và không chứng minh gì
 
 **Chứng minh được**: Suricata nhìn thấy datagram tại vị trí quan sát, sinh alert,
