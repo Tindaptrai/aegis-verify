@@ -48,7 +48,18 @@ vẫn có nhãn riêng; hai nguồn được phép trùng nhãn vì nhãn không
 Thêm hoặc đổi nhãn **không** làm đổi evidence ID, raw hash, canonical field hay
 `profile_fingerprint`/`scope_fingerprint`/`event_set_fingerprint`, nên một
 collection attestation đã ký vẫn còn hiệu lực; chỉ hash bytes của `inputs.json`
-đổi, đúng với sự thật là manifest đã đổi. Không sửa newline/BOM sau
+đổi, đúng với sự thật là manifest đã đổi.
+
+Khi bytes của một mục **không phải** file nguồn như đã thu mà là bản trích từ
+bản ghi nằm chỗ khác, mục đó khai báo `derived_from` gồm `parent_sha256` là hash
+bản ghi cha do caller cung cấp và `extraction` là quy tắc trích đã review. Quy
+tắc hiện có: `wazuh-archive-full-log-utf8-v1`, tức giải mã bản ghi archive dạng
+JSON, lấy chuỗi `full_log`, encode UTF-8 và không thêm newline. Bundle không
+chứa bản ghi cha nên công cụ **không** kiểm chứng `parent_sha256`; đây là lời
+khai của caller để người review truy ngược, không phải bằng chứng đã đối chiếu.
+`parent_sha256` không được trùng `sha256` của chính mục đó. Khai báo derivation
+không làm đổi hash, evidence ID, canonical field hay fingerprint nào, và không
+được dùng để nới lỏng bất kỳ assertion nào. Không sửa newline/BOM sau
 khi tính hash. PowerShell: `(Get-FileHash -Algorithm SHA256 -LiteralPath <file>).Hash.ToLowerInvariant()`.
 
 Mọi parser context cần `ingested_at` có timezone, do caller cung cấp. CLI không
@@ -109,12 +120,14 @@ Text in scenario/run, từng assertion, reason, evidence IDs/unevaluable IDs,
 final status, counts, warnings và assurance. JSON có `cli_report_version`,
 `kind`, `scenario`, `evaluation` nguyên kết quả engine, `counts`, `intake`
 (inventory/ledger), `input_fingerprints` của bytes cấu hình đã chọn và, từ
-Issue #10, `timeline` (version `0.2.0`): các event được `evidence_index` tham
+Issue #10, `timeline` (version `0.3.0`): các event được `evidence_index` tham
 chiếu, sắp theo `timestamp` rồi `event_id`, sao chép nguyên trường canonical
 (`null` giữ `null`) để [dashboard](DASHBOARD.md) hiển thị. Từ `0.2.0` mỗi event
-mang thêm `source_ref` và `source_label` lấy từ manifest, tra qua ledger; event
-không tra được giữ `null` cho cả hai. `evaluation`, fingerprints và `compare`
-không đổi.
+mang thêm `source_ref` và `source_label` lấy từ manifest, tra qua ledger; từ
+`0.3.0` có thêm `source_derived` cho biết manifest có khai báo bytes là bản
+trích hay không. Event không tra được giữ `null` cho cả ba, và `null` ở
+`source_derived` nghĩa là report không nói gì, **không** phải khẳng định bản ghi
+là file gốc. `evaluation`, fingerprints và `compare` không đổi.
 Parsed count không phải proof count; kết luận phải tham chiếu evidence IDs.
 
 | Exit | Ý nghĩa |

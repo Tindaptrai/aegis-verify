@@ -59,6 +59,12 @@ export interface TimelineEvent {
   source_ref: string | null;
   /** Name the operator configured for that entry. Never an observed hostname. */
   source_label: string | null;
+  /**
+   * Whether the manifest declares these bytes were extracted from a record held
+   * elsewhere. `null` means the report says nothing, which is not a claim that
+   * the record is a native capture.
+   */
+  source_derived: boolean | null;
   timestamp: string | null;
   ingested_at: string | null;
   source_type: string | null;
@@ -194,6 +200,14 @@ const nullableString = (record: Record<string, unknown>, key: string, where: str
   return value;
 };
 
+const nullableBoolean = (record: Record<string, unknown>, key: string, where: string): boolean | null => {
+  const value = key in record ? record[key] : null;
+  if (value !== null && typeof value !== 'boolean') {
+    throw new Error(`${where}.${key}: expected a boolean or null`);
+  }
+  return value;
+};
+
 const OUTCOMES: readonly Outcome[] = ['satisfied', 'missing_telemetry', 'false_negative', 'inconclusive'];
 const ASSURANCES: readonly Assurance[] = ['unknown', 'caller-attested'];
 
@@ -264,6 +278,7 @@ function timeline(value: unknown): Timeline | null {
       event_id: requireString(event, 'event_id', where),
       source_ref: nullableString(event, 'source_ref', where),
       source_label: nullableString(event, 'source_label', where),
+      source_derived: nullableBoolean(event, 'source_derived', where),
       timestamp: nullableString(event, 'timestamp', where),
       ingested_at: nullableString(event, 'ingested_at', where),
       source_type: nullableString(event, 'source_type', where),

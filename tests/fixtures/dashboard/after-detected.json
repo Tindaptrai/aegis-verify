@@ -201,6 +201,7 @@
     "inventory": [
       {
         "context_fingerprint": "5f1ae0266dede76aab417eb8fe92c35c2c9af4e5253508bd09325c8c83ccc0f7",
+        "derived_from": null,
         "display_label": "Synthetic endpoint",
         "parser": "wazuh-win4688-v2",
         "path": "activity.json",
@@ -209,6 +210,7 @@
       },
       {
         "context_fingerprint": "5f1ae0266dede76aab417eb8fe92c35c2c9af4e5253508bd09325c8c83ccc0f7",
+        "derived_from": null,
         "display_label": null,
         "parser": "wazuh-win4688-v2",
         "path": "alert.json",
@@ -263,6 +265,7 @@
         "raw_event_ref": "synthetic-activity#record=1",
         "rule_id": "900001",
         "signature_id": null,
+        "source_derived": false,
         "source_label": "Synthetic endpoint",
         "source_ref": "synthetic-activity",
         "source_type": "wazuh",
@@ -278,6 +281,7 @@
         "raw_event_ref": "synthetic-alert#record=1",
         "rule_id": "900002",
         "signature_id": null,
+        "source_derived": false,
         "source_label": null,
         "source_ref": "synthetic-alert",
         "source_type": "wazuh",
@@ -285,6 +289,6 @@
       }
     ],
     "order": "timestamp_then_event_id",
-    "version": "0.2.0"
+    "version": "0.3.0"
   }
 }

@@ -188,7 +188,10 @@ def _result(event_ids):
 def test_timeline_leaves_an_unresolved_event_null_rather_than_guessing():
     events = [_event("a", "2026-01-01T00:00:01Z"), _event("b", "2026-01-01T00:00:02Z")]
     timeline = evidence_timeline(
-        events, _result(("a", "b")), sources={"a": ("known-source", "Lab edge")}
+        events,
+        _result(("a", "b")),
+        sources={"a": {"source_ref": "known-source", "source_label": "Lab edge",
+                       "source_derived": False}},
     )
     by_id = {event["event_id"]: event for event in timeline["events"]}
     assert by_id["a"]["source_ref"] == "known-source"

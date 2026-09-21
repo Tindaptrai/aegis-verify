@@ -42,6 +42,38 @@ describe('parseEvaluationReport', () => {
     // the first label or the observed hostname.
     expect(alert?.source_ref).toBe('synthetic-alert');
     expect(alert?.source_label).toBeNull();
+    // These fixture files are written as they are parsed, so neither is an extract.
+    expect(activity?.source_derived).toBe(false);
+    expect(alert?.source_derived).toBe(false);
+  });
+
+  it('reads a declared extract, and reads silence as unknown rather than native', () => {
+    const timeline = afterFixture.timeline as { events: Record<string, unknown>[] };
+    const withDerived = {
+      ...afterFixture,
+      timeline: {
+        ...timeline,
+        events: timeline.events.map((event, index) => {
+          if (index === 0) return { ...event, source_derived: true };
+          const { source_derived: _omitted, ...silent } = event;
+          return silent;
+        }),
+      },
+    };
+    const parsed = parseEvaluationReport(withDerived);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.timeline?.events[0]?.source_derived).toBe(true);
+    expect(parsed.value.timeline?.events[1]?.source_derived).toBeNull();
+  });
+
+  it('refuses a non-boolean extract flag instead of coercing it', () => {
+    const timeline = afterFixture.timeline as { events: Record<string, unknown>[] };
+    const broken = {
+      ...afterFixture,
+      timeline: { ...timeline, events: [{ ...timeline.events[0], source_derived: 'yes' }] },
+    };
+    expect(parseEvaluationReport(broken).ok).toBe(false);
   });
 
   it('reads a report written before the label existed as null, not as an error', () => {

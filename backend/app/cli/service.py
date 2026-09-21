@@ -67,7 +67,10 @@ def _engine_error(error: ValidationEngineError) -> IntakeError:
     return IntakeError(error.code, stage=stage, field=field)
 
 
-TIMELINE_VERSION = "0.2.0"
+TIMELINE_VERSION = "0.3.0"
+# What the report says about a record whose manifest entry could not be found.
+# Unknown, never "native".
+_UNMAPPED_SOURCE = {"source_ref": None, "source_label": None, "source_derived": None}
 _TIMELINE_FIELDS = (
     "source_type", "event_provider", "hostname", "event_action", "rule_id", "signature_id",
     "process_name", "raw_event_ref",
@@ -82,10 +85,11 @@ def evidence_timeline(events, evaluation, *, sources=None) -> dict:
     is the canonical field as parsed, so an absent field stays ``null``. The
     dashboard renders this order and must not reorder or derive missing times.
 
-    ``sources`` maps an event ID to the bundle entry that produced it, as
-    ``(source_ref, display_label)``. Both are caller-configured identity, kept
-    apart from the observed ``hostname``; an event the caller did not map keeps
-    ``null`` for both rather than being guessed from its type or bytes.
+    ``sources`` maps an event ID to what the manifest says about the entry that
+    produced it: ``source_ref``, ``source_label`` and ``source_derived``. All
+    three are caller-declared and kept apart from the observed ``hostname``. An
+    event the caller did not map keeps ``null`` for all three, so an unmapped
+    record is never reported as a native capture by omission.
     """
     referenced = {entry.event_id for entry in evaluation.evidence_index}
     by_event = dict(sources or {})
@@ -97,9 +101,10 @@ def evidence_timeline(events, evaluation, *, sources=None) -> dict:
                   "ingested_at": event.ingested_at.isoformat()}
         for field in _TIMELINE_FIELDS:
             values[field] = getattr(event, field)
-        source_ref, source_label = by_event.get(event.event_id, (None, None))
-        values["source_ref"] = source_ref
-        values["source_label"] = source_label
+        source = by_event.get(event.event_id, _UNMAPPED_SOURCE)
+        values["source_ref"] = source["source_ref"]
+        values["source_label"] = source["source_label"]
+        values["source_derived"] = source["source_derived"]
         entries.append((event.timestamp.epoch_nanoseconds, event.event_id, values))
     entries.sort(key=lambda item: (item[0], item[1]))
     return {
@@ -113,11 +118,21 @@ def _sources(intake) -> dict:
     """Map each parsed event to the bundle entry a reader can look it up in.
 
     The ledger already records which entry produced which event, so nothing new
-    is inferred here. An entry without a configured label contributes ``None``.
+    is inferred here. An entry without a configured label contributes ``None`` for
+    the label, and an entry that declares no derivation is reported as not derived,
+    which is a statement the manifest actually makes. A record whose entry cannot
+    be found is left unknown instead.
     """
-    labels = {item["source_ref"]: item["display_label"] for item in intake.inventory}
+    entries = {
+        item["source_ref"]: {
+            "source_ref": item["source_ref"],
+            "source_label": item["display_label"],
+            "source_derived": item["derived_from"] is not None,
+        }
+        for item in intake.inventory
+    }
     return {
-        item.event_id: (item.source_ref, labels.get(item.source_ref))
+        item.event_id: entries.get(item.source_ref, _UNMAPPED_SOURCE)
         for item in intake.ledger
         if item.event_id is not None
     }
