@@ -29,6 +29,10 @@ aegis compare  --format json  ─┼─► thư mục report (*.json)
   trường canonical sao chép nguyên (`null` giữ `null`). `EvaluationResult`,
   fingerprints và `compare` không đổi. Report cũ không có mục này vẫn được
   dashboard hiển thị, kèm thông báo không có thời điểm.
+- Từ version `0.3.0`, mỗi event mang thêm `source_derived`: `true` khi manifest
+  khai báo bytes là bản trích, `false` khi là file nguồn như đã thu, `null` khi
+  report không nói gì. Dashboard gắn nhãn `bản trích` cho `true` và ghi
+  `nguồn bytes: không có dữ liệu` cho `null`; im lặng không được hiểu là file gốc.
 - Từ version `0.2.0`, mỗi event mang thêm `source_ref` và `source_label`:
   mục manifest sinh ra bản ghi, và nhãn do người vận hành cấu hình cho mục đó.
   Backend tra cứu qua ledger sẵn có, không suy đoán; event không tra được thì cả

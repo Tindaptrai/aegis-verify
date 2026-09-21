@@ -117,6 +117,11 @@ def load_bundle(root: Path, manifest: BundleManifest) -> IntakeResult:
                 "sha256": entry.sha256,
                 "context_fingerprint": _context_fingerprint(entry),
                 "display_label": entry.display_label,
+                "derived_from": (
+                    None
+                    if entry.derived_from is None
+                    else entry.derived_from.model_dump(mode="json")
+                ),
             }
         )
     return IntakeResult(tuple(events), tuple(ledger), tuple(inventory))

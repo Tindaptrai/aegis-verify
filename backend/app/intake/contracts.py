@@ -66,6 +66,7 @@ EnvironmentId = Annotated[StrictStr, AfterValidator(_environment)]
 Digest = Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]
 BundlePath = Annotated[StrictStr, Field(min_length=1, max_length=4096)]
 DisplayLabel = Annotated[StrictStr, AfterValidator(_display_label)]
+ExtractionRule = Literal["wazuh-archive-full-log-utf8-v1"]
 
 
 class _Context(BaseModel):
@@ -138,6 +139,23 @@ _CONTEXT_TYPES = {
 }
 
 
+class Derivation(BaseModel):
+    """How bytes in this entry were extracted from a record held elsewhere.
+
+    Caller-declared provenance. The parent archive is not part of the bundle,
+    so nothing here is verified against it; the hash records which record the
+    caller says these bytes came from, and the rule records how. Declaring a
+    derivation never relaxes an assertion and never changes an identity.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, strict=True, hide_input_in_errors=True
+    )
+
+    parent_sha256: Digest
+    extraction: ExtractionRule
+
+
 class BundleFile(BaseModel):
     model_config = ConfigDict(
         extra="forbid", frozen=True, strict=True, hide_input_in_errors=True
@@ -152,6 +170,10 @@ class BundleFile(BaseModel):
     # never read out of the evidence, never an observed hostname, and never part
     # of an evidence identity or of any fingerprint an attestation binds to.
     display_label: DisplayLabel | None = None
+    # Absent means the bytes are the source file as captured. Present means
+    # they were extracted, and the report must say so rather than let a
+    # derivative read as a native capture.
+    derived_from: Derivation | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -172,6 +194,14 @@ class BundleFile(BaseModel):
     def context_matches_parser(self):
         if type(self.context) is not _CONTEXT_TYPES[self.parser]:
             raise ValueError("parser context mismatch")
+        return self
+
+    @model_validator(mode="after")
+    def parent_differs_from_these_bytes(self):
+        # A derivative cannot be its own parent: equal hashes would mean the
+        # bytes were never extracted from anything.
+        if self.derived_from is not None and self.derived_from.parent_sha256 == self.sha256:
+            raise PydanticCustomError("self_parent", "parent equals these bytes")
         return self
 
 
@@ -205,6 +235,9 @@ def _field_from_location(location: tuple[object, ...]) -> str | None:
         "sha256",
         "context",
         "display_label",
+        "derived_from",
+        "parent_sha256",
+        "extraction",
     }
     for item in reversed(location):
         if type(item) is str and item in allowed:
@@ -239,7 +272,9 @@ def parse_manifest(data: dict) -> BundleManifest:
             else "invalid_manifest"
         )
         field = (
-            "parser"
+            "parent_sha256"
+            if code == "self_parent"
+            else "parser"
             if code == "unknown_parser"
             else "context"
             if code == "invalid_parser_context"

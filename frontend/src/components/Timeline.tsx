@@ -126,6 +126,10 @@ function Field({ label, value, mono = false }: { label: string; value: string | 
  * The source column never pretends to be observed telemetry. A configured
  * label is shown as such; without one the manifest entry ref is shown and
  * marked as a ref; with neither the usual no-data text appears.
+ *
+ * Bytes the manifest declares as extracted are marked too, so an extract is
+ * never read as a capture straight from the source. Saying nothing about it is
+ * not the same as saying it is native, so only an explicit `false` is quiet.
  */
 function SourceField({ event }: { event: TimelineEvent }) {
   const configured = event.source_label !== null;
@@ -138,6 +142,10 @@ function SourceField({ event }: { event: TimelineEvent }) {
         {value === null ? null : (
           <span className="muted small"> {configured ? '(cấu hình)' : '(source ref)'}</span>
         )}
+        {event.source_derived === true ? <span className="badge warn sm">bản trích</span> : null}
+        {event.source_derived === null ? (
+          <span className="muted small"> nguồn bytes: không có dữ liệu</span>
+        ) : null}
       </dd>
     </div>
   );
