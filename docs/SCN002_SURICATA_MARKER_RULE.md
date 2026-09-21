@@ -41,17 +41,46 @@ Chạy trên pfSense, chỉ đọc. Xem SID của signature lab đang có để 
 cách và chọn số liền kề:
 
 ```sh
-grep -rn 'LAB WAN ICMP TEST' /usr/local/etc/suricata/ /var/db/suricata/ 2>/dev/null | head
+grep -rn 'LAB WAN ICMP TEST' /usr/local/etc/suricata/ /var/db/suricata/ | head
 ```
 
 Kiểm SID định dùng còn trống:
 
 ```sh
-grep -rn 'sid:<SID>;' /usr/local/etc/suricata/ /var/db/suricata/ 2>/dev/null | head
+grep -rn 'sid:' /usr/local/etc/suricata/suricata_*/rules/custom.rules
 ```
 
-Không dòng nào trả về nghĩa là còn trống. Nếu đường dẫn khác, tìm trong thư mục
-custom rules của đúng interface trong giao diện Suricata.
+Lệnh thứ hai liệt kê mọi SID tự tạo; chọn một số chưa xuất hiện. Shell mặc định
+của pfSense là tcsh, nên không dùng `2>/dev/null` như bash.
+
+## 3b. Chọn instance nào
+
+Suricata trên pfSense chạy theo từng interface, mỗi instance chỉ thấy lưu lượng
+của interface mình. Rule phải nằm trên instance **quan sát được gói trước khi
+firewall quyết định chặn**.
+
+Với SCN-002, probe đi từ máy Windows trong LAN ra máy nhận phía WAN. Ở lượt
+Block, firewall chặn ngay khi gói vào LAN nên gói không ra tới WAN. Đặt rule
+trên instance WAN thì lượt Block sẽ không có alert, và kết quả sẽ giống hệt một
+rule hỏng dù rule vẫn đúng. Vì vậy đặt trên instance **LAN**: cả lượt đối chứng
+lẫn lượt Block đều đi qua đó.
+
+Kiểm tra agent Wazuh có đọc eve.json của instance đó không, vì rule nổ mà Wazuh
+không đọc thì A04 vẫn không có bằng chứng:
+
+```sh
+grep -rn 'eve.json' /var/ossec/etc/ossec.conf
+```
+
+Shell mặc định của pfSense là tcsh, nên không dùng được `2>/dev/null` như bash.
+
+## 3c. Vì sao dùng `any any` thay vì ghim địa chỉ
+
+`content` với marker đã đủ đặc trưng, nên không cần ghim IP và cổng. Ghim vào
+làm rule giòn: đổi máy nhận hoặc đổi cổng là alert im lặng biến mất, và nhìn từ
+report nó giống hệt một detection gap dù không phải. Đó đúng là cái bẫy mà
+SCN-001 đã phơi bày với rule theo tên file. Render `$dst_ip` và `$dst_port`
+thành `any` là hợp lệ; `$src_net` để `any` hoặc `$HOME_NET` đều được.
 
 ## 4. Áp dụng
 
@@ -84,6 +113,29 @@ Alert sau khi Wazuh xử lý giữ `src_ip`, `src_port`, `dest_ip`, `dest_port`,
 2. Khởi động lại Suricata trên interface đó.
 3. Chạy một probe nữa và xác nhận không còn alert cho SID đã gỡ.
 
+## 6b. Đã nạp thử được, ngày 2026-09-21
+
+Rule render với `any any` và SID 1000010 đã được nạp thử bằng `suricata -T`,
+dùng config của instance LAN, ghi log ra thư mục tạm, **không** sửa cấu hình và
+**không** khởi động lại dịch vụ nào:
+
+| Mục | Kết quả |
+| --- | --- |
+| Suricata | 7.0.8 RELEASE trên pfSense 2.7.2 |
+| Rule files processed | 1 |
+| Rules successfully loaded | **1**, failed **0** |
+| Signatures processed | 1, trong đó **1 inspecting packet payload** |
+| Kết luận của Suricata | "Configuration provided was successfully loaded." |
+
+Dòng "inspecting packet payload" xác nhận phần khớp `content` có hiệu lực, không
+bị rút thành rule chỉ theo IP. `classtype:policy-violation` được bản này chấp
+nhận. SID 1000010 còn trống; SID lab đang dùng là 1000003 cho một rule ICMP trên
+WAN.
+
+**Nạp được không phải nổ được.** Kết quả trên chỉ nói Suricata hiểu và chấp nhận
+rule. Nó không nói signature sẽ khớp gói thật. Chỉ một alert thu được từ lượt
+probe mới chứng minh điều đó, và đó là bước kế tiếp.
+
 ## 7. Rule này chứng minh gì và không chứng minh gì
 
 **Chứng minh được**: Suricata nhìn thấy datagram tại vị trí quan sát, sinh alert,
@@ -105,5 +157,6 @@ dự án duyệt; tài liệu này không đụng tới.
 placeholder, có marker đã review, `depth` có giới hạn, `classtype` là
 `policy-violation`, đúng một rule, kết thúc bằng một newline LF, và **không** có
 literal IPv4, cổng hay SID nào lọt vào Git. Test đọc văn bản, không chạy Suricata,
-nên test xanh chỉ nói nội dung đúng hình dạng đã review, không nói Suricata nạp
-được rule hay signature sẽ nổ.
+nên test xanh chỉ nói nội dung đúng hình dạng đã review. Việc Suricata thật sự nạp
+được rule là một phép thử riêng, kết quả ghi ở mục 6b; và nạp được vẫn chưa phải
+nổ được.
