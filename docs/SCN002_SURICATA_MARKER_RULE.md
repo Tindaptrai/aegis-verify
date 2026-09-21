@@ -85,13 +85,35 @@ thành `any` là hợp lệ; `$src_net` để `any` hoặc `$HOME_NET` đều đ
 ## 4. Áp dụng
 
 Các bước sau **đụng cấu hình lab**. Người vận hành thực hiện sau khi chủ dự án
-duyệt; sửa file và khởi động lại dịch vụ là hai lần duyệt riêng.
+duyệt; lưu rule và khởi động lại dịch vụ là hai lần duyệt riêng.
 
-1. Sao lưu file custom rules của interface LAN kèm SHA-256 trước khi sửa.
-2. Thêm đúng một dòng rule đã render. Không đổi chế độ blocking của bất kỳ
-   interface nào; LAN hiện không bật blocking và giữ nguyên.
-3. Khởi động lại Suricata trên đúng interface đó. Ghi lại thời điểm.
-4. Chạy lại probe đối chứng với run UUID mới, đúng hợp đồng một datagram.
+**Không sửa thẳng file `custom.rules`.** Package Suricata của pfSense sinh lại
+file đó từ `config.xml` mỗi lần lưu hoặc khởi động lại interface, nên rule gõ
+tay vào file sẽ biến mất mà không báo gì. Đường đúng là qua giao diện web.
+
+1. Ghi lại trạng thái xuất phát của file custom rules trên interface đã chọn:
+
+   ```sh
+   ls -l /usr/local/etc/suricata/<instance>/rules/custom.rules
+   ```
+
+   ```sh
+   sha256 /usr/local/etc/suricata/<instance>/rules/custom.rules
+   ```
+
+   File rỗng có SHA-256 là
+   `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. Nếu file
+   đang rỗng thì hoàn tác nghĩa là đưa nó về rỗng, không phải khôi phục bản sao.
+   Nếu đang có nội dung, chép ra ngoài kèm hash trước khi sửa.
+2. Giao diện web: Services, Suricata, sửa interface đã chọn, mở tab Rules, chọn
+   category `custom.rules`, dán đúng một dòng rule đã render, rồi Save. Không
+   đổi chế độ blocking của bất kỳ interface nào.
+3. Xác nhận lại blocking của interface đó vẫn tắt trước khi khởi động lại, để
+   một lần restart không làm rơi lưu lượng.
+4. Khởi động lại Suricata **chỉ trên interface đó** từ danh sách Interfaces. Ghi
+   lại thời điểm.
+5. Đối chiếu file đã được sinh lại đúng nội dung mong đợi bằng `sha256` như bước 1.
+6. Chạy lại probe đối chứng với run UUID mới, đúng hợp đồng một datagram.
 
 ## 5. Kiểm chứng
 
@@ -109,9 +131,12 @@ Alert sau khi Wazuh xử lý giữ `src_ip`, `src_port`, `dest_ip`, `dest_port`,
 
 ## 6. Gỡ bỏ
 
-1. Khôi phục file rules từ bản sao lưu, đối chiếu lại SHA-256.
-2. Khởi động lại Suricata trên interface đó.
-3. Chạy một probe nữa và xác nhận không còn alert cho SID đã gỡ.
+1. Giao diện web: xoá dòng rule khỏi ô custom rules của đúng interface, Save.
+   Nếu trước đó file có nội dung, dán lại nguyên văn bản đã chép ra.
+2. Khởi động lại Suricata chỉ trên interface đó.
+3. Đối chiếu `sha256` của file custom rules bằng giá trị đã ghi ở bước 1 của mục
+   4. Về đúng trạng thái xuất phát mới coi là đã hoàn tác.
+4. Chạy một probe nữa và xác nhận không còn alert cho SID đã gỡ.
 
 ## 6b. Đã nạp thử được, ngày 2026-09-21
 
