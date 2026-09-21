@@ -1,0 +1,1 @@
+alert udp $src_net any -> $dst_ip $dst_port (msg:"AEGIS SCN-002 marker UDP"; content:"AEGIS-SCN002-TEST"; depth:64; classtype:policy-violation; metadata:aegis scn-002; sid:$sid; rev:1;)
