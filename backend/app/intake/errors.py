@@ -49,6 +49,7 @@ _FIELDS = frozenset(
         "parser",
         "sha256",
         "context",
+        "display_label",
         "ingested_at",
         "collection_mode",
         "deployment_mode",

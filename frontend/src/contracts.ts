@@ -55,6 +55,10 @@ export interface OutcomeCounts {
 
 export interface TimelineEvent {
   event_id: string;
+  /** Manifest entry the record came from; caller identity, not observed. */
+  source_ref: string | null;
+  /** Name the operator configured for that entry. Never an observed hostname. */
+  source_label: string | null;
   timestamp: string | null;
   ingested_at: string | null;
   source_type: string | null;
@@ -258,6 +262,8 @@ function timeline(value: unknown): Timeline | null {
     const event = requireRecord(item, where);
     return {
       event_id: requireString(event, 'event_id', where),
+      source_ref: nullableString(event, 'source_ref', where),
+      source_label: nullableString(event, 'source_label', where),
       timestamp: nullableString(event, 'timestamp', where),
       ingested_at: nullableString(event, 'ingested_at', where),
       source_type: nullableString(event, 'source_type', where),

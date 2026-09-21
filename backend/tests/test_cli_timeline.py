@@ -13,7 +13,7 @@ BUNDLE = ROOT / "tests" / "fixtures" / "cli" / "synthetic-detected"
 def test_report_timeline_orders_referenced_evidence_and_keeps_nulls():
     report = evaluate_bundle(BUNDLE / "scenario.yaml", BUNDLE)
     timeline = report["timeline"]
-    assert timeline["version"] == "0.1.0"
+    assert timeline["version"] == "0.2.0"
     assert timeline["order"] == "timestamp_then_event_id"
     events = timeline["events"]
     assert [event["raw_event_ref"] for event in events] == ["synthetic-activity#record=1", "synthetic-alert#record=1"]
@@ -25,7 +25,11 @@ def test_report_timeline_orders_referenced_evidence_and_keeps_nulls():
     assert events[0]["signature_id"] is None  # absent in source, never filled
     assert set(events[0]) == {"event_id", "timestamp", "ingested_at", "source_type", "event_provider",
                               "hostname", "event_action", "rule_id", "signature_id", "process_name",
-                              "raw_event_ref"}
+                              "raw_event_ref", "source_ref", "source_label"}
+    # This bundle configures no label, so the configured fields stay null while
+    # the source ref still says which manifest entry the record came from.
+    assert events[0]["source_ref"] == "synthetic-activity"
+    assert events[0]["source_label"] is None
 
 
 def _event(event_id, timestamp):

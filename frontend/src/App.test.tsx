@@ -203,6 +203,27 @@ describe('Run view', () => {
     expect(within(content).getByText('false_negative')).toBeInTheDocument();
   });
 
+  it('shows the configured source label apart from the observed host, and falls back to the ref', async () => {
+    renderApp(allReports);
+    const content = main();
+    await within(content).findByRole('heading', { level: 1, name: 'synthetic-run-after-fix' });
+    fireEvent.click(within(content).getByRole('tab', { name: /Timeline/ }));
+    const items = within(content).getAllByRole('listitem');
+
+    const labelled = items.find((item) => item.textContent?.includes('Synthetic endpoint'))!;
+    expect(labelled).toBeDefined();
+    expect(labelled).toHaveTextContent('Nguồn');
+    expect(labelled).toHaveTextContent('Synthetic endpoint (cấu hình)');
+    // The observed hostname keeps its own field and is marked as observed.
+    expect(labelled).toHaveTextContent('Host (quan sát)');
+    expect(labelled).toHaveTextContent('synthetic-host');
+
+    const unlabelled = items.find((item) => item.textContent?.includes('synthetic-alert#record=1'))!;
+    expect(unlabelled).toBeDefined();
+    expect(unlabelled).toHaveTextContent('synthetic-alert (source ref)');
+    expect(unlabelled).not.toHaveTextContent('Synthetic endpoint');
+  });
+
   it('explains a report without a timeline instead of ordering by guesswork', async () => {
     const { timeline: _omitted, ...legacy } = afterFixture;
     renderApp({ ...allReports, '/api/reports/after-detected.json': { status: 200, body: legacy } });

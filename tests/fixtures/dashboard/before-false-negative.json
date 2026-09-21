@@ -196,7 +196,7 @@
   },
   "input_fingerprints": {
     "context": "2ea1e6a7688eedb142f70cc84538b2af9453e45c74493a1d7e136ebde33e95f0",
-    "inputs": "44ae4011efd106e7acbcad2ae3ffcbfe0f80ba98111361a0224b7c2afe2b5162",
+    "inputs": "b6f3ea8ef9f6bde65d7db3f2a1f7c1633848ddd045c70fd460a75860b06d6275",
     "profile": "9d2131f4058b9c1f196c7ed1a60c5bba144826409de9b33ca32327f92b5b560c",
     "scenario": "cc3c09ce041412ff9fbaa5795d76b8c5b6a25ee38be17233386eba4f82fb547d"
   },
@@ -204,6 +204,7 @@
     "inventory": [
       {
         "context_fingerprint": "5f1ae0266dede76aab417eb8fe92c35c2c9af4e5253508bd09325c8c83ccc0f7",
+        "display_label": "Synthetic endpoint",
         "parser": "wazuh-win4688-v2",
         "path": "activity.json",
         "sha256": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
@@ -244,11 +245,13 @@
         "raw_event_ref": "synthetic-activity#record=1",
         "rule_id": "900001",
         "signature_id": null,
+        "source_label": "Synthetic endpoint",
+        "source_ref": "synthetic-activity",
         "source_type": "wazuh",
         "timestamp": "2026-01-01T00:00:01Z"
       }
     ],
     "order": "timestamp_then_event_id",
-    "version": "0.1.0"
+    "version": "0.2.0"
   }
 }

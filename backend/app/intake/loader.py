@@ -116,6 +116,7 @@ def load_bundle(root: Path, manifest: BundleManifest) -> IntakeResult:
                 "parser": entry.parser,
                 "sha256": entry.sha256,
                 "context_fingerprint": _context_fingerprint(entry),
+                "display_label": entry.display_label,
             }
         )
     return IntakeResult(tuple(events), tuple(ledger), tuple(inventory))
