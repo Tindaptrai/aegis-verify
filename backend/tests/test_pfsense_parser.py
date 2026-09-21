@@ -30,6 +30,34 @@ def parse(raw, kwargs):
     return pfsense.parse_pfsense_filterlog(raw, **kwargs)
 
 
+@pytest.mark.parametrize("program", [b"filterlog", b"filterlog[1]"])
+@pytest.mark.parametrize("ending", [b"", b"\n", b"\r\n"])
+def test_hostname_less_syslog_preserves_missing_host_and_exact_bytes(kwargs, program, ending):
+    raw = SYNTHETIC_PASS.replace(b"fixture-fw filterlog[1]", program) + ending
+    record = parse(raw, kwargs)[0]
+    assert record.status == "parsed"
+    assert record.event.hostname is None
+    assert record.provenance.sensor_id == "unit-fw"
+    assert record.event.raw_event_hash == sha256(raw).hexdigest()
+    assert record.event.timestamp.isoformat() == "2026-09-10T14:01:41Z"
+    assert record.event.event_action == "allowed"
+    assert record.event.protocol == "udp"
+    assert record.event.src_port == 5353
+    assert record.event.dst_port == 5353
+    assert record.event.rule_id == "1000000001"
+    assert record == parse(raw, kwargs)[0]
+
+
+def test_sensor_label_never_becomes_missing_hostname(kwargs):
+    raw = SYNTHETIC_PASS.replace(b"fixture-fw ", b"")
+    first = parse(raw, kwargs)[0]
+    second = parse(raw, kwargs | {"sensor_id": "configured-firewall"})[0]
+    assert first.event.hostname is second.event.hostname is None
+    assert second.provenance.sensor_id == "configured-firewall"
+    assert first.event.raw_event_hash == second.event.raw_event_hash
+    assert first.event.event_id != second.event.event_id
+
+
 def test_exact_bytes_identity_and_valid_canonical(kwargs):
     raw = SYNTHETIC_PASS + b"\r\n"
     record = parse(raw, kwargs)[0]
