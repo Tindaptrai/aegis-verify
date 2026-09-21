@@ -10,10 +10,16 @@ from .network_telemetry import (
     NetworkTelemetryProvenance, NetworkTelemetryResult,
     parse_wazuh_sysmon3_archive_record,
 )
+from .suricata_alert import (
+    SuricataAlertProvenance, SuricataAlertResult,
+    parse_wazuh_suricata_alert_record,
+)
 
 __all__ = ['WazuhDiagnostic', 'WazuhParseError', 'WazuhParseResult', 'WazuhProvenance',
            'load_wazuh_document', 'parse_wazuh_document',
            'WindowsTelemetryProvenance', 'WindowsTelemetryResult',
            'parse_wazuh_sysmon1_document', 'parse_wazuh_powershell4104_document',
            'NetworkTelemetryProvenance', 'NetworkTelemetryResult',
-           'parse_wazuh_sysmon3_archive_record']
+           'parse_wazuh_sysmon3_archive_record',
+           'SuricataAlertProvenance', 'SuricataAlertResult',
+           'parse_wazuh_suricata_alert_record']

@@ -16,7 +16,7 @@ from ..connectors.suricata import (
 from ..connectors.wazuh import (
     WazuhParseError, parse_wazuh_document,
     parse_wazuh_sysmon1_document, parse_wazuh_powershell4104_document,
-    parse_wazuh_sysmon3_archive_record,
+    parse_wazuh_sysmon3_archive_record, parse_wazuh_suricata_alert_record,
 )
 from ..models import CanonicalEventV2
 from .contracts import BundleFile
@@ -43,6 +43,7 @@ _SOURCE_TYPES = {
     "wazuh-sysmon1-v1": "wazuh",
     "wazuh-powershell4104-v1": "wazuh",
     "wazuh-sysmon3-archive-v1": "wazuh",
+    "wazuh-suricata-alert-v1": "wazuh",
     "suricata-wazuh-alert-v1": "suricata",
     "suricata-eve-jsonl-v1": "suricata",
     "pfsense-filterlog-bsd-ipv4-tcp-udp-v1": "pfsense",
@@ -87,6 +88,8 @@ def _parse(raw: bytes, entry: BundleFile, environment_id: str):
         return parse_wazuh_powershell4104_document(raw, **common, **context)
     if entry.parser == "wazuh-sysmon3-archive-v1":
         return parse_wazuh_sysmon3_archive_record(raw, **common, **context)
+    if entry.parser == "wazuh-suricata-alert-v1":
+        return parse_wazuh_suricata_alert_record(raw, **common, **context)
     if entry.parser == "suricata-wazuh-alert-v1":
         return parse_suricata_wazuh_document(raw, **common, **context)
     if entry.parser == "suricata-eve-jsonl-v1":
@@ -127,7 +130,7 @@ def parse_entry(
         return (event,), (ledger,)
     if entry.parser in {"suricata-wazuh-alert-v1", "cowrie-wazuh-v1",
                         "wazuh-sysmon1-v1", "wazuh-powershell4104-v1",
-                        "wazuh-sysmon3-archive-v1"}:
+                        "wazuh-sysmon3-archive-v1", "wazuh-suricata-alert-v1"}:
         return (parsed.event,), (_ledger(entry, source_type, parsed),)
 
     outcomes = tuple(parsed)
