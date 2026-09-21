@@ -40,10 +40,10 @@ neo theo spec thiết kế; sẽ siết lại sau khi đo lệch giờ thật tr
 (bước 0c của kế hoạch), không nới rộng thêm.
 
 A04 pin cả hai literal vì 86601 một mình khớp mọi alert Suricata mà Wazuh nhận.
-Nghĩa của A04 trong profile này là "Wazuh ghi nhận detection sinh từ alert
-Suricata của đúng SID và tuple"; câu chữ trong manifest vẫn chờ chủ dự án quyết
-(issue #61). Parser cho bản ghi này chưa có, nên A04 hiện chỉ đánh giá được với
-event canonical dựng thủ công.
+Nghĩa của A04 là "Wazuh ghi nhận detection sinh từ alert Suricata marker của
+cùng flow"; mô tả trong manifest đã được chủ dự án duyệt sửa ngày 2026-09-21
+theo đúng thứ chứng minh được: Wazuh rule 86601 nhận và phân loại alert
+Suricata, không tương quan nhiều nguồn. Parser cho bản ghi này là issue #61.
 
 ## 4. Vì sao không join theo `protocol`
 
