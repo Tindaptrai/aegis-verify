@@ -4,7 +4,7 @@
   "profile_version": "0.1.0",
   "scenario_id": "SCN-002",
   "scenario_version": "0.1.0",
-  "scenario_fingerprint": "d55fc298fee3b51475de5a46e86af4862581e3af2f55a7989495d8e033c4524b",
+  "scenario_fingerprint": "95f7ea34d04eba04f74a269a5d94a59891296d10a4f91f57a8cd91d1fbff4102",
   "rules": [
     {
       "assertion_id": "SCN-002-A01",
