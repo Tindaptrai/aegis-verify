@@ -70,8 +70,11 @@ phải lỗi profile. `False negative` chỉ xuất hiện khi có declaration
 
 ## 6. Giới hạn
 
-- Chưa có bằng chứng lab nào chạy qua profile này; test dùng event tổng hợp dựng
-  trong test, không phải fixture giả làm log thật.
+- Chưa có bằng chứng lab nào chạy qua profile này. Test engine dùng event tổng
+  hợp dựng trong test; bundle CLI tổng hợp bốn nguồn ở
+  `tests/fixtures/cli/scn002-synthetic-prevented/` chứng minh đường
+  `aegis validate` ra `Prevented`, và README của nó nói rõ đây không phải bằng
+  chứng lab.
 - Sysmon 3 ghi `dst_ip` theo góc nhìn máy gửi; pfSense LAN và Suricata LAN thấy
   tuple trước NAT. Nếu tuple khác nhau, profile dừng ở `Inconclusive`, không có
   NAT resolver.
