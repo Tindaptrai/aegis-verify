@@ -1,0 +1,35 @@
+{
+  "id": "1767225611.200",
+  "timestamp": "2026-01-01T00:00:11.050+0000",
+  "agent": {
+    "id": "901",
+    "name": "synthetic-sender"
+  },
+  "manager": {
+    "name": "synthetic-manager"
+  },
+  "data": {
+    "win": {
+      "system": {
+        "providerName": "Microsoft-Windows-Sysmon",
+        "channel": "Microsoft-Windows-Sysmon/Operational",
+        "eventID": "3",
+        "eventRecordID": "2001",
+        "computer": "synthetic-sender",
+        "systemTime": "2026-01-01T00:00:10.1234567Z"
+      },
+      "eventdata": {
+        "utcTime": "2026-01-01 00:00:10.000",
+        "protocol": "udp",
+        "sourceIp": "192.0.2.11",
+        "sourcePort": "51000",
+        "destinationIp": "198.51.100.10",
+        "destinationPort": "40000",
+        "processId": "4242",
+        "image": "C:\\Synthetic\\Send-Probe.exe",
+        "user": "SYNTHETIC\\operator",
+        "processGuid": "{00000000-0000-0000-0000-000000000002}"
+      }
+    }
+  }
+}
