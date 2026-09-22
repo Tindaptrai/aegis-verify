@@ -1,0 +1,53 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "lab-sanitized",
+  "files": [
+    {
+      "path": "sysmon3-archive.json",
+      "source_ref": "lab-sysmon3-2fb0b770",
+      "display_label": "Lab sender (Sysmon 3)",
+      "parser": "wazuh-sysmon3-archive-v1",
+      "sha256": "99d2f89f48e8be0675da758aad395f8ab19941f5470fcf9e02991ba3b5a70c67",
+      "context": {
+        "ingested_at": "2026-09-22T15:00:00Z",
+        "collection_mode": "direct"
+      }
+    },
+    {
+      "path": "eve-alert.json",
+      "source_ref": "lab-suricata-lan-2fb0b770",
+      "display_label": "Lab Suricata LAN",
+      "parser": "suricata-eve-jsonl-v1",
+      "sha256": "289c730d3a48568e18239e12086974e14f35194eaec2a8d64d31c926d92ac938",
+      "context": {
+        "ingested_at": "2026-09-22T15:00:00Z",
+        "sensor_id": "suricata-lan",
+        "deployment_mode": "ids"
+      }
+    },
+    {
+      "path": "filterlog.log",
+      "source_ref": "lab-pfsense-lan-2fb0b770",
+      "display_label": "Lab pfSense LAN filterlog",
+      "parser": "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
+      "sha256": "7ae763d0fbd5cd957ed6dd86654811c4719e2901c2c06e03d7962b59e4694689",
+      "context": {
+        "ingested_at": "2026-09-22T15:00:00Z",
+        "sensor_id": "pfsense-lan",
+        "source_year": 2026,
+        "source_utc_offset": "+07:00"
+      }
+    },
+    {
+      "path": "wazuh-alert.json",
+      "source_ref": "lab-wazuh-86601-2fb0b770",
+      "display_label": "Lab Wazuh manager (rule 86601)",
+      "parser": "wazuh-suricata-alert-v1",
+      "sha256": "4cf0a542c0000874b711d2b1eb1ca1db7015d28fa6a70c7b3f8da53ebb54952b",
+      "context": {
+        "ingested_at": "2026-09-22T15:00:00Z",
+        "collection_mode": "direct"
+      }
+    }
+  ]
+}
