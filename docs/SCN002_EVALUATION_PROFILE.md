@@ -35,9 +35,12 @@ các nguồn để chứng minh cùng một datagram.
 | A03 | prevention | pfsense | `event_provider = pfSense-filterlog`, `protocol = udp`, `event_action = blocked`, `rule_id = binding` | join 4 trường với A01 |
 | A04 | detection | wazuh | `rule_id = 86601` **và** `signature_id = 1000010` | join 4 trường với A01 |
 
-Join bốn trường: `src_ip`, `dst_ip`, `src_port`, `dst_port`. Cửa sổ ±5 s quanh
-neo theo spec thiết kế; sẽ siết lại sau khi đo lệch giờ thật trên lượt đối chứng
-(bước 0c của kế hoạch), không nới rộng thêm.
+Join bốn trường: `src_ip`, `dst_ip`, `src_port`, `dst_port`. Cửa sổ **±2 s**
+quanh neo, siết từ ±5 s của spec sau khi đo trên lượt đối chứng thật ngày
+2026-09-22: Suricata ghi sớm hơn Sysmon 0,345 s, Sysmon lệch giờ gửi 3 ms; lần
+đo ngày 2026-09-20 là 1,37 s. Chủ dự án duyệt siết ngày 2026-09-22. Không nới
+rộng lại để ép khớp; nếu một lượt lệch quá 2 s, đó là việc phải giải thích về
+đồng hồ nguồn, không phải sửa profile.
 
 A04 pin cả hai literal vì 86601 một mình khớp mọi alert Suricata mà Wazuh nhận.
 Nghĩa của A04 là "Wazuh ghi nhận detection sinh từ alert Suricata marker của
