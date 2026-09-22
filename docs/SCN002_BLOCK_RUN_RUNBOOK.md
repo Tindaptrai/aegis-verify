@@ -12,7 +12,9 @@ phải cả LAN. Suricata LAN giữ chế độ chỉ alert, không bật blocki
 
 | Điều kiện | Cách kiểm | Nếu không đạt |
 | --- | --- | --- |
-| Lượt đối chứng đã đóng gói và chạy `aegis validate` ra `Inconclusive` với A01, A02, A04 `satisfied` | report của bundle `run4-control` | dừng, hoàn tất Giai đoạn 1 trước |
+| Lượt đối chứng đã đóng gói và chạy `aegis validate` ra `Inconclusive` với A01, A02, A04 `satisfied` | report của bundle lượt đối chứng gần nhất | dừng, hoàn tất Giai đoạn 1 trước |
+| Agent Wazuh của máy Windows gửi probe đang **Active** trên manager | `sudo /var/ossec/bin/agent_control -lc`, chỉ đọc; và trên máy Windows `Get-Service WazuhSvc` là `Running` | bật lại dịch vụ agent, chờ Active, rồi mới tiếp. Ngày 2026-09-21 agent đã dừng mà không ai thấy, lượt đó mất A01 |
+| Máy nhận (Kali) có IP đúng trên interface nhận, đặt qua NetworkManager | `ip -4 addr show eth1`, chờ 10 s kiểm lại | IP gán tay bằng `ip addr add` bị NetworkManager xoá; dùng profile `nmcli` tĩnh |
 | Lệch giờ Sysmon và Suricata đã đo, cửa sổ tương quan đã chốt | ghi trong readiness | dừng, đo trước |
 | Rule marker SID 1000010 vẫn nạp trên LAN | `suricata -T` hoặc log khởi động, chỉ đọc | dừng, xem lại #59 |
 | Rule pass LAN cho UDP tới receiver đang bật log | GUI Firewall › Rules › LAN, chỉ nhìn | ghi nhận, filterlog `pass` sẽ không có ở lượt Block nên không chặn bước |
