@@ -198,11 +198,12 @@ và Wazuh ghi nhận alert đó cho cùng tuple. Đủ cho A02.
 `allowed` kể cả khi firewall chặn ở nơi khác, nên không đọc trường đó thành
 prevention. Lượt Block cần bằng chứng riêng từ filterlog và là một gate khác.
 
-**Chưa giải quyết**: câu chữ của SCN-002-A04. Scenario ghi "correlated detection",
-nhưng rule 86601 chỉ nhận và phân loại alert của Suricata, không tương quan nhiều
-nguồn. Kể cả khi SID này nổ, thứ chứng minh được là "Wazuh sinh detection từ alert
-của Suricata cho cùng tuple". Sửa mô tả A04 là thay đổi ground truth và cần chủ
-dự án duyệt; tài liệu này không đụng tới.
+**Đã giải quyết sau đó**: câu chữ của SCN-002-A04 được chủ dự án duyệt sửa ngày
+2026-09-21 (PR #65) thành "Wazuh records the detection derived from the Suricata
+marker alert for the same flow", đúng thứ rule 86601 chứng minh được. Lượt Block
+ngày 2026-09-22 cho thấy SID này **vẫn nổ khi gói bị pf chặn** trên LAN, vì
+Suricata bắt gói ở interface trước khi pf xử lý; kết quả đầy đủ và hash ở
+[SCN002_RESULT_2026-09-22.md](SCN002_RESULT_2026-09-22.md).
 
 ## 8. Test
 
