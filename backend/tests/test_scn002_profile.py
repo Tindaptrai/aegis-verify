@@ -144,8 +144,14 @@ def test_protocol_literals_are_case_exact_per_source(manifest, profile, context)
 
 
 def test_block_evidence_beyond_the_correlation_window_is_not_a_witness(manifest, profile, context):
-    late = filterlog(timestamp="2026-01-01T00:00:15.000000001Z")
+    # Window is +/-2 s (measured lab skew 0.35 s and 1.37 s); 1 ns past it is out.
+    late = filterlog(timestamp="2026-01-01T00:00:12.000000001Z")
     result = evaluate_scenario(manifest, [sysmon3(), suricata_alert(), late, wazuh_alert()],
                                profile=profile, context=context)
     assert outcomes(result)["SCN-002-A03"] == ("inconclusive", "prevention_not_demonstrated")
     assert result.final_status == "Inconclusive"
+    on_edge = filterlog(timestamp="2026-01-01T00:00:12.000000000Z")
+    result = evaluate_scenario(manifest, [sysmon3(), suricata_alert(), on_edge, wazuh_alert()],
+                               profile=profile, context=context)
+    assert outcomes(result)["SCN-002-A03"][0] == "satisfied"
+    assert result.final_status == "Prevented"

@@ -45,8 +45,8 @@
           {"target_field": "src_port", "anchor_field": "src_port"},
           {"target_field": "dst_port", "anchor_field": "dst_port"}
         ],
-        "min_delta_ns": -5000000000,
-        "max_delta_ns": 5000000000
+        "min_delta_ns": -2000000000,
+        "max_delta_ns": 2000000000
       }
     },
     {
@@ -73,8 +73,8 @@
           {"target_field": "src_port", "anchor_field": "src_port"},
           {"target_field": "dst_port", "anchor_field": "dst_port"}
         ],
-        "min_delta_ns": -5000000000,
-        "max_delta_ns": 5000000000
+        "min_delta_ns": -2000000000,
+        "max_delta_ns": 2000000000
       }
     },
     {
@@ -99,8 +99,8 @@
           {"target_field": "src_port", "anchor_field": "src_port"},
           {"target_field": "dst_port", "anchor_field": "dst_port"}
         ],
-        "min_delta_ns": -5000000000,
-        "max_delta_ns": 5000000000
+        "min_delta_ns": -2000000000,
+        "max_delta_ns": 2000000000
       }
     }
   ]
