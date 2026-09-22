@@ -66,7 +66,8 @@ ghi lại giới hạn đó.
 Lượt đối chứng ra `Inconclusive` là kết quả đúng của ground truth `prevented`;
 nó chứng minh telemetry và detection hoạt động khi lưu lượng được phép, không
 phải lỗi profile. `False negative` chỉ xuất hiện khi có declaration
-`complete_for_scope` hợp lệ cho assertion đó.
+`complete_for_scope` hợp lệ cho assertion đó. Thao tác lab của lượt Block theo
+[SCN002_BLOCK_RUN_RUNBOOK.md](SCN002_BLOCK_RUN_RUNBOOK.md).
 
 ## 6. Giới hạn
 
