@@ -31,12 +31,20 @@ provenance, không vào report. Chỉ khoá mờ được giữ.
 | Có `_source` | `unsupported_profile` | `_source` |
 | `rule.groups` thiếu hoặc không có `cowrie` | `invalid_field` / `unsupported_profile` | `rule.groups` |
 | Thiếu `rule.id` hoặc không phải số thập phân | `invalid_field` | `rule.id` |
-| `data` còn thành viên `password` | `unsupported_profile` | `data.password` |
 | `data.eventid` khác `cowrie.login.failed` (kể cả login success, command) | `unsupported_profile` | `data.eventid` |
 | Thiếu `data.session` | `invalid_field` | `data.session` |
 | Lỗi trong `data` (giờ, cổng, giao thức) | mã của connector Cowrie, đường dẫn `data.…` | |
 
 Diagnostic chỉ có từ vựng cố định; không chứa giá trị nguồn, kể cả username.
+
+**Về `data.password`.** Bản ghi `cowrie.login.failed` thật mang mật khẩu người ta
+gõ, và Wazuh giữ nguyên nó trong `data` (xác nhận trên lab 2026-09-26). Parser
+**không đọc** trường này, giống hai parser Cowrie trực tiếp: không vào canonical
+event, không vào provenance, không vào ledger hay report, không xuất hiện trong
+diagnostic. Bản đầu (plan Task 2) từ chối cả bản ghi; như vậy A04 không bao giờ
+đánh giá được trên dữ liệu thật nên đã đổi. File thô trong hồ sơ riêng vẫn giữ
+nguyên byte, hash tính trên đúng byte đó; fixture công khai không được chứa mật
+khẩu.
 
 ## 3. Vì sao chỉ nhận login failed
 

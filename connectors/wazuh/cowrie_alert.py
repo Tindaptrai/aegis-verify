@@ -82,9 +82,11 @@ def parse_wazuh_cowrie_alert_record(
 ) -> CowrieAlertResult:
     """Parse exact alert bytes. A raised Wazuh rule is not a compromise verdict.
 
-    Deliberately rejects search hits, rules outside the `cowrie` group, any
-    record carrying a password member, data that is not one login failure,
-    records without a source session, and non-decimal Wazuh rule IDs.
+    Deliberately rejects search hits, rules outside the `cowrie` group, data
+    that is not one login failure, records without a source session, and
+    non-decimal Wazuh rule IDs. A real login record carries the typed
+    password; like the direct Cowrie parsers this one never reads it: it is
+    not mapped, not stored in provenance and never echoed in a diagnostic.
     `sensor_id` must be the same label the direct Cowrie parsers were given, so
     both views derive the same session key.
     """
@@ -102,9 +104,7 @@ def parse_wazuh_cowrie_alert_record(
         raise WazuhParseError('unsupported_profile', 'rule.groups') from None
     rule_id = _rule_id(rule)
     data = _object(source, 'data', 'data')
-    if 'password' in data:
-        # A credential must never enter canonical events, provenance or reports.
-        raise WazuhParseError('unsupported_profile', 'data.password') from None
+    # `data.password`, when present, is deliberately never read below.
     kind = data.get('eventid')
     if type(kind) is not str:
         raise WazuhParseError('invalid_field', 'data.eventid') from None
