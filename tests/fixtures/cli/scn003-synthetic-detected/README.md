@@ -9,15 +9,16 @@ evidence that the lab detected anything.
 
 | File | Parser | Models |
 | --- | --- | --- |
-| `filterlog-pass.log` | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | A02 root: pfSense LAN `pass` for the TCP SYN, pre-NAT tuple, tracker `1700000003`, replayed with year 2026 and offset +07:00 |
+| `filterlog-pass.log` | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | A02 root: pfSense `pass` for the TCP SYN with the **post-NAT** destination (pf translates before it filters), tracker `1700000003`, replayed with year 2026 and offset +07:00 |
 | `eve-alert.jsonl` | `suricata-eve-jsonl-v1` | A01: Suricata alert SID 1000012 on the same pre-NAT tuple |
 | `cowrie-session.jsonl` | `cowrie-jsonl-v1` | A03 root: `cowrie.session.connect` with the post-NAT tuple; plus one `cowrie.login.failed` of the same session as supporting evidence (no ports, like a real record) |
 | `wazuh-cowrie-alert.json` | `wazuh-cowrie-alert-v1` | A04: Wazuh rule 120003 raised from that login failure |
 
-Pre-NAT tuple `192.0.2.10:51003 -> 203.0.113.30:2223/tcp`; post-NAT tuple
-`192.0.2.10:51003 -> 198.51.100.20:2223/telnet`. The initiator port is the
-only bridge between the two domains, as the profile README explains. Source
-times sit within 1 s of each other; the Wazuh receipt time is later on purpose.
+Suricata sees the pre-NAT tuple `192.0.2.10:51003 -> 203.0.113.30:2223/tcp`;
+the filterlog pass line and Cowrie see the post-NAT tuple
+`192.0.2.10:51003 -> 198.51.100.20:2223`. The initiator port is the only bridge
+between the two domains, as the profile README explains. Source times sit
+within 1 s of each other; the Wazuh receipt time is later on purpose.
 
 The scenario is the committed `scenarios/SCN-003-internal-deception.yaml` and
 the profile is `scenarios/profiles/scn-003/profile.json`; neither is copied
@@ -28,7 +29,7 @@ Exact-byte SHA-256 (UTF-8, LF, including final newline):
 
 | File | SHA-256 |
 | --- | --- |
-| `filterlog-pass.log` | `ec364ce85d6e45a8865d91197857a2624e9ca497acaa67c0457a8901e8cd6cc0` |
+| `filterlog-pass.log` | `49e221b542f6a9262241c67157d55c526a79421709e79ad48ec0ea36be193316` |
 | `eve-alert.jsonl` | `40629e3529c7ecf50bde27f3b55cb90e1acc1d1f3f67e3bd0f434181d704d4c6` |
 | `cowrie-session.jsonl` | `c21bdcd924837636cea1c4c40bd77b01f8a2d92ae216723b10ad4b2693905abd` |
 | `wazuh-cowrie-alert.json` | `59b04006434b268674ab538a1ed048fecd547abddf871c188a22a33ac393c142` |

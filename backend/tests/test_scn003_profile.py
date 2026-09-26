@@ -56,8 +56,10 @@ def _event(event_id, source_type, timestamp, **fields):
 
 
 def filterlog(action="allowed", src_port=INITIATOR_PORT, **overrides):
+    # pf translates before it filters: with a port-forward the pass line
+    # carries the post-NAT destination (the honeypot), unlike Suricata.
     fields = dict(event_provider="pfSense-filterlog", hostname="synthetic-fw", protocol="tcp",
-                  src_ip=INITIATOR, src_port=src_port, dst_ip=DECOY, dst_port=DECOY_PORT,
+                  src_ip=INITIATOR, src_port=src_port, dst_ip=COWRIE, dst_port=COWRIE_PORT,
                   event_action=action, rule_id=TRACKER)
     fields.update(overrides)
     return _event("filterlog", "pfsense", ANCHOR, **fields)
@@ -121,8 +123,8 @@ def test_profile_is_bound_to_the_committed_scenario_manifest(manifest, profile):
 
 def test_example_context_resolves_every_binding_and_empty_evidence_is_missing_telemetry(manifest, profile, context):
     assert {b.name for b in context.bindings} == {
-        "initiator_ip", "initiator_port", "decoy_ip", "decoy_port", "cowrie_ip", "cowrie_port",
-        "honeypot_protocol", "firewall_rule_tracker", "username_marker"}
+        "initiator_ip", "initiator_port", "decoy_ip", "decoy_port", "firewall_dst_ip", "firewall_dst_port",
+        "cowrie_ip", "cowrie_port", "honeypot_protocol", "firewall_rule_tracker", "username_marker"}
     assert evaluate_scenario(manifest, [], profile=profile, context=context).final_status == "Missing telemetry"
 
 
@@ -174,11 +176,14 @@ def test_a_rewritten_source_port_breaks_the_nat_bridge(manifest, profile, contex
 @pytest.mark.parametrize("bad", [
     lambda: eve(dst_port=22),
     lambda: eve(dst_ip=COWRIE),
+    lambda: eve(src_port=INITIATOR_PORT + 1),
+    lambda: filterlog(dst_ip=DECOY),
     lambda: wazuh(username="AEGIS-SCN003-ffffffff"),
     lambda: wazuh(key=OTHER_KEY),
     lambda: wazuh(protocol="ssh"),
     lambda: wazuh(timestamp="2026-01-01T00:00:15.100000001Z"),
-], ids=["decoy-port", "decoy-is-cowrie-ip", "other-username", "other-session", "other-protocol", "beyond-window"])
+], ids=["decoy-port", "suricata-sees-post-nat", "suricata-other-src-port", "filterlog-pre-nat-dst",
+        "other-username", "other-session", "other-protocol", "beyond-window"])
 def test_evidence_of_another_flow_or_session_is_not_a_witness(manifest, profile, context, bad):
     replacement = bad()
     events = [replacement if e.event_id == replacement.event_id else e for e in all_events()]
@@ -196,9 +201,9 @@ def test_direct_connection_without_dnat_uses_the_same_profile(manifest, profile,
     same = EvaluationContext.model_validate(context.model_dump(mode="json") | {"bindings": [
         {"name": "initiator_ip", "value": INITIATOR}, {"name": "initiator_port", "value": INITIATOR_PORT},
         {"name": "decoy_ip", "value": COWRIE}, {"name": "decoy_port", "value": COWRIE_PORT},
+        {"name": "firewall_dst_ip", "value": COWRIE}, {"name": "firewall_dst_port", "value": COWRIE_PORT},
         {"name": "cowrie_ip", "value": COWRIE}, {"name": "cowrie_port", "value": COWRIE_PORT},
         {"name": "honeypot_protocol", "value": PROTOCOL}, {"name": "firewall_rule_tracker", "value": TRACKER},
         {"name": "username_marker", "value": USERNAME}]})
-    events = [filterlog(dst_ip=COWRIE, dst_port=COWRIE_PORT), eve(dst_ip=COWRIE, dst_port=COWRIE_PORT),
-              connect(), login(), wazuh()]
+    events = [filterlog(), eve(dst_ip=COWRIE, dst_port=COWRIE_PORT), connect(), login(), wazuh()]
     assert evaluate_scenario(manifest, events, profile=profile, context=same).final_status == "Detected"

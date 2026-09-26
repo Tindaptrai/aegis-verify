@@ -10,8 +10,8 @@ marker giả.
 
 | Assertion | Vai trò | Root/witness | Scope | Join |
 | --- | --- | --- | --- | --- |
-| A02 | telemetry, **trước NAT** | pfSense filterlog `pass` TCP | `initiator_ip`, `initiator_port`, `decoy_ip`, `decoy_port`, `protocol = tcp`; `rule_id` = `firewall_rule_tracker` | |
-| A01 | detection | Suricata alert SID `1000012` | `initiator_ip`, `decoy_ip`, `decoy_port`, `protocol = TCP` | neo A02: 4 trường tuple |
+| A02 | telemetry, root phía firewall | pfSense filterlog `pass` TCP | `initiator_ip`, `initiator_port`, `firewall_dst_ip`, `firewall_dst_port`, `protocol = tcp`; `rule_id` = `firewall_rule_tracker` | |
+| A01 | detection, **trước NAT** | Suricata alert SID `1000012` | `initiator_ip`, `decoy_ip`, `decoy_port`, `protocol = TCP` | neo A02: `src_ip`, `src_port` |
 | A03 | telemetry, **sau NAT** | Cowrie **`session.connect`** | `initiator_ip`, `initiator_port`, `cowrie_ip`, `cowrie_port`, `protocol` = `honeypot_protocol`; `session_key` tồn tại | |
 | A04 | detection | Wazuh alert rule `120003` từ `cowrie.login.failed` | `initiator_ip`, `protocol` = `honeypot_protocol`; `username` = `username_marker` | neo A03: `src_ip`, `protocol`, `session_key` |
 
@@ -29,8 +29,14 @@ ghi đúng cổng nguồn, và pfSense **không** viết lại cổng nguồn. N
 dịch, A03 không có root và kết quả là `Missing telemetry`, không phải
 `Detected`. Không có NAT resolver.
 
-Không có DNAT (kết nối thẳng tới Cowrie) thì `decoy_ip = cowrie_ip`,
-`decoy_port = cowrie_port`; profile không đổi.
+**Đích mà filterlog ghi là một binding riêng** (`firewall_dst_ip`,
+`firewall_dst_port`), vì pf dịch địa chỉ **trước** khi lọc: với port-forward,
+dòng `pass` của filterlog mang đích sau NAT (IP Cowrie), còn Suricata cùng
+interface thấy đích trước NAT (VIP decoy). Vì vậy A01 chỉ join A02 theo
+`src_ip` và `src_port`; đích của mỗi nguồn được bind riêng theo đúng thứ nguồn
+đó quan sát, không sao chép sang miền kia. Với port-forward: `firewall_dst_* =
+cowrie_*`. Không có DNAT (kết nối thẳng tới Cowrie): `decoy_* = firewall_dst_* =
+cowrie_*`; profile không đổi.
 
 ## Literal và cửa sổ
 

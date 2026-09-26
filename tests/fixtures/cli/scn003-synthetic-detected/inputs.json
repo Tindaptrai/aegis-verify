@@ -7,7 +7,7 @@
       "source_ref": "synthetic-pfsense-lan",
       "display_label": "Synthetic pfSense LAN",
       "parser": "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
-      "sha256": "ec364ce85d6e45a8865d91197857a2624e9ca497acaa67c0457a8901e8cd6cc0",
+      "sha256": "49e221b542f6a9262241c67157d55c526a79421709e79ad48ec0ea36be193316",
       "context": {
         "ingested_at": "2026-01-01T00:02:00Z",
         "sensor_id": "pfsense-lan",
