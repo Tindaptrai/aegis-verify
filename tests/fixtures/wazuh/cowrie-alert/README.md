@@ -9,8 +9,9 @@ numeric Cowrie fields arrive as strings because the Wazuh JSON decoder
 stringifies them. Identifiers, times, addresses (RFC 5737), the session and the
 username marker are invented.
 
-**No password is present.** A real Cowrie login event carries one; the parser
-refuses any record that still has it, so a fixture with one would be a bug.
+**No password is present.** A real Cowrie login event carries the typed one
+and Wazuh keeps it in `data`; the parser never reads that member, and a
+committed fixture must not contain one.
 
 **No ports and no destination address either**, on purpose: a real
 `cowrie.login.failed` record carries only `src_ip`, `session`, `protocol`,

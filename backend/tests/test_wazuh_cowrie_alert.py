@@ -5,6 +5,7 @@ failure (#76, plan Task 2) and its intake wiring under key
 `wazuh-cowrie-alert-v1`.
 """
 
+import dataclasses
 import json
 from hashlib import sha256
 from pathlib import Path
@@ -22,8 +23,9 @@ PARSER = "wazuh-cowrie-alert-v1"
 CONTEXT = dict(source_ref="synthetic-alert", environment_id="synthetic-env",
                ingested_at="2026-01-01T00:01:00Z", collection_mode="direct", sensor_id="synthetic-cowrie")
 SESSION_PREFIX = "cowrie:session-v1:"
-# Placeholder used only to prove the parser refuses a credential-bearing record.
-REFUSED_VALUE = "synthetic-only"
+# Placeholder standing in for the credential a real login record carries. The
+# parser must never read it: not into the event, provenance, ledger or report.
+TYPED_VALUE = "synthetic-only"
 
 
 @pytest.fixture
@@ -114,7 +116,6 @@ def test_forwarded_collection_does_not_claim_the_agent_as_asset(sample):
         (lambda d: d["rule"].__setitem__("groups", ["honeypot"]), "unsupported_profile", "rule.groups"),
         (lambda d: d["rule"].__delitem__("id"), "invalid_field", "rule.id"),
         (lambda d: d["rule"].__setitem__("id", "one-two"), "invalid_field", "rule.id"),
-        (lambda d: d["data"].__setitem__("password", REFUSED_VALUE), "unsupported_profile", "data.password"),
         (lambda d: d["data"].__setitem__("eventid", "cowrie.login.success"), "unsupported_profile", "data.eventid"),
         (lambda d: d["data"].__setitem__("eventid", "cowrie.command.input"), "unsupported_profile", "data.eventid"),
         (lambda d: d["data"].__delitem__("eventid"), "invalid_field", "data.eventid"),
@@ -126,17 +127,29 @@ def test_forwarded_collection_does_not_claim_the_agent_as_asset(sample):
         (lambda d: d["data"].__setitem__("src_port", "70000"), "invalid_field", "data.src_port"),
         (lambda d: d.__delitem__("data"), "invalid_field", "data"),
     ],
-    ids=["search-hit", "no-groups", "not-cowrie-group", "no-rule-id", "non-decimal-rule-id", "password-present",
+    ids=["search-hit", "no-groups", "not-cowrie-group", "no-rule-id", "non-decimal-rule-id",
          "login-success", "command", "no-eventid", "no-session", "no-time", "bad-time", "bad-protocol",
          "bad-address", "bad-port", "no-data"],
 )
 def test_records_outside_the_profile_are_refused_with_a_safe_diagnostic(document, mutate, code, field):
+    # Every refusal is exercised on a record that also carries the typed
+    # credential, as a real login record does; the diagnostic must not echo it.
+    document["data"]["password"] = TYPED_VALUE
     mutate(document)
     with pytest.raises(wazuh.WazuhParseError) as raised:
         parse(encode(document))
     assert raised.value.diagnostic.code == code
     assert raised.value.diagnostic.field_path == field
-    assert "synthetic-only" not in str(raised.value) and "1a2b3c4d" not in str(raised.value)
+    assert TYPED_VALUE not in str(raised.value) and "1a2b3c4d" not in str(raised.value)
+
+
+def test_a_real_login_record_with_the_typed_credential_parses_without_reading_it(document):
+    document["data"]["password"] = TYPED_VALUE
+    result = parse(encode(document))
+    assert result.event.rule_id == "120003" and result.event.username == "AEGIS-SCN003-1a2b3c4d"
+    assert TYPED_VALUE not in result.event.model_dump_json()
+    assert TYPED_VALUE not in result.provenance.model_dump_json()
+    assert "password" not in result.event.model_dump() and "password" not in result.provenance.model_dump()
 
 
 @pytest.mark.parametrize("override", [dict(collection_mode="mirror"), dict(ingested_at="now"),
@@ -194,13 +207,24 @@ def test_bundle_intake_routes_the_key_to_the_parser_with_a_faithful_ledger(tmp_p
     assert entry.event_id == event.event_id and entry.raw_event_hash == event.raw_event_hash
 
 
-def test_bundle_intake_stops_on_a_password_carrying_record_as_parser_error(tmp_path, document):
-    document["data"]["password"] = REFUSED_VALUE
+def test_bundle_intake_keeps_the_typed_credential_out_of_events_and_ledger(tmp_path, document):
+    document["data"]["password"] = TYPED_VALUE
+    raw = encode(document)
+    root, manifest = _bundle(tmp_path, raw)
+    result = load_bundle(root, parse_manifest(manifest))
+    assert len(result.events) == 1 and result.ledger[0].status == "parsed"
+    assert TYPED_VALUE not in result.events[0].model_dump_json()
+    assert TYPED_VALUE not in json.dumps([dataclasses.asdict(entry) for entry in result.ledger], default=str)
+    # The raw bytes still hold it: the hash is over the exact evidence, which stays private.
+    assert result.events[0].raw_event_hash == sha256(raw).hexdigest()
+
+
+def test_bundle_intake_stops_on_a_search_hit_as_parser_error(tmp_path, document):
+    document["_source"] = {}
     root, manifest = _bundle(tmp_path, encode(document))
     with pytest.raises(IntakeError) as raised:
         load_bundle(root, parse_manifest(manifest))
     assert raised.value.code == "parser_error" and raised.value.stage == "evidence"
-    assert REFUSED_VALUE not in str(raised.value)
 
 
 @pytest.mark.parametrize("context", [
