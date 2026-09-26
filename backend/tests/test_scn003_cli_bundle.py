@@ -104,7 +104,7 @@ def test_cowrie_records_share_one_session_key_and_only_connect_carries_the_tuple
     ("wazuh-cowrie-alert.json", lambda raw: raw.replace(b'"id": "120003"', b'"id": "100301"'),
      "SCN-003-A04", "Inconclusive"),
     ("wazuh-cowrie-alert.json", lambda raw: raw.replace(b"2026-01-01T00:00:11.000000+0000",
-                                                        b"2026-01-01T00:00:16.000000+0000"),
+                                                        b"2026-01-01T00:00:12.200000+0000"),
      "SCN-003-A04", "Inconclusive"),
 ], ids=["filterlog-other-port", "wrong-sid", "connect-port-rewritten", "connect-other-session",
         "wazuh-other-username", "wazuh-wrong-rule", "wazuh-beyond-window"])

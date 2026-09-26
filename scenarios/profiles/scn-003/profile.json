@@ -26,8 +26,8 @@
           {"target_field": "src_ip", "anchor_field": "src_ip"},
           {"target_field": "src_port", "anchor_field": "src_port"}
         ],
-        "min_delta_ns": -5000000000,
-        "max_delta_ns": 5000000000
+        "min_delta_ns": -2000000000,
+        "max_delta_ns": 2000000000
       }
     },
     {
@@ -88,8 +88,8 @@
           {"target_field": "protocol", "anchor_field": "protocol"},
           {"target_field": "session_key", "anchor_field": "session_key"}
         ],
-        "min_delta_ns": -5000000000,
-        "max_delta_ns": 5000000000
+        "min_delta_ns": -2000000000,
+        "max_delta_ns": 2000000000
       }
     }
   ]

@@ -48,8 +48,11 @@ cowrie_*`; profile không đổi.
 
 SID `1000012` và rule `120003` từ `detections/*/scn-003/` (Task 1).
 `protocol` pin riêng từng parser: Suricata `TCP`, pfSense `tcp`, Cowrie qua
-binding (`ssh` hoặc `telnet`). Cửa sổ ±5 s là hợp đồng tổng hợp theo spec,
-**chưa** đo trên lab; siết bằng PR riêng sau lượt đối chứng, không nới.
+binding (`ssh` hoặc `telnet`). Cửa sổ tương quan là **±2 s**, siết từ ±5 s
+sau khi đo trên ba lượt lab `Detected` (2026-09-26): A04 lệch A03 tối đa
+0,006 s (cùng đồng hồ Cowrie); A01 lệch A02 tối đa ~0,6 s (cùng đồng hồ
+pfSense; filterlog BSD syslog chỉ có độ phân giải giây). ±2 s giữ biên cho độ
+phân giải giây đó, giống SCN-002. Không nới để lấy verdict.
 
 ## Kết quả kỳ vọng
 
