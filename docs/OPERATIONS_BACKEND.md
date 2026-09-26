@@ -141,13 +141,11 @@ inspection in the recovery subprocess; they do **not** establish live TLS,
 Windows ACL correctness, physical power-loss durability, arbitrary crash timing,
 backup/restore acceptance, or SCN-001 detection correctness.
 
-### Gate for expanding beyond SCN-001
+### Scope beyond SCN-001
 
-Keep the current SCN-001 acceptance baseline while reviewing P2 tests and doing
-a separately approved SCN-001 lab rerun with evidence-linked conclusions. Then
-start SCN-002 as its own issue: review its draft ground truth, controlled
-destination and non-sensitive payload, routing, clock alignment, and required
-Wazuh/Suricata/pfSense evidence before execution. SCN-003 follows after SCN-002
-acceptance, adding the explicitly allowlisted decoy/Cowrie and NAT evidence.
-Neither draft manifest is live acceptance or authorization to execute a scenario.
-No scenario ground truth is changed by this recovery work.
+Operations collection remains scoped to SCN-001. SCN-002 (`Prevented`,
+2026-09-22) and SCN-003 (`Detected`, 2026-09-26) were validated through
+separately exported evidence bundles and the offline CLI, not through
+Operations; see their result documents. These recovery tests do not extend
+Operations to other scenarios, authorize running a scenario, or change any
+scenario ground truth.
