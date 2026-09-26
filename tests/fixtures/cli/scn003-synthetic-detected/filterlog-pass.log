@@ -1,0 +1,1 @@
+Jan  1 07:00:10 synthetic-fw filterlog[1]: 6,,,1700000003,fixture0,match,pass,in,4,0x0,,64,1,0,DF,6,tcp,60,192.0.2.10,203.0.113.30,51003,2223,0,S,1234567890,,64240,,mss;sackOK;TS;nop;wscale

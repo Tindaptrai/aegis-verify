@@ -1,0 +1,45 @@
+{
+  "run_id": "scn003-synthetic-control-run",
+  "environment_id": "synthetic-lab",
+  "start": "2026-01-01T00:00:00Z",
+  "end": "2026-01-01T00:01:00Z",
+  "bindings": [
+    {
+      "name": "initiator_ip",
+      "value": "192.0.2.10"
+    },
+    {
+      "name": "initiator_port",
+      "value": 51003
+    },
+    {
+      "name": "decoy_ip",
+      "value": "203.0.113.30"
+    },
+    {
+      "name": "decoy_port",
+      "value": 2223
+    },
+    {
+      "name": "cowrie_ip",
+      "value": "198.51.100.20"
+    },
+    {
+      "name": "cowrie_port",
+      "value": 2223
+    },
+    {
+      "name": "honeypot_protocol",
+      "value": "telnet"
+    },
+    {
+      "name": "firewall_rule_tracker",
+      "value": "1700000003"
+    },
+    {
+      "name": "username_marker",
+      "value": "AEGIS-SCN003-1a2b3c4d"
+    }
+  ],
+  "declarations": []
+}
