@@ -290,7 +290,7 @@ sanitize ngoài runtime — parser không tự redaction dữ liệu production.
 | Acceptance | Bằng chứng A/B | Giới hạn |
 | --- | --- | --- |
 | Canonical hợp lệ cho connection/login/command | Unit mapping và 9 fixture derivatives bao phủ sáu types | `session.params/closed` là `observed` |
-| Giữ timestamp, peer, command, login result, session | Canonical giữ field có sẵn; provenance giữ outcome/session | Canonical hiện không có outcome/session |
+| Giữ timestamp, peer, command, login result, session | Canonical giữ field có sẵn; provenance giữ outcome/session; từ #76 canonical mang `session_key` (khoá mờ) | Canonical không có outcome; định danh phiên gốc chỉ ở provenance |
 | Cross-record session identity | A có cặp command thật; B có sequence thật 7 parsed cùng key, event ID riêng | Sample session không chứng minh identity global |
 | Missing fields là null | A thiếu username; B không enrich peer/port từ connect sang dòng sau | Không fallback từ record khác hoặc `full_log` |
 | Stable evidence ID và line reference | Literal digest/hash/ref tests trên mọi derivative | `source_ref` là caller/manifest contract |

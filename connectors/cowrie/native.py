@@ -93,9 +93,17 @@ def _line(raw: bytes, index: int, context: dict) -> CowrieNativeRecord:
 
     fields, metadata = map_cowrie_event(document, prefix="")
     fields["source_record_id"] = None
+    source_session = metadata["session"]
+    # The canonical event carries only the opaque key, never the raw session.
+    key = (
+        session_key(context["environment_id"], context["sensor_id"], source_session)
+        if source_session is not None
+        else None
+    )
     try:
         event = CanonicalEventV2(
             **fields,
+            session_key=key,
             event_id=identifier,
             environment_id=context["environment_id"],
             ingested_at=context["ingested_at"],
@@ -108,16 +116,11 @@ def _line(raw: bytes, index: int, context: dict) -> CowrieNativeRecord:
         )[0]["loc"]
         field_path = "canonical." + str(location[0]) if location else None
         raise CowrieParseError("canonical_validation", field_path) from None
-    source_session = metadata["session"]
     native_provenance = CowrieNativeProvenance(
         **provenance,
         **metadata,
         timestamp_basis="cowrie.timestamp",
-        session_key=(
-            session_key(context["environment_id"], context["sensor_id"], source_session)
-            if source_session is not None
-            else None
-        ),
+        session_key=key,
     )
     return CowrieNativeRecord(
         status="parsed", event=event, provenance=native_provenance

@@ -13,7 +13,8 @@ MAX_EVENTS = 10_000
 MAX_COMPARISONS = 1_000_000
 FILTER_FIELDS = frozenset({"source_type", "event_provider", "asset_id", "hostname", "username", "src_ip",
     "dst_ip", "src_port", "dst_port", "protocol", "process_name", "parent_process_name", "process_id",
-    "command_line", "file_path", "file_hash", "rule_id", "signature_id", "event_action", "severity", "technique_ids"})
+    "command_line", "file_path", "file_hash", "rule_id", "signature_id", "event_action", "severity", "technique_ids",
+    "session_key"})
 TARGET_FIELDS = frozenset({"asset_id", "hostname", "username", "src_ip", "dst_ip", "src_port", "dst_port", "process_id"})
 JOIN_FIELDS = FILTER_FIELDS - {"rule_id", "signature_id", "technique_ids"}
 IP_FIELDS = frozenset({"src_ip", "dst_ip"})

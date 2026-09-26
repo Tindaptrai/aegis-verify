@@ -54,6 +54,7 @@ def test_full_event_round_trip_preserves_context_without_interpreting_it(minimal
         "file_path": "unit-only/example.txt", "file_hash": "source-format-hash",
         "rule_id": "unit-rule", "signature_id": "unit-signature",
         "event_action": "observed", "severity": 3, "technique_ids": ["T1059.001"],
+        "session_key": "cowrie:session-v1:" + "b" * 64,
     }
     event = CanonicalEvent.model_validate(data)
     encoded = event.model_dump_json()

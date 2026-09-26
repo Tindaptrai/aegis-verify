@@ -46,6 +46,9 @@ NonBlank = Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
 Port = Annotated[int, Field(strict=True, ge=0, le=65535)]
 NonNegativeInt = Annotated[int, Field(strict=True, ge=0)]
 RawHash = Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]
+# Opaque, privacy-safe correlation key derived by a connector from its own
+# session identity namespace. It never replaces evidence identity.
+SessionKey = Annotated[StrictStr, Field(pattern=r"^cowrie:session-v1:[0-9a-f]{64}$")]
 
 
 class CanonicalFields(BaseModel):
@@ -80,6 +83,7 @@ class CanonicalFields(BaseModel):
     event_action: EventAction | None = None
     severity: NonNegativeInt | None = None
     technique_ids: tuple[NonBlank, ...] | None = None
+    session_key: SessionKey | None = None
 
     @field_validator("src_ip", "dst_ip", mode="before")
     @classmethod

@@ -62,6 +62,7 @@ Các trường bị thiếu hoặc được truyền `None` sẽ xuất JSON là
 | Hành động | `event_action` | Enum bên dưới hoặc null; không có mặc định observed |
 | Mức độ | `severity` | Số nguyên không âm theo nguồn; chưa phải thang điểm chung giữa công cụ |
 | ATT&CK | `technique_ids` | Danh sách chuỗi không rỗng do nguồn/mapping đã review cung cấp; không tự map |
+| Phiên | `session_key` | Khoá tương quan mờ do connector sinh từ namespace phiên của nó, dạng `cowrie:session-v1:` + 64 hex; tuỳ chọn với mọi nguồn, không thay thế evidence ID, không chứa định danh phiên gốc |
 
 `event_action` nhận: `observed`, `allowed`, `blocked`, `redirected`, `login`,
 `command`, `other`. `detected` và `prevented` là kết luận của engine, không phải
