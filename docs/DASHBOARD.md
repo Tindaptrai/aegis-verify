@@ -63,7 +63,7 @@ Không thêm thư viện biểu đồ hoặc dependency.
 | AC | Nơi kiểm |
 | --- | --- |
 | Scenario, run ID, final result, classification, evidence count | `RunView` mục "Tổng quan"; test `renders scenario, run ID, final result…` |
-| Assertion pass/fail với evidence IDs liên kết | bảng Assertions, link `#evidence-<id>` tới timeline; cùng test |
+| Assertion pass/fail với evidence IDs liên kết | bảng Assertions, nút evidence chuyển sang tab Timeline và làm nổi bản ghi đó; cùng test |
 | Timeline có thứ tự, không bịa giá trị thiếu | backend `evidence_timeline` (`test_cli_timeline.py`); frontend giữ thứ tự backend, hiển thị `null`; test "explains a report without a timeline" |
 | So sánh trước/sau Gap → Fix → Re-test | `ComparisonView`; fixture `comparison-regression-passed.json`; test "Comparison view" |
 | Loading, empty, malformed, backend-error | `App.test.tsx` mục "App states" và các test 422/500/network |
@@ -84,7 +84,7 @@ Phần này không nhập native review và không sửa cơ chế companion/bac
 Các findings native thu riêng không tự cập nhật report lịch sử; reason cũ như
 `native_review_missing` vẫn phản ánh chính input của report đó.
 Tests: `frontend/src/binding.test.tsx`; toàn frontend 59 tests và build đã qua
-ngày 2026-09-19. Chỉ dùng synthetic fixtures trong tests, không đưa log lab vào Git.
+ngày 2026-09-19 (ngày 2026-09-27: 86 tests, gồm timeline rỗng, và build đạt). Chỉ dùng synthetic fixtures trong tests, không đưa log lab vào Git.
 
 ## Ngoài phạm vi (theo issue)
 
