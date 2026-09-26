@@ -270,3 +270,13 @@ lab** khi chưa có ngoại lệ đó.
 Bản sao còn trên endpoint (`C:\AEGIS-Lab\…`) và staging/backup trên manager
 (`~/aegis-v2/`, `~/aegis-rule-backup-v2/`) giữ nguyên; xoá là quyết định của chủ
 dự án sau khi xác nhận evidence đã lưu đủ.
+
+## 7. Tái lập sau thay đổi canonical model (2026-09-27)
+
+Từ #83 (field `session_key`), `event_set_fingerprint` của bộ này trên `main` khác
+giá trị đã ghim trong request Run B, nên approval gốc không còn dùng được trên
+`main`. Kết quả ở mục 3 vẫn đúng như đã ghi. Để tái lập, chạy trên tag
+`v0.1.0-lab.1`: đã kiểm lại cho A Detected, B False negative (caller-attested),
+C Detected, B→C Regression Passed, cùng study `d3889018…` và profile `08a8fc0b…`.
+Xem [Validation Engine](VALIDATION_ENGINE.md) mục "Fingerprint gắn với phiên bản
+canonical model". Bộ chạy lại mới nhất là [v3](SCN001_V3_RESULT_2026-09-27.md).
