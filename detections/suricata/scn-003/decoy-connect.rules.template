@@ -1,0 +1,1 @@
+alert tcp $src_net any -> $decoy_ip $decoy_port (msg:"AEGIS SCN-003 decoy connection"; flow:to_server; flags:S,12; classtype:policy-violation; metadata:aegis scn-003; sid:1000012; rev:1;)
