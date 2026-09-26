@@ -1,6 +1,8 @@
 # Wazuh Indexer collector — Issue #11
 
-Implementation local, pending human review and live lab validation on Wazuh 4.14.4.
+Merged in PR #29 (2026-09-19) and used by Operations Collections; live lab reads on
+Wazuh 4.14.4 are recorded below. Issue #11 closed 2026-09-27 with the limits in the
+last section.
 The Windows fixture parsers remain the mapping authority. No new dependencies.
 
 ## Setup
@@ -151,7 +153,7 @@ pointer tracing and canonical parser replay. Successful leaf windows were
 contiguous, with no duplicate index/document identities within or across the
 previous ten intervals. Combined result: 205 records (203 Security 4688, one
 Sysmon 1, one PowerShell 4104). No ground truth, detection rule or VM configuration
-was changed by this collector. Human review remains required before merge.
+was changed by this collector.
 
 Adaptive verification, 2026-09-19: 49 focused live/adaptive tests passed;
 full backend suite 2629 passed / 1 skipped (Windows FIFO unsupported), using
@@ -181,8 +183,10 @@ closure or merge was performed during this review pass.
 | Setup/teardown | Sections above; stop CLI/tunnel and remove process credentials when finished |
 | Existing tests | See local verification record; rerun with a fresh pytest base directory whose parent exists |
 
-Still required before merge: human code/evidence review and an operator audit of
-effective least-privilege role mappings. Successful reads alone do not establish
+Known limits at closing (2026-09-27): least-privilege role mappings were reviewed
+by the operator in the Indexer UI, not audited automatically. Only HTTP 429 is
+retried (at most twice, Retry-After capped at 10 s); 5xx and connection errors are
+not retried because replaying a scroll could skip data. Successful reads alone do not establish
 that the account lacks unrelated permissions. Live invalid-credential/rate-limit
 failure injection was not performed; those paths were tested offline.
 

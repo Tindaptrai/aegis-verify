@@ -272,6 +272,15 @@ describe('Run view', () => {
     expect(within(content).getByRole('list', { name: 'Evidence index, không theo thời gian' })).toBeInTheDocument();
   });
 
+  it('says so when the timeline has no events instead of rendering an empty list', async () => {
+    const empty = { ...afterFixture, timeline: { ...afterFixture.timeline, events: [] } };
+    renderApp({ ...allReports, '/api/reports/after-detected.json': { status: 200, body: empty } });
+    const content = main();
+    await within(content).findByRole('heading', { level: 1, name: 'synthetic-run-after-fix' });
+    fireEvent.click(within(content).getByRole('tab', { name: /Timeline/ }));
+    expect(within(content).getByText('Run này không tham chiếu evidence nào')).toBeInTheDocument();
+  });
+
   it('shows the malformed state for a 422 report with technical details and retry', async () => {
     window.history.replaceState(null, '', '/#report=malformed-truncated.json');
     renderApp(allReports);
