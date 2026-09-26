@@ -1,9 +1,16 @@
 # Local operations workspace
 
 Milestone được chủ dự án chốt là **SCN-001 local lab MVP**: workflow SCN-001
-và Reports/Agents/Collections. SCN-002/003 chưa nghiệm thu live, để giai đoạn
-sau; Operations không tự chạy bất kỳ scenario nào. Xem
+và Reports/Agents/Collections. Operations không tự chạy bất kỳ scenario nào. Xem
 [phạm vi và bằng chứng nghiệm thu](OPERATIONS_ACCEPTANCE.md).
+
+SCN-002 đã đạt `Prevented` trên bằng chứng lab thật ngày 2026-09-22, nhưng
+**không** qua Operations: bằng chứng được xuất thủ công thành bundle rồi đánh giá
+offline bằng `aegis validate`. Xem [kết quả SCN-002](SCN002_RESULT_2026-09-22.md).
+Collections đọc một index pattern của Wazuh Indexer (thường là
+`wazuh-alerts-*`), mỗi job lọc theo một agent ID. Nó không đọc archive của
+manager, eve.json hay filterlog trên pfSense, là những nguồn SCN-002 cần cho
+Sysmon Event 3, alert Suricata và dòng `block`. SCN-003 mới có issue thiết kế.
 
 ## Hướng dẫn nhanh cho người vận hành
 
