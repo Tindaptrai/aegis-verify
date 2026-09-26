@@ -394,7 +394,7 @@ def fires(rules, event):
 @pytest.mark.parametrize('profile', ['decoded-json-v1', NATIVE_PROFILE])
 def test_behavioral_exempts_only_the_reviewed_runner_preflight(kit_module, profile):
     rules = behavioral_rules(kit_module, profile)
-    assert [r.attrib for r in rules] == [{'id': '119901', 'level': '5'}, {'id': '119902', 'level': '0'}]
+    assert [r.attrib for r in rules] == [{'id': '119901', 'level': '5'}, {'id': '119902', 'level': '4'}]
     assert rules[1].findtext('if_sid') == '119901'
     native = profile == NATIVE_PROFILE
 

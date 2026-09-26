@@ -35,8 +35,9 @@ BEHAVIOR_PATTERN = (
     r'(?=.*(?:\$PID\b|GetCurrentProcess\(\)\.Id\b))')
 # The reviewed runner's preflight function reads the machine name and $PID to
 # check where it runs, so it carries both behaviors and fired the rule in the v2
-# lab set (issue #91). A level-0 child rule exempts it only at the runner's exact
-# lab path and only for this function's own opening and error code.
+# lab set (issue #91). A child rule relabels it only at the runner's exact lab
+# path and only for this function's own opening and error code. It stays level 4,
+# like the stock alert the block raised before, so nothing is silenced.
 RUNNER = 'Invoke-SafeDemo.ps1'
 RUNNER_ANCHOR_PATTERN = r"(?s)\Afunction Get-AegisPreflight\s*\{.*'AEGIS_WRONG_HOST'"
 # A second wording of the same two behaviors, used only as a synthetic control.
