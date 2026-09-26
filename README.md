@@ -99,7 +99,7 @@ a lab action, evaluate log evidence or return detection/prevention results.
 
 | Scenario | Expected outcome | Where it stands |
 | --- | --- | --- |
-| [SCN-001](scenarios/SCN-001-powershell-execution.yaml) PowerShell execution | `detected` | Local lab MVP milestone with the Gap → Fix demo kit; see [Operations acceptance](docs/OPERATIONS_ACCEPTANCE.md) and [study run](docs/SCN001_STUDY_RUN.md) |
+| [SCN-001](scenarios/SCN-001-powershell-execution.yaml) PowerShell execution | `detected` | Gap → Fix → Re-test on real lab evidence: B→C `Regression Passed` in the [v2 set](docs/SCN001_V2_APPROVAL_AND_PINS.md) and again in the [v3 set](docs/SCN001_V3_RESULT_2026-09-27.md) (2026-09-27, runner no longer fires the demo rule); see also [Operations acceptance](docs/OPERATIONS_ACCEPTANCE.md) |
 | [SCN-002](scenarios/SCN-002-attempted-exfiltration.yaml) attempted exfiltration | `prevented` | `Prevented` on real lab evidence, 2026-09-22; [public profile](docs/SCN002_EVALUATION_PROFILE.md), [block-round runbook](docs/SCN002_BLOCK_RUN_RUNBOOK.md), [result](docs/SCN002_RESULT_2026-09-22.md), [lab-derived sanitized bundles](tests/fixtures/cli/scn002-lab-sanitized/README.md) |
 | [SCN-003](scenarios/SCN-003-internal-deception.yaml) internal deception | `detected` | `Detected` on real lab evidence, 2026-09-26; [public profile](scenarios/profiles/scn-003/README.md), [result](docs/SCN003_RESULT_2026-09-26.md), [lab-derived sanitized bundle](tests/fixtures/cli/scn003-lab-sanitized/README.md) |
 

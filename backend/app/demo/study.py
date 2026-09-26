@@ -93,7 +93,10 @@ def verify_study(study, *, study_sha256, scenario, profile, kit, artifacts):
         kit_data = decode_config(kit, stage='inputs')
         if set(kit_data) != _KIT_KEYS or type(artifacts) is not dict or set(artifacts) != _ARTIFACTS:
             raise StudyRunError()
-        expected = dict(kind='safe_demo_kit', kit_version='0.2.0', scenario_id='SCN-001', scenario_version='0.1.0',
+        # 0.2.0 is the v2 lab set; 0.3.0 adds the runner exception (issue #91). The pins decide the bytes.
+        if not same(kit_data.get('kit_version'), '0.2.0') and not same(kit_data.get('kit_version'), '0.3.0'):
+            raise StudyRunError()
+        expected = dict(kind='safe_demo_kit', scenario_id='SCN-001', scenario_version='0.1.0',
                         target_host=target.hostname, lab_directory=target.native_directory, filenames=list(FILENAMES),
                         rule_id=target.rule_id, parent_sid=target.parent_sid, field_profile=target.field_profile,
                         payload_sha256=pins.payload)

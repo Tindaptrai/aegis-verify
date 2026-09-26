@@ -127,7 +127,7 @@ function Get-AegisPreflight {
         if ($kit.artifact_sha256.$name -isnot [string] -or
             $kit.artifact_sha256.$name -cnotmatch '^[0-9a-f]{64}$') { throw 'AEGIS_INVALID_KIT_MANIFEST' }
     }
-    if ($kit.kind -cne 'safe_demo_kit' -or $kit.kit_version -cne '0.2.0' -or
+    if ($kit.kind -cne 'safe_demo_kit' -or $kit.kit_version -cne '0.3.0' -or
         $kit.scenario_id -cne 'SCN-001' -or $kit.scenario_version -cne '0.1.0' -or
         $kit.target_host -cne $ExpectedComputerName -or $kit.lab_directory -cne $KitDirectory -or
         $kit.filenames.Count -ne 2 -or $kit.filenames[0] -cne 'lab_update.ps1' -or

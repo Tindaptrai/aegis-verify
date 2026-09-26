@@ -436,3 +436,19 @@ def test_non_ascii_canonical_values_are_out_of_measured_scope(api, inputs):
     repin_study(inputs, study)
     with pytest.raises(api.StudyRunError):
         api.verify_run(**inputs)
+
+
+@pytest.mark.parametrize('version, accepted', [
+    ('0.2.0', True), ('0.3.0', True), ('0.4.0', False), ('0.3', False), ('0.1.0', False)])
+def test_kit_version_is_the_v2_or_v3_contract_only(api, inputs, version, accepted):
+    # 0.2.0 is the v2 lab set, 0.3.0 adds the runner exception (issue #91); pins decide the bytes.
+    study, kit = json.loads(inputs['study']), json.loads(inputs['kit'])
+    kit['kit_version'] = version
+    inputs['kit'] = wire(kit)
+    study['pins']['kit'] = sha(inputs['kit'])
+    repin_study(inputs, study)
+    if accepted:
+        api.verify_run(**inputs)
+    else:
+        with pytest.raises(api.StudyRunError):
+            api.verify_run(**inputs)
