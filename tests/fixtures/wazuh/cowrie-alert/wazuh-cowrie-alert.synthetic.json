@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-01-01T00:00:11.250+0000",
+  "rule": {
+    "level": 5,
+    "description": "AEGIS SCN-003 lab marker: one Cowrie login failure with the run username; not a compromise verdict.",
+    "id": "120003",
+    "firedtimes": 1,
+    "mail": false,
+    "groups": ["aegis_scn003", "cowrie", "honeypot"]
+  },
+  "agent": {"id": "013", "name": "synthetic-cowrie", "ip": "198.51.100.20"},
+  "manager": {"name": "synthetic-manager"},
+  "id": "1767225611.250",
+  "decoder": {"name": "json"},
+  "data": {
+    "eventid": "cowrie.login.failed",
+    "username": "AEGIS-SCN003-1a2b3c4d",
+    "timestamp": "2026-01-01T00:00:10.800000+0000",
+    "src_ip": "192.0.2.10",
+    "protocol": "ssh",
+    "session": "synthetic-session-003",
+    "sensor": "synthetic-cowrie",
+    "uuid": "00000000-0000-4000-8000-000000000003",
+    "@source": "cowrie",
+    "@service": "ssh-telnet-honeypot"
+  },
+  "location": "/home/cowrie/cowrie/var/log/cowrie/cowrie.json"
+}

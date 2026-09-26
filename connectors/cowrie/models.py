@@ -162,4 +162,6 @@ class CowrieParseResult(BaseModel):
             raise ValueError("event evidence identity does not match provenance")
         if event.timestamp.fractional_digits != provenance.source_fraction_digits:
             raise ValueError("timestamp precision does not match provenance")
+        if event.session_key != provenance.session_key:
+            raise ValueError("canonical session key does not match provenance")
         return self

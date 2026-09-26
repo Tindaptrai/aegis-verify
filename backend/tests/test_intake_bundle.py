@@ -143,6 +143,10 @@ def test_explicit_registry_dispatches_existing_fixture_parser(
             "parser": parser,
             "sha256": sha256(raw).hexdigest(),
             "context_fingerprint": result.inventory[0]["context_fingerprint"],
+            # No configured label in these bundles, so it stays null.
+            "display_label": None,
+            # Native captures, so no derivation is declared.
+            "derived_from": None,
         },
     )
     assert len(result.inventory[0]["context_fingerprint"]) == 64

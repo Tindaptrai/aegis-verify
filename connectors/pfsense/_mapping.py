@@ -11,7 +11,7 @@ from .models import PfSenseContext
 
 _HEADER = re.compile(
     r"(?P<timestamp>[A-Za-z]{3} [ 0-9][0-9] [0-9]{2}:[0-9]{2}:[0-9]{2}) "
-    r"(?P<hostname>[A-Za-z0-9_.-]+) "
+    r"(?:(?P<hostname>[A-Za-z0-9_.-]+) )?"
     r"(?P<program>filterlog|newsyslog)(?:\[(?P<pid>[0-9]{1,128})\])?: "
     r"(?P<payload>.*)",
     re.ASCII,

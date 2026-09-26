@@ -121,6 +121,15 @@ Hàm chỉ giữ biểu diễn còn có trong v1, không lấy lại được đ
 Đây là chuyển đổi model-to-model, không áp dụng budget dành riêng cho reader;
 v1 không serialize/validate hợp lệ sẽ bị từ chối. Không có API downgrade v2 -> v1.
 
+## Trường thêm sau v2.0: `session_key`
+
+Từ SCN-003 (#76), cả v1 và v2 có thêm trường tuỳ chọn `session_key`: khoá tương
+quan mờ do connector sinh từ namespace phiên của chính nó, hiện chỉ Cowrie dùng
+(`cowrie:session-v1:` cộng SHA-256 hex). Giá trị mặc định `null`, không đổi
+`schema_version`, không tham gia evidence ID, và không bao giờ chứa định danh
+phiên gốc. Engine có thể lọc và join theo trường này nhưng không dùng nó làm
+target binding. Xem [CANONICAL_EVENT.md](CANONICAL_EVENT.md).
+
 ## Bước tiếp theo
 
 1. Người dùng chạy đối chiếu và review Issue #15; chỉ merge khi được duyệt.

@@ -24,11 +24,21 @@ aegis compare  --format json  ─┼─► thư mục report (*.json)
   intake khi file không decode được; không bao giờ trả report một phần.
 - Tên file phải khớp `[A-Za-z0-9][A-Za-z0-9._-]{0,127}\.json`; không có
   traversal; chỉ liệt kê tối đa 200 file.
-- Report `evaluation` nay có thêm mục `timeline` (version `0.1.0`): các event
+- Report `evaluation` nay có thêm mục `timeline` (version `0.2.0`): các event
   được `evidence_index` tham chiếu, sắp theo `timestamp` rồi `event_id`, với các
   trường canonical sao chép nguyên (`null` giữ `null`). `EvaluationResult`,
   fingerprints và `compare` không đổi. Report cũ không có mục này vẫn được
   dashboard hiển thị, kèm thông báo không có thời điểm.
+- Từ version `0.3.0`, mỗi event mang thêm `source_derived`: `true` khi manifest
+  khai báo bytes là bản trích, `false` khi là file nguồn như đã thu, `null` khi
+  report không nói gì. Dashboard gắn nhãn `bản trích` cho `true` và ghi
+  `nguồn bytes: không có dữ liệu` cho `null`; im lặng không được hiểu là file gốc.
+- Từ version `0.2.0`, mỗi event mang thêm `source_ref` và `source_label`:
+  mục manifest sinh ra bản ghi, và nhãn do người vận hành cấu hình cho mục đó.
+  Backend tra cứu qua ledger sẵn có, không suy đoán; event không tra được thì cả
+  hai là `null`. Dashboard hiển thị `Nguồn` tách khỏi `Host (quan sát)`, ghi rõ
+  `(cấu hình)` cho nhãn và `(source ref)` khi phải lùi về `source_ref`. Report
+  version `0.1.0` đọc hai trường này thành `null`, không bịa nhãn.
 
 ## Chạy nhanh với fixture synthetic
 

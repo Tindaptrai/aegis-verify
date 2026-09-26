@@ -193,7 +193,7 @@
   },
   "input_fingerprints": {
     "context": "e88aa8ecfe3d85f758c4fd8cfef3647cdf903fb4bb803c3505cfcd7f87576301",
-    "inputs": "167178d6b7cce33a5c95c819a37aa0f1155104d5e84cea02ca323f10a31ec896",
+    "inputs": "28e40222d9ef5d31db303bd11f5e15e4eed69e3fb5fa677164bdb8fd104cac76",
     "profile": "9d2131f4058b9c1f196c7ed1a60c5bba144826409de9b33ca32327f92b5b560c",
     "scenario": "cc3c09ce041412ff9fbaa5795d76b8c5b6a25ee38be17233386eba4f82fb547d"
   },
@@ -201,6 +201,8 @@
     "inventory": [
       {
         "context_fingerprint": "5f1ae0266dede76aab417eb8fe92c35c2c9af4e5253508bd09325c8c83ccc0f7",
+        "derived_from": null,
+        "display_label": "Synthetic endpoint",
         "parser": "wazuh-win4688-v2",
         "path": "activity.json",
         "sha256": "da21be3f209f2655d4a49d28103f57a9ee51694f9d6501e1bf8cc2ddad4c0e03",
@@ -208,6 +210,8 @@
       },
       {
         "context_fingerprint": "5f1ae0266dede76aab417eb8fe92c35c2c9af4e5253508bd09325c8c83ccc0f7",
+        "derived_from": null,
+        "display_label": null,
         "parser": "wazuh-win4688-v2",
         "path": "alert.json",
         "sha256": "54033fd55717179d2dda7ccc8986f42566d6c0f0ea8cdcb1d4dbef3192a10f6a",
@@ -261,6 +265,9 @@
         "raw_event_ref": "synthetic-activity#record=1",
         "rule_id": "900001",
         "signature_id": null,
+        "source_derived": false,
+        "source_label": "Synthetic endpoint",
+        "source_ref": "synthetic-activity",
         "source_type": "wazuh",
         "timestamp": "2026-01-01T00:00:01Z"
       },
@@ -274,11 +281,14 @@
         "raw_event_ref": "synthetic-alert#record=1",
         "rule_id": "900002",
         "signature_id": null,
+        "source_derived": false,
+        "source_label": null,
+        "source_ref": "synthetic-alert",
         "source_type": "wazuh",
         "timestamp": "2026-01-01T00:00:02Z"
       }
     ],
     "order": "timestamp_then_event_id",
-    "version": "0.1.0"
+    "version": "0.3.0"
   }
 }

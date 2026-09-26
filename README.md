@@ -6,9 +6,14 @@ AEGIS Verify replays safe security scenarios, normalizes telemetry from open-sou
 security controls, and verifies every security conclusion against raw evidence. Its
 core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
-> Status (2026-09-19): controlled demo/lab V1 is integrated through PRs #28–#30.
+> Status (2026-09-26): controlled demo/lab V1 is integrated through PRs #28–#30.
 > The fixture-driven CLI, regression comparison, read-only dashboard, optional
 > native-review input and bounded live Wazuh Indexer collector are available.
+> **SCN-002 reached `Prevented` on real lab evidence on 2026-09-22**, evaluated
+> offline through the engine ([result and evidence hashes](docs/SCN002_RESULT_2026-09-22.md)).
+> **SCN-003 reached `Detected` on real lab evidence on 2026-09-26**, evaluated
+> offline through the engine ([result and evidence hashes](docs/SCN003_RESULT_2026-09-26.md)).
+> All three manifests still declare `status: draft`.
 > This is not production certification or live fleet monitoring. Historical run
 > binding remains unknown; successful reads do not prove least-privilege access.
 > Start with the [V1 handoff/runbook](docs/V1_HANDOFF.md) and
@@ -27,13 +32,15 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 ## Repository map
 
 ```text
-docs/          Product, architecture, threat model, and demo documentation
-backend/       Validation engine, CLI, read-only dashboard server, and tests
+docs/          Product, architecture, threat model, guides and run records
+backend/app/   Canonical model, bundle intake, validation engine, CLI, compare,
+               read-only dashboard server with optional Operations mode
+backend/tests/ Unit, integration and CLI subprocess tests
 frontend/      Read-only results dashboard (Vite + React), see docs/DASHBOARD.md
-connectors/    Fixture-first adapters for four telemetry sources
-scenarios/     Safe, repeatable scenario manifests
-detections/    Detection content owned by each source integration
-tests/fixtures Sanitized evidence used by tests and CI
+connectors/    Source parsers: Wazuh, Suricata, pfSense, Cowrie; bounded live Wazuh reader
+scenarios/     Reviewed ground-truth manifests and public evaluation profiles
+detections/    Detection content templates (Wazuh SCN-001, Suricata SCN-002 marker)
+tests/fixtures Sanitized or synthetic evidence used by tests and CI
 ```
 
 Start with [the MVP PRD](docs/PRD.md), then read
@@ -55,41 +62,52 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pytest backend/tests -q
 ```
 
-Requires Python >=3.11. Contract tests use artificial data; Wazuh parser tests also
-use one reviewed, sanitized user sample, not proof of an incident.
-The offline validation CLI is available on this branch; see the runnable example below.
+Requires Python >=3.11. Runtime dependencies are `pydantic` and `PyYAML` only.
+Tests use synthetic data and reviewed, sanitized samples, not proof of an incident.
+CI runs the backend suite on Ubuntu and Windows with Python 3.11 and 3.12, plus
+the frontend tests and build ([CI notes](docs/CI.md)).
 
-## Current implementation: Wazuh fixture parser
+## Current implementation: bundle parsers
 
-[Wazuh Windows 4688 guide](docs/WAZUH_FIXTURE_PARSER.md) explains the first JSON-only
-profile, exact timestamp mapping, evidence identity, explicit collection topology,
-safe errors and runnable local comparison. No live SIEM or scenario execution.
+A bundle's `inputs.json` names one parser key per file. The registry currently
+accepts ten keys; the [CLI guide](docs/CLI_VALIDATE.md) lists each key's input
+and required context.
+
+| Source | Keys | Guide |
+| --- | --- | --- |
+| Wazuh, Windows | `wazuh-win4688-v2`, `wazuh-sysmon1-v1`, `wazuh-powershell4104-v1` | [4688](docs/WAZUH_FIXTURE_PARSER.md), [Sysmon 1 and PowerShell 4104](docs/WINDOWS_TELEMETRY_PARSERS.md) |
+| Wazuh, network | `wazuh-sysmon3-archive-v1` (manager archive, UDP), `wazuh-suricata-alert-v1` (Wazuh alert raised from a Suricata alert) | [Wazuh from Suricata](docs/WAZUH_SURICATA_ALERT.md) |
+| Suricata | `suricata-wazuh-alert-v1` (search hit), `suricata-eve-jsonl-v1` (direct EVE) | [A](docs/SURICATA_WAZUH_ALERT.md), [B](docs/SURICATA_EVE_JSONL.md) |
+| pfSense | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | [filterlog](docs/PFSENSE_FIXTURE_PARSER.md) |
+| Cowrie | `cowrie-wazuh-v1`, `cowrie-jsonl-v1` | [Cowrie](docs/COWRIE_FIXTURE_PARSER.md) |
+
+Every parser emits Canonical Event v2 with an exact `raw_event_ref` and SHA-256.
+No parser opens a network connection or executes a scenario.
 
 ## Current implementation: scenario contract
 
-[Scenario YAML v0.1](docs/SCENARIO_SCHEMA.md) validates the three unchanged draft
-manifests, their safety metadata, source declarations and assertion identities.
+[Scenario YAML v0.1](docs/SCENARIO_SCHEMA.md) validates the three draft manifests,
+their safety metadata, source declarations and assertion identities. The only
+ground-truth edit so far is the owner-approved rewording of SCN-002-A04 (PR #65).
 `aegis_verify.scenario_loader.load_scenario(path)` reads one local UTF-8 YAML file
 without rewriting it. Malformed or ambiguous YAML raises a contextual error.
 
 This checks the manifest contract only: it does not execute a scenario, authorize
 a lab action, evaluate log evidence or return detection/prevention results.
 
-## Current implementation: Suricata fixture parsers
+## Scenarios
 
-[Suricata A](docs/SURICATA_WAZUH_ALERT.md) handles Wazuh-exported alerts.
-[Suricata B](docs/SURICATA_EVE_JSONL.md) handles direct EVE JSONL alert/flow,
-including skip outcomes, exact line evidence and explicit sensor context.
-The B guide documents the four initial lab exports and the additional real MGMT flow sample.
+| Scenario | Expected outcome | Where it stands |
+| --- | --- | --- |
+| [SCN-001](scenarios/SCN-001-powershell-execution.yaml) PowerShell execution | `detected` | Gap → Fix → Re-test on real lab evidence: B→C `Regression Passed` in the [v2 set](docs/SCN001_V2_APPROVAL_AND_PINS.md) and again in the [v3 set](docs/SCN001_V3_RESULT_2026-09-27.md) (2026-09-27, runner no longer fires the demo rule); see also [Operations acceptance](docs/OPERATIONS_ACCEPTANCE.md) |
+| [SCN-002](scenarios/SCN-002-attempted-exfiltration.yaml) attempted exfiltration | `prevented` | `Prevented` on real lab evidence, 2026-09-22; [public profile](docs/SCN002_EVALUATION_PROFILE.md), [block-round runbook](docs/SCN002_BLOCK_RUN_RUNBOOK.md), [result](docs/SCN002_RESULT_2026-09-22.md), [lab-derived sanitized bundles](tests/fixtures/cli/scn002-lab-sanitized/README.md) |
+| [SCN-003](scenarios/SCN-003-internal-deception.yaml) internal deception | `detected` | `Detected` on real lab evidence, 2026-09-26/27; [public profile](scenarios/profiles/scn-003/README.md), [control-run runbook](docs/SCN003_CONTROL_RUN_RUNBOOK.md), [result](docs/SCN003_RESULT_2026-09-26.md), [lab-derived sanitized bundle](tests/fixtures/cli/scn003-lab-sanitized/README.md) |
 
-## Current implementation: Cowrie fixture parsers
+Ground truth changes need explicit owner approval; every manifest still says
+`status: draft`.
 
-[Cowrie directions A and B](docs/COWRIE_FIXTURE_PARSER.md) parse either one
-offline Wazuh-exported Cowrie search-hit or bounded native Cowrie JSONL. Both emit
-canonical v2 events plus immutable source provenance; B also returns explicit
-per-line skip outcomes. The [native intake record](docs/COWRIE_NATIVE_INTAKE.md)
-documents the audited real derivative, safe aggregates and remaining human/lab
-gate. Live access is not implemented.
+For a 25-minute offline walkthrough of all three scenarios and the dashboard,
+see [the customer demo guide](docs/DEMO_WALKTHROUGH.md).
 
 ## First technical milestone
 
@@ -109,7 +127,13 @@ inferred, and fields absent from source telemetry remain `null`.
 See [the Vietnamese CLI guide](docs/CLI_VALIDATE.md) for installation, bundle
 contracts, explicit profile/context selection, exit codes and privacy. The sample
 returns `Detected` with two distinct evidence IDs; it proves the offline software
-path only, not lab coverage. Human review and local/lab validation remain pending.
+path only, not lab coverage.
+
+`aegis compare --before <report> --after <report>` compares two runs of the same
+scenario, profile and bindings ([compare guide](docs/CLI_COMPARE.md)). It is
+built for Gap → Fix: `Regression Passed` needs a `false_negative` assertion to
+become `satisfied`. A control round followed by a block round therefore reports
+`Inconclusive` by design; the block round's own verdict is the conclusion.
 
 ## Current implementation: results dashboard
 
@@ -132,9 +156,9 @@ cd frontend; npm install; npm run build; cd ..
 
 ## Opt-in local operations workspace
 
-The owner-approved milestone is **SCN-001 local lab MVP**, including the
-SCN-001 workflow and Reports/Agents/Collections. SCN-002/003 remain draft
-manifests without live acceptance and are deferred to a later milestone.
+The owner-approved Operations milestone is **SCN-001 local lab MVP**, including
+the SCN-001 workflow and Reports/Agents/Collections. SCN-002 was validated
+separately through exported evidence bundles, not through Operations.
 This is not full-PRD live acceptance or a production-readiness claim.
 
 Reports remain read-only by default. The optional Operations mode adds manual

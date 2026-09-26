@@ -1,0 +1,25 @@
+{
+  "run_id": "scn002-block-2fb0b7700fd54fee81ebfe19bb78ecd9",
+  "environment_id": "lab-sanitized",
+  "start": "2026-09-22T14:27:30Z",
+  "end": "2026-09-22T14:29:30Z",
+  "bindings": [
+    {
+      "name": "sender_ip",
+      "value": "192.0.2.11"
+    },
+    {
+      "name": "receiver_ip",
+      "value": "198.51.100.10"
+    },
+    {
+      "name": "receiver_port",
+      "value": 45002
+    },
+    {
+      "name": "block_rule_tracker",
+      "value": "1790087102"
+    }
+  ],
+  "declarations": []
+}

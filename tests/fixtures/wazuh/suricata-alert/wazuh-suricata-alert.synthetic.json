@@ -1,0 +1,50 @@
+{
+  "timestamp": "2026-01-01T00:00:12.345+0000",
+  "rule": {
+    "level": 3,
+    "description": "Suricata: Alert - AEGIS SCN-002 marker UDP",
+    "id": "86601",
+    "firedtimes": 1,
+    "mail": false,
+    "groups": ["ids", "suricata"]
+  },
+  "agent": {"id": "911", "name": "synthetic-firewall", "ip": "192.0.2.1"},
+  "manager": {"name": "synthetic-manager"},
+  "id": "1767225612.100",
+  "decoder": {"name": "json"},
+  "data": {
+    "timestamp": "2026-01-01T07:00:10.400000+0700",
+    "flow_id": "100000000000002.000000",
+    "in_iface": "if-lab-2",
+    "event_type": "alert",
+    "src_ip": "192.0.2.11",
+    "src_port": "51000",
+    "dest_ip": "198.51.100.10",
+    "dest_port": "40000",
+    "proto": "UDP",
+    "pkt_src": "wire/pcap",
+    "alert": {
+      "action": "allowed",
+      "gid": "1",
+      "signature_id": "1000010",
+      "rev": "1",
+      "signature": "AEGIS SCN-002 marker UDP",
+      "category": "Potential Corporate Privacy Violation",
+      "severity": "1"
+    },
+    "app_proto": "failed",
+    "direction": "to_server",
+    "flow": {
+      "pkts_toserver": "1",
+      "pkts_toclient": "0",
+      "bytes_toserver": "110",
+      "bytes_toclient": "0",
+      "start": "2026-01-01T07:00:10.400000+0700",
+      "src_ip": "192.0.2.11",
+      "dest_ip": "198.51.100.10",
+      "src_port": "51000",
+      "dest_port": "40000"
+    }
+  },
+  "location": "/var/log/suricata/suricata_lab/eve.json"
+}

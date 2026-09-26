@@ -37,7 +37,29 @@ tương đối dùng `/`, `source_ref` duy nhất, `parser`, `sha256` lowercase 
 của toàn bộ bytes file và `context` riêng của parser. Xem
 [manifest mẫu](../tests/fixtures/cli/synthetic-detected/inputs.json).
 `source_ref` là nhãn ASCII theo `[A-Za-z0-9][A-Za-z0-9._-]{0,127}`; giữ nhãn
-ổn định khi di chuyển bundle để giữ evidence identity. Không sửa newline/BOM sau
+ổn định khi di chuyển bundle để giữ evidence identity.
+
+Mỗi mục có thêm một trường tùy chọn `display_label`: tên do người dựng bundle
+cấu hình cho nguồn đó, ví dụ `pfSense lab`. Đây là thông tin trình bày, **không
+phải** hostname quan sát được trong log; hostname thiếu vẫn là `null`. Nhãn dài
+tối đa 64 ký tự, không được rỗng và không chứa ký tự điều khiển, định dạng hay
+ngắt dòng. Nhãn gắn theo từng `source_ref` nên hai thiết bị cùng `source_type`
+vẫn có nhãn riêng; hai nguồn được phép trùng nhãn vì nhãn không phải định danh.
+Thêm hoặc đổi nhãn **không** làm đổi evidence ID, raw hash, canonical field hay
+`profile_fingerprint`/`scope_fingerprint`/`event_set_fingerprint`, nên một
+collection attestation đã ký vẫn còn hiệu lực; chỉ hash bytes của `inputs.json`
+đổi, đúng với sự thật là manifest đã đổi.
+
+Khi bytes của một mục **không phải** file nguồn như đã thu mà là bản trích từ
+bản ghi nằm chỗ khác, mục đó khai báo `derived_from` gồm `parent_sha256` là hash
+bản ghi cha do caller cung cấp và `extraction` là quy tắc trích đã review. Quy
+tắc hiện có: `wazuh-archive-full-log-utf8-v1`, tức giải mã bản ghi archive dạng
+JSON, lấy chuỗi `full_log`, encode UTF-8 và không thêm newline. Bundle không
+chứa bản ghi cha nên công cụ **không** kiểm chứng `parent_sha256`; đây là lời
+khai của caller để người review truy ngược, không phải bằng chứng đã đối chiếu.
+`parent_sha256` không được trùng `sha256` của chính mục đó. Khai báo derivation
+không làm đổi hash, evidence ID, canonical field hay fingerprint nào, và không
+được dùng để nới lỏng bất kỳ assertion nào. Không sửa newline/BOM sau
 khi tính hash. PowerShell: `(Get-FileHash -Algorithm SHA256 -LiteralPath <file>).Hash.ToLowerInvariant()`.
 
 Mọi parser context cần `ingested_at` có timezone, do caller cung cấp. CLI không
@@ -48,6 +70,9 @@ lấy giờ hiện tại, không cho context khai báo lại environment/source_
 | `wazuh-win4688-v2` | Một JSON search-hit/document Windows 4688; `collection_mode`: `direct`/`forwarded`/`unknown` |
 | `wazuh-sysmon1-v1` | Một Wazuh JSON search-hit Sysmon Event 1; cùng context `collection_mode` như 4688 |
 | `wazuh-powershell4104-v1` | Một Wazuh JSON search-hit PowerShell 4104, chỉ đoạn `1/1` có script text không rỗng; cùng context `collection_mode` |
+| `wazuh-sysmon3-archive-v1` | Một bản ghi **archive** của manager cho Sysmon Event 3, chỉ UDP/IPv4; từ chối search-hit có `_source`; cùng context `collection_mode` |
+| `wazuh-suricata-alert-v1` | Một bản ghi **alert** của manager sinh từ alert Suricata, cho event `source_type: wazuh` với `rule_id` Wazuh và `signature_id` Suricata (SCN-002-A04); từ chối search-hit có `_source`; cùng context `collection_mode`. Xem [WAZUH_SURICATA_ALERT.md](WAZUH_SURICATA_ALERT.md) |
+| `wazuh-cowrie-alert-v1` | Một bản ghi **alert** của manager sinh từ `cowrie.login.failed`, cho event `source_type: wazuh`, `event_provider: cowrie`, `rule_id` Wazuh, `username`, tuple và `session_key` (SCN-003-A04); từ chối search-hit, record còn `password`, event khác login failed; context `collection_mode` và `sensor_id` (cùng nhãn với parser Cowrie trực tiếp). Xem [WAZUH_COWRIE_ALERT.md](WAZUH_COWRIE_ALERT.md) |
 | `suricata-wazuh-alert-v1` | Một Wazuh-exported Suricata alert; `deployment_mode`: `ids`/`ips`/`unknown` |
 | `suricata-eve-jsonl-v1` | EVE JSONL alert/flow; `sensor_id`, `deployment_mode` |
 | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | BSD filterlog IPv4 TCP/UDP; `sensor_id`, `source_year`, `source_utc_offset` |
@@ -98,10 +123,14 @@ Text in scenario/run, từng assertion, reason, evidence IDs/unevaluable IDs,
 final status, counts, warnings và assurance. JSON có `cli_report_version`,
 `kind`, `scenario`, `evaluation` nguyên kết quả engine, `counts`, `intake`
 (inventory/ledger), `input_fingerprints` của bytes cấu hình đã chọn và, từ
-Issue #10, `timeline` (version `0.1.0`): các event được `evidence_index` tham
+Issue #10, `timeline` (version `0.3.0`): các event được `evidence_index` tham
 chiếu, sắp theo `timestamp` rồi `event_id`, sao chép nguyên trường canonical
-(`null` giữ `null`) để [dashboard](DASHBOARD.md) hiển thị. `evaluation`,
-fingerprints và `compare` không đổi.
+(`null` giữ `null`) để [dashboard](DASHBOARD.md) hiển thị. Từ `0.2.0` mỗi event
+mang thêm `source_ref` và `source_label` lấy từ manifest, tra qua ledger; từ
+`0.3.0` có thêm `source_derived` cho biết manifest có khai báo bytes là bản
+trích hay không. Event không tra được giữ `null` cho cả ba, và `null` ở
+`source_derived` nghĩa là report không nói gì, **không** phải khẳng định bản ghi
+là file gốc. `evaluation`, fingerprints và `compare` không đổi.
 Parsed count không phải proof count; kết luận phải tham chiếu evidence IDs.
 
 | Exit | Ý nghĩa |

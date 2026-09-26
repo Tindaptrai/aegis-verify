@@ -1,0 +1,40 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "lab-sanitized",
+  "files": [
+    {
+      "path": "sysmon3-archive.json",
+      "source_ref": "lab-sysmon3-72340d49",
+      "display_label": "Lab sender (Sysmon 3)",
+      "parser": "wazuh-sysmon3-archive-v1",
+      "sha256": "300155fafb11211852df9b6931053e1492611b7b2314545086223660848bf82e",
+      "context": {
+        "ingested_at": "2026-09-22T15:00:00Z",
+        "collection_mode": "direct"
+      }
+    },
+    {
+      "path": "eve-alert.json",
+      "source_ref": "lab-suricata-lan-72340d49",
+      "display_label": "Lab Suricata LAN",
+      "parser": "suricata-eve-jsonl-v1",
+      "sha256": "00ed154a31362f7f0f47196947ce5c42cfb33a1eafa691367f74119aff0652f3",
+      "context": {
+        "ingested_at": "2026-09-22T15:00:00Z",
+        "sensor_id": "suricata-lan",
+        "deployment_mode": "ids"
+      }
+    },
+    {
+      "path": "wazuh-alert.json",
+      "source_ref": "lab-wazuh-86601-72340d49",
+      "display_label": "Lab Wazuh manager (rule 86601)",
+      "parser": "wazuh-suricata-alert-v1",
+      "sha256": "aec66d2cef15ca531cdab8c2a1ae03b09773313713f556dc3ac7e4cb662a5541",
+      "context": {
+        "ingested_at": "2026-09-22T15:00:00Z",
+        "collection_mode": "direct"
+      }
+    }
+  ]
+}

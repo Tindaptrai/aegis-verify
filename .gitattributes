@@ -2,4 +2,7 @@ tests/fixtures/cowrie/native/*.jsonl text eol=lf
 tests/fixtures/wazuh/windows-telemetry/*.json text eol=lf
 demos/scn-001/*.ps1 text eol=lf
 detections/wazuh/scn-001/*.template text eol=lf
+detections/suricata/scn-002/*.template text eol=lf
 tests/fixtures/demo/scn-001/**/*.json text eol=lf
+detections/suricata/scn-003/*.template text eol=lf
+detections/wazuh/scn-003/*.template text eol=lf

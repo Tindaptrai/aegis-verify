@@ -315,6 +315,25 @@ set làm attestation cũ không dùng lại được. `status="unknown"` luôn g
 `unknown`, kể cả khi có một phần metadata. Xác nhận sai có thể tạo kết luận sai;
 human review và lab collection assurance vẫn là bước bắt buộc.
 
+## Fingerprint gắn với phiên bản canonical model
+
+`event_set_fingerprint` băm `model_dump` của **mọi** field canonical, kể cả field
+vắng (`null`). Vì vậy thêm một field canonical mới, dù chỉ là optional, sẽ đổi
+fingerprint của mọi bằng chứng cũ. Ví dụ: `session_key` (thêm cho SCN-003, #83)
+làm approval Run B của SCN-001 v2 không còn khớp request được tạo lại trên `main`.
+
+Quy tắc:
+
+- Approval và declaration ghim đúng biểu diễn canonical của phiên bản code đã tạo
+  ra chúng. Đó là chủ ý: attestation không được trôi sang một biểu diễn khác.
+- Đánh giá lại bằng chứng cũ thì dùng **phiên bản code đã tạo ra nó** (tag hoặc
+  commit ghi trong hồ sơ). Đã kiểm 2026-09-27: bộ SCN-001 v2 cùng approval gốc chạy
+  trên tag `v0.1.0-lab.1` cho lại đúng B `False negative`, B→C `Regression Passed`.
+- Không đổi thuật toán fingerprint để "cứu" bằng chứng cũ: làm vậy sẽ làm hỏng
+  attestation mới hơn (ví dụ SCN-001 v3, ký sau #83).
+- Thêm field canonical là thay đổi có hệ quả: ghi rõ trong PR rằng fingerprint
+  của bằng chứng cũ sẽ đổi.
+
 ## Cowrie và giới hạn session
 
 Engine nhận trực tiếp các `CanonicalEventV2` do connector Cowrie offline trả về và

@@ -97,7 +97,7 @@ def test_real_block_canonical_values(source_line, timestamp, src, dst, src_port,
         "source_record_id": None, "asset_id": None, "username": None,
         "process_name": None, "process_id": None, "parent_process_name": None,
         "command_line": None, "file_path": None, "file_hash": None,
-        "signature_id": None, "severity": None, "technique_ids": None,
+        "signature_id": None, "severity": None, "technique_ids": None, "session_key": None,
     }
     assert {k: v for k, v in event.items() if k not in {"event_id", "raw_event_hash", "raw_event_ref"}} == expected
     metadata = record.provenance

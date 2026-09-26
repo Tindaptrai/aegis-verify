@@ -1,0 +1,54 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "lab-sanitized",
+  "files": [
+    {
+      "path": "filterlog.log",
+      "source_ref": "lab-pfsense-wan-cac43623",
+      "display_label": "Lab pfSense WAN filterlog",
+      "parser": "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
+      "sha256": "dd35d21770268a2128561bfb081321f0c76cce53c6ab0aeeb7b9a2206a5e4930",
+      "context": {
+        "ingested_at": "2026-09-26T15:00:00Z",
+        "sensor_id": "pfsense-wan",
+        "source_year": 2026,
+        "source_utc_offset": "+07:00"
+      }
+    },
+    {
+      "path": "eve-alert.json",
+      "source_ref": "lab-suricata-wan-cac43623",
+      "display_label": "Lab Suricata WAN",
+      "parser": "suricata-eve-jsonl-v1",
+      "sha256": "81fcb8982d0637ecdd7827459842c8adbed47078b6b352f791a28efcbd76818c",
+      "context": {
+        "ingested_at": "2026-09-26T15:00:00Z",
+        "sensor_id": "suricata-wan",
+        "deployment_mode": "ids"
+      }
+    },
+    {
+      "path": "cowrie-session.jsonl",
+      "source_ref": "lab-cowrie-cac43623",
+      "display_label": "Lab Cowrie honeypot",
+      "parser": "cowrie-jsonl-v1",
+      "sha256": "8cfad3c24cd9d83d36f7dcca9c8595efaaca6ed81d53ff33ad5142c79343fc75",
+      "context": {
+        "ingested_at": "2026-09-26T15:00:00Z",
+        "sensor_id": "lab-cowrie"
+      }
+    },
+    {
+      "path": "wazuh-alert.json",
+      "source_ref": "lab-wazuh-120003-cac43623",
+      "display_label": "Lab Wazuh manager (rule 120003)",
+      "parser": "wazuh-cowrie-alert-v1",
+      "sha256": "d9ec0bd9c5d500ae60c69d5463f2a89cfdf23b5fad817fee574d82b05e89629e",
+      "context": {
+        "ingested_at": "2026-09-26T15:00:00Z",
+        "collection_mode": "direct",
+        "sensor_id": "lab-cowrie"
+      }
+    }
+  ]
+}

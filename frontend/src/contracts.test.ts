@@ -28,6 +28,71 @@ describe('parseEvaluationReport', () => {
     expect(parsed.value.timeline?.events[0]?.signature_id).toBeNull();
   });
 
+  it('reads the configured source label and ref without touching the observed host', () => {
+    const parsed = parseEvaluationReport(afterFixture);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const events = parsed.value.timeline?.events ?? [];
+    const activity = events.find((e) => e.raw_event_ref === 'synthetic-activity#record=1');
+    const alert = events.find((e) => e.raw_event_ref === 'synthetic-alert#record=1');
+    expect(activity?.source_ref).toBe('synthetic-activity');
+    expect(activity?.source_label).toBe('Synthetic endpoint');
+    expect(activity?.hostname).toBe('synthetic-host');
+    // The second entry configures no label, so it stays null rather than reusing
+    // the first label or the observed hostname.
+    expect(alert?.source_ref).toBe('synthetic-alert');
+    expect(alert?.source_label).toBeNull();
+    // These fixture files are written as they are parsed, so neither is an extract.
+    expect(activity?.source_derived).toBe(false);
+    expect(alert?.source_derived).toBe(false);
+  });
+
+  it('reads a declared extract, and reads silence as unknown rather than native', () => {
+    const timeline = afterFixture.timeline as { events: Record<string, unknown>[] };
+    const withDerived = {
+      ...afterFixture,
+      timeline: {
+        ...timeline,
+        events: timeline.events.map((event, index) => {
+          if (index === 0) return { ...event, source_derived: true };
+          const { source_derived: _omitted, ...silent } = event;
+          return silent;
+        }),
+      },
+    };
+    const parsed = parseEvaluationReport(withDerived);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.timeline?.events[0]?.source_derived).toBe(true);
+    expect(parsed.value.timeline?.events[1]?.source_derived).toBeNull();
+  });
+
+  it('refuses a non-boolean extract flag instead of coercing it', () => {
+    const timeline = afterFixture.timeline as { events: Record<string, unknown>[] };
+    const broken = {
+      ...afterFixture,
+      timeline: { ...timeline, events: [{ ...timeline.events[0], source_derived: 'yes' }] },
+    };
+    expect(parseEvaluationReport(broken).ok).toBe(false);
+  });
+
+  it('reads a report written before the label existed as null, not as an error', () => {
+    const timeline = afterFixture.timeline as { version: string; order: string; events: Record<string, unknown>[] };
+    const legacy = {
+      ...afterFixture,
+      timeline: {
+        ...timeline,
+        version: '0.1.0',
+        events: timeline.events.map(({ source_ref: _ref, source_label: _label, ...rest }) => rest),
+      },
+    };
+    const parsed = parseEvaluationReport(legacy);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.value.timeline?.events[0]?.source_ref).toBeNull();
+    expect(parsed.value.timeline?.events[0]?.source_label).toBeNull();
+  });
+
   it('keeps a false negative and its caller-attested assurance verbatim', () => {
     const parsed = parseEvaluationReport(beforeFixture);
     expect(parsed.ok).toBe(true);

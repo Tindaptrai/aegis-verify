@@ -93,10 +93,11 @@ function TimelineItem({ event, fullIds, highlighted }: { event: TimelineEvent; f
           <span>{text(event.event_provider)}</span>
         </p>
         <dl className="event-fields">
+          <SourceField event={event} />
+          <Field label="Host (quan sát)" value={event.hostname} />
           <Field label="Hành động" value={event.event_action} />
           <Field label="Rule" value={event.rule_id} mono />
           <Field label="Signature" value={event.signature_id} mono />
-          <Field label="Host" value={event.hostname} />
           <Field label="Process" value={event.process_name} />
         </dl>
         <p className="event-meta">
@@ -117,6 +118,35 @@ function Field({ label, value, mono = false }: { label: string; value: string | 
     <div>
       <dt>{label}</dt>
       <dd className={value === null ? 'muted' : mono ? 'mono' : undefined}>{text(value)}</dd>
+    </div>
+  );
+}
+
+/**
+ * The source column never pretends to be observed telemetry. A configured
+ * label is shown as such; without one the manifest entry ref is shown and
+ * marked as a ref; with neither the usual no-data text appears.
+ *
+ * Bytes the manifest declares as extracted are marked too, so an extract is
+ * never read as a capture straight from the source. Saying nothing about it is
+ * not the same as saying it is native, so only an explicit `false` is quiet.
+ */
+function SourceField({ event }: { event: TimelineEvent }) {
+  const configured = event.source_label !== null;
+  const value = event.source_label ?? event.source_ref;
+  return (
+    <div>
+      <dt>Nguồn</dt>
+      <dd className={value === null ? 'muted' : configured ? undefined : 'mono'}>
+        {text(value)}
+        {value === null ? null : (
+          <span className="muted small"> {configured ? '(cấu hình)' : '(source ref)'}</span>
+        )}
+        {event.source_derived === true ? <span className="badge warn sm">bản trích</span> : null}
+        {event.source_derived === null ? (
+          <span className="muted small"> nguồn bytes: không có dữ liệu</span>
+        ) : null}
+      </dd>
     </div>
   );
 }

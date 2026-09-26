@@ -1,0 +1,54 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "synthetic-lab",
+  "files": [
+    {
+      "path": "filterlog-pass.log",
+      "source_ref": "synthetic-pfsense-lan",
+      "display_label": "Synthetic pfSense LAN",
+      "parser": "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
+      "sha256": "49e221b542f6a9262241c67157d55c526a79421709e79ad48ec0ea36be193316",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z",
+        "sensor_id": "pfsense-lan",
+        "source_year": 2026,
+        "source_utc_offset": "+07:00"
+      }
+    },
+    {
+      "path": "eve-alert.jsonl",
+      "source_ref": "synthetic-suricata-lan",
+      "display_label": "Synthetic Suricata LAN",
+      "parser": "suricata-eve-jsonl-v1",
+      "sha256": "40629e3529c7ecf50bde27f3b55cb90e1acc1d1f3f67e3bd0f434181d704d4c6",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z",
+        "sensor_id": "suricata-lan",
+        "deployment_mode": "ids"
+      }
+    },
+    {
+      "path": "cowrie-session.jsonl",
+      "source_ref": "synthetic-cowrie",
+      "display_label": "Synthetic Cowrie honeypot",
+      "parser": "cowrie-jsonl-v1",
+      "sha256": "c21bdcd924837636cea1c4c40bd77b01f8a2d92ae216723b10ad4b2693905abd",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z",
+        "sensor_id": "synthetic-cowrie"
+      }
+    },
+    {
+      "path": "wazuh-cowrie-alert.json",
+      "source_ref": "synthetic-wazuh-120003",
+      "display_label": "Synthetic Wazuh manager",
+      "parser": "wazuh-cowrie-alert-v1",
+      "sha256": "59b04006434b268674ab538a1ed048fecd547abddf871c188a22a33ac393c142",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z",
+        "collection_mode": "direct",
+        "sensor_id": "synthetic-cowrie"
+      }
+    }
+  ]
+}

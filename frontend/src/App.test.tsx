@@ -203,6 +203,65 @@ describe('Run view', () => {
     expect(within(content).getByText('false_negative')).toBeInTheDocument();
   });
 
+  it('shows the configured source label apart from the observed host, and falls back to the ref', async () => {
+    renderApp(allReports);
+    const content = main();
+    await within(content).findByRole('heading', { level: 1, name: 'synthetic-run-after-fix' });
+    fireEvent.click(within(content).getByRole('tab', { name: /Timeline/ }));
+    const items = within(content).getAllByRole('listitem');
+
+    const labelled = items.find((item) => item.textContent?.includes('Synthetic endpoint'))!;
+    expect(labelled).toBeDefined();
+    expect(labelled).toHaveTextContent('Nguồn');
+    expect(labelled).toHaveTextContent('Synthetic endpoint (cấu hình)');
+    // The observed hostname keeps its own field and is marked as observed.
+    expect(labelled).toHaveTextContent('Host (quan sát)');
+    expect(labelled).toHaveTextContent('synthetic-host');
+
+    const unlabelled = items.find((item) => item.textContent?.includes('synthetic-alert#record=1'))!;
+    expect(unlabelled).toBeDefined();
+    expect(unlabelled).toHaveTextContent('synthetic-alert (source ref)');
+    expect(unlabelled).not.toHaveTextContent('Synthetic endpoint');
+  });
+
+  it('marks bytes the manifest declares as an extract, and stays quiet for a native record', async () => {
+    const timeline = afterFixture.timeline as { events: Record<string, unknown>[] };
+    const report = {
+      ...afterFixture,
+      timeline: {
+        ...timeline,
+        events: timeline.events.map((event, index) =>
+          index === 0 ? { ...event, source_derived: true } : event,
+        ),
+      },
+    };
+    renderApp({ ...allReports, '/api/reports/after-detected.json': { status: 200, body: report } });
+    const content = main();
+    await within(content).findByRole('heading', { level: 1, name: 'synthetic-run-after-fix' });
+    fireEvent.click(within(content).getByRole('tab', { name: /Timeline/ }));
+    const items = within(content).getAllByRole('listitem');
+    const derived = items.find((item) => item.textContent?.includes('Synthetic endpoint'))!;
+    expect(derived).toHaveTextContent('bản trích');
+    const native = items.find((item) => item.textContent?.includes('synthetic-alert#record=1'))!;
+    expect(native).not.toHaveTextContent('bản trích');
+  });
+
+  it('says the byte source is unknown when an older report is silent about it', async () => {
+    const timeline = afterFixture.timeline as { events: Record<string, unknown>[] };
+    const legacy = {
+      ...afterFixture,
+      timeline: {
+        ...timeline,
+        events: timeline.events.map(({ source_derived: _flag, ...rest }) => rest),
+      },
+    };
+    renderApp({ ...allReports, '/api/reports/after-detected.json': { status: 200, body: legacy } });
+    const content = main();
+    await within(content).findByRole('heading', { level: 1, name: 'synthetic-run-after-fix' });
+    fireEvent.click(within(content).getByRole('tab', { name: /Timeline/ }));
+    expect(within(content).getAllByText(/nguồn bytes: không có dữ liệu/).length).toBe(2);
+  });
+
   it('explains a report without a timeline instead of ordering by guesswork', async () => {
     const { timeline: _omitted, ...legacy } = afterFixture;
     renderApp({ ...allReports, '/api/reports/after-detected.json': { status: 200, body: legacy } });
