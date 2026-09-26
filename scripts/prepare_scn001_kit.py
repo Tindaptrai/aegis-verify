@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PAYLOAD = b"$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }\nWrite-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $facts.Pid)\n"
 FILENAMES = ('lab_update.ps1', 'maintenance_check.ps1')
 REVISIONS = ('baseline', 'fixed', 'behavioral')
-KIT_VERSION = '0.2.0'
+KIT_VERSION = '0.3.0'
 # The behavioral revision is written from the two behaviors the scenario shows
 # in one script block, never from the payload text: an environment or machine
 # identity read, and a process identity read. Any wording of either counts, so
@@ -33,6 +33,12 @@ BEHAVIOR_PATTERN = (
     r'|\[Environment\]::(?:MachineName|UserName|UserDomainName)\b'
     r'|GetEnvironmentVariable))'
     r'(?=.*(?:\$PID\b|GetCurrentProcess\(\)\.Id\b))')
+# The reviewed runner's preflight function reads the machine name and $PID to
+# check where it runs, so it carries both behaviors and fired the rule in the v2
+# lab set (issue #91). A level-0 child rule exempts it only at the runner's exact
+# lab path and only for this function's own opening and error code.
+RUNNER = 'Invoke-SafeDemo.ps1'
+RUNNER_ANCHOR_PATTERN = r"(?s)\Afunction Get-AegisPreflight\s*\{.*'AEGIS_WRONG_HOST'"
 # A second wording of the same two behaviors, used only as a synthetic control.
 REWORDED = ("$m = [Environment]::MachineName; $u = [Environment]::UserName\n"
             "\"AEGIS_SAFE_DEMO_V1\"\n"
@@ -47,7 +53,8 @@ def _field_profile(value):
 
 
 def _ids(rule_id, parent_sid):
-    if type(rule_id) is not int or not 100000 <= rule_id <= 120000:
+    # rule_id + 1 is the behavioral revision's runner exception, so it must fit too.
+    if type(rule_id) is not int or not 100000 <= rule_id <= 119999:
         raise ValueError('invalid_rule_id')
     if type(parent_sid) is not int or not 1 <= parent_sid <= 999999 or parent_sid == rule_id:
         raise ValueError('invalid_parent_sid')
@@ -103,6 +110,7 @@ def render_rule(*, revision: str, rule_id: int, parent_sid: int,
     if not isinstance(baseline_path, str) or not baseline_path.endswith('\\lab_update.ps1'):
         raise ValueError('invalid_baseline_path')
     _directory(baseline_path[:-len('\\lab_update.ps1')])
+    runner_path = baseline_path[:-len('lab_update.ps1')] + RUNNER
     lines = PAYLOAD.decode('ascii').splitlines()
     script_pattern = r'\A' + r'\r?\n'.join(map(re.escape, lines)) + r'(?:\r?\n)?\z'
     content_description = 'reviewed script content matched'
@@ -110,11 +118,14 @@ def render_rule(*, revision: str, rule_id: int, parent_sid: int,
         # Pinned, lossy EventChannel representation of THIS ASCII/LF payload.
         # Not a general Windows decoder or a reversible evidence normalization.
         baseline_path = baseline_path.replace('\\', '\\\\')
+        runner_path = runner_path.replace('\\', '\\\\')
         script_pattern = _path_pattern(' '.join(lines))
         content_description = 'decoded script representation matched'
     template = _asset(ROOT / 'detections/wazuh/scn-001' / f'{revision}.xml.template')
     rendered = Template(template.decode('utf-8')).substitute(
-        rule_id=str(rule_id), parent_sid=str(parent_sid),
+        rule_id=str(rule_id), parent_sid=str(parent_sid), exception_rule_id=str(rule_id + 1),
+        runner_path_pattern=escape(_path_pattern(runner_path)),
+        runner_anchor_pattern=escape(RUNNER_ANCHOR_PATTERN),
         host_pattern=escape(_path_pattern(target_host)),
         path_pattern=escape(_path_pattern(baseline_path)),
         script_pattern=escape(script_pattern), content_description=content_description,
@@ -220,7 +231,7 @@ def prepare_kit(*, output_dir: Path, lab_directory: str, target_host: str,
     if (not isinstance(occupied_ids, frozenset)
             or any(type(i) is not int or not 1 <= i <= 999999 for i in occupied_ids)):
         raise ValueError('invalid_occupied_ids')
-    if rule_id in occupied_ids:
+    if rule_id in occupied_ids or rule_id + 1 in occupied_ids:
         raise ValueError('rule_id_occupied')
     out = _output_directory(output_dir)
     payload = _asset(ROOT / 'demos/scn-001/payload.ps1')

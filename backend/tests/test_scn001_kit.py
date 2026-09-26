@@ -316,7 +316,7 @@ def test_native_kit_records_profile_without_changing_payload_or_runner(kit_modul
     manifest = kit_module.prepare_kit(**options(tmp_path, field_profile=NATIVE_PROFILE))
     out = tmp_path / 'kit'
     assert manifest['field_profile'] == NATIVE_PROFILE
-    assert manifest['kit_version'] == '0.2.0'  # Enriched payload and third revision: runner contract moved with it.
+    assert manifest['kit_version'] == '0.3.0'  # Runner exception in `behavioral` (issue #91); runner contract moved with it.
     assert (out / 'lab_update.ps1').read_bytes() == PAYLOAD
     assert (out / 'maintenance_check.ps1').read_bytes() == PAYLOAD
     assert (out / 'Invoke-SafeDemo.ps1').read_bytes() == (ROOT / 'demos/scn-001/Invoke-SafeDemo.ps1').read_bytes()
@@ -362,3 +362,70 @@ def test_cli_accepts_explicit_native_profile(kit_module, tmp_path):
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout)['status'] == 'prepared_not_executed'
     assert json.loads((tmp_path / 'kit/kit.json').read_bytes())['field_profile'] == NATIVE_PROFILE
+
+
+def runner_preflight_text():
+    # The block PowerShell logs for the runner's preflight is the function statement itself.
+    text = (ROOT / 'demos/scn-001/Invoke-SafeDemo.ps1').read_text(encoding='ascii')
+    start = text.index('function Get-AegisPreflight {')
+    return text[start:text.index('\n}\n', start) + 2]
+
+
+def behavioral_rules(kit_module, profile):
+    return ET.fromstring(kit_module.render_rule(
+        revision='behavioral', rule_id=119901, parent_sid=91816, target_host='SYNTHETIC.ENDPOINT',
+        baseline_path=r'C:\AEGIS Synthetic\lab_update.ps1', field_profile=profile)).findall('rule')
+
+
+def hit(rule, event):
+    # Python `re` stand-in for the anchored subset used here; NOT the Wazuh/PCRE2 engine.
+    return all(isinstance(event.get(f.attrib['name']), str)
+               and re.search(f.text.replace(r'\z', r'\Z'), event[f.attrib['name']])
+               for f in rule.findall('field'))
+
+
+def fires(rules, event):
+    demo, exception = rules
+    if not hit(demo, event):
+        return None
+    return exception.attrib['id'] if hit(exception, event) else demo.attrib['id']
+
+
+@pytest.mark.parametrize('profile', ['decoded-json-v1', NATIVE_PROFILE])
+def test_behavioral_exempts_only_the_reviewed_runner_preflight(kit_module, profile):
+    rules = behavioral_rules(kit_module, profile)
+    assert [r.attrib for r in rules] == [{'id': '119901', 'level': '5'}, {'id': '119902', 'level': '0'}]
+    assert rules[1].findtext('if_sid') == '119901'
+    native = profile == NATIVE_PROFILE
+
+    def event(path, text):
+        base = {'win.system.providerName': 'Microsoft-Windows-PowerShell',
+                'win.system.channel': 'Microsoft-Windows-PowerShell/Operational',
+                'win.system.eventID': '4104', 'win.system.computer': 'SYNTHETIC.ENDPOINT',
+                'win.eventdata.messageNumber': '1', 'win.eventdata.messageTotal': '1'}
+        path = 'C:\\AEGIS Synthetic\\' + path
+        if native:
+            path, text = path.replace('\\', '\\\\'), re.sub(r'\s*\n\s*', ' ', text).strip()
+        return base | {'win.eventdata.path': path, 'win.eventdata.scriptBlockText': text}
+
+    preflight = runner_preflight_text()
+    # The problem this fixes: the runner's own preflight carries both behaviors.
+    assert hit(rules[0], event('Invoke-SafeDemo.ps1', preflight))
+    assert fires(rules, event('Invoke-SafeDemo.ps1', preflight)) == '119902'
+    for path, text in (
+            ('Invoke-SafeDemo.ps1', PAYLOAD.decode()),              # payload text at the runner's path
+            ('maintenance_check.ps1', preflight),                    # runner text at another path
+            ('Invoke-SafeDemo.ps1x', preflight),
+            ('Other\\Invoke-SafeDemo.ps1', preflight),
+            ('Invoke-SafeDemo.ps1', '# x\n' + preflight),            # anchor must open the block
+            ('Invoke-SafeDemo.ps1', preflight.replace("'AEGIS_WRONG_HOST'", "'OTHER'")),
+            ('Invoke-SafeDemo.ps1', REWORDED)):
+        assert fires(rules, event(path, text)) == '119901', (path, text[:40])
+
+
+def test_runner_exception_id_must_be_free(kit_module, tmp_path):
+    with pytest.raises(ValueError, match='rule_id_occupied'):
+        kit_module.prepare_kit(**options(tmp_path, occupied_ids=frozenset({119902})))
+    with pytest.raises(ValueError, match='invalid_rule_id'):
+        kit_module.prepare_kit(**options(tmp_path, rule_id=120000))
+    assert not (tmp_path / 'kit').exists()

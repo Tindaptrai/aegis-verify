@@ -12,4 +12,10 @@
     <description>AEGIS safe demo: behavior matched, environment and process identity discovery in one script block; not a malware verdict.</description>
     <options>no_email_alert</options>
   </rule>
+  <rule id="$exception_rule_id" level="0">
+    <if_sid>$rule_id</if_sid>
+    <field name="win.eventdata.path" type="pcre2">$runner_path_pattern</field>
+    <field name="win.eventdata.scriptBlockText" type="pcre2">$runner_anchor_pattern</field>
+    <description>AEGIS safe demo: reviewed runner preflight block at its lab path; suppressed, says nothing about any other script.</description>
+  </rule>
 </group>
