@@ -181,9 +181,13 @@ def test_a_rewritten_source_port_breaks_the_nat_bridge(manifest, profile, contex
     lambda: wazuh(username="AEGIS-SCN003-ffffffff"),
     lambda: wazuh(key=OTHER_KEY),
     lambda: wazuh(protocol="ssh"),
-    lambda: wazuh(timestamp="2026-01-01T00:00:15.100000001Z"),
+    lambda: wazuh(timestamp="2026-01-01T00:00:12.100000001Z"),
+    lambda: wazuh(timestamp="2026-01-01T00:00:08.099999999Z"),
+    lambda: eve(timestamp="2026-01-01T00:00:12.000000001Z"),
+    lambda: eve(timestamp="2026-01-01T00:00:07.999999999Z"),
 ], ids=["decoy-port", "suricata-sees-post-nat", "suricata-other-src-port", "filterlog-pre-nat-dst",
-        "other-username", "other-session", "other-protocol", "beyond-window"])
+        "other-username", "other-session", "other-protocol", "wazuh-after-window", "wazuh-before-window",
+        "suricata-after-window", "suricata-before-window"])
 def test_evidence_of_another_flow_or_session_is_not_a_witness(manifest, profile, context, bad):
     replacement = bad()
     events = [replacement if e.event_id == replacement.event_id else e for e in all_events()]
@@ -192,9 +196,20 @@ def test_evidence_of_another_flow_or_session_is_not_a_witness(manifest, profile,
     assert result.final_status != "Detected"
 
 
-def test_the_window_edge_is_inclusive(manifest, profile, context):
-    events = [filterlog(), eve(), connect(), login(), wazuh(timestamp="2026-01-01T00:00:15.100000000Z")]
+@pytest.mark.parametrize("suricata, wazuh_at", [
+    ("2026-01-01T00:00:12.000000000Z", "2026-01-01T00:00:12.100000000Z"),
+    ("2026-01-01T00:00:08.000000000Z", "2026-01-01T00:00:08.100000000Z"),
+], ids=["after-edge", "before-edge"])
+def test_the_window_edge_is_inclusive(manifest, profile, context, suricata, wazuh_at):
+    events = [filterlog(), eve(timestamp=suricata), connect(), login(), wazuh(timestamp=wazuh_at)]
     assert evaluate_scenario(manifest, events, profile=profile, context=context).final_status == "Detected"
+
+
+def test_both_correlation_windows_are_two_seconds_measured_on_the_lab(profile):
+    windows = {r.assertion_id: (r.correlation.min_delta_ns, r.correlation.max_delta_ns)
+               for r in profile.rules if r.correlation is not None}
+    assert windows == {"SCN-003-A01": (-2_000_000_000, 2_000_000_000),
+                       "SCN-003-A04": (-2_000_000_000, 2_000_000_000)}
 
 
 def test_direct_connection_without_dnat_uses_the_same_profile(manifest, profile, context):
