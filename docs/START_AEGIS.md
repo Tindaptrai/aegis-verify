@@ -20,8 +20,15 @@ bằng đường dẫn đầy đủ; đường dẫn reports tương đối đư
   hãy build lại khi đổi frontend.
 - Script in URL; mở URL đó trong trình duyệt. Server chạy foreground trên
   `127.0.0.1`, Ctrl+C để dừng. Không cài background service hay tự mở trình duyệt.
-- Không cài dependency/build tự động; không sửa execution policy, nhập credential,
-  kết nối lab, đổi report, kill tiến trình hoặc chạy scenario.
+- Không cài dependency/build tự động; không sửa execution policy, kết nối lab,
+  đổi report, kill tiến trình hoặc chạy scenario.
+- Mặc định không hỏi credential. Chỉ khi dùng Operations và truyền cả
+  `-OperationsConfig` lẫn `-PromptCredentials Inventory|Collections|Both`,
+  launcher mới hỏi username và mật khẩu ẩn ngay trong terminal (thêm ở PR #45).
+  Credential chỉ nằm trong môi trường tiến trình khi server chạy và được khôi
+  phục khi thoát; không truyền qua tham số, không lưu file. Chi tiết và mã lỗi
+  `credential_input_failed`, `launcher_start_failed`: xem
+  [Nhập credential trong terminal](OPERATIONS.md#nhập-credential-trong-terminal-windows-powershell).
 - Hỗ trợ Windows PowerShell 5.1 và PowerShell 7 trên Windows. Nếu chính sách tổ
   chức chặn script, dừng và nhờ người quản trị review; không tắt policy toàn máy.
 
