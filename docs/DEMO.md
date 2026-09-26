@@ -57,13 +57,13 @@ two behaviors the payload actually performs in one script block — an environme
 machine-identity read and a process-identity read — in any wording, and is tested
 against benign cases (env-only, pid-only, marker-only) plus a reworded equivalent.
 Its known limits are stated, not hidden: commented-out code still matches (kit
-catalog), and the demo runner's own preflight function reads the machine name and
-`$PID` in one script block, so on the real engine it also fires 118001 (Run C,
-Windows record 12921). That record is excluded from the verdict only by the A03
-path scope; on baseline the same block already fires stock rule 91815. The rule is
-a lab demo artifact under group `aegis_safe_demo` and must not be deployed outside
-the lab until an explicit tooling exception is added and re-tested (assessment and
-recommendation in SCN001_V2_APPROVAL_AND_PINS.md, section 5).
+catalog). In the v2 lab set the demo runner's own preflight function, which reads
+the machine name and `$PID` in one script block, also fired 118001 (Run C, Windows
+record 12921). Since kit 0.3.0 (issue #91) a level-4 child rule relabels exactly
+that block, at the runner's lab path, as tooling instead of the demo detection; the
+v3 lab set confirmed it on the real engine while the payload and the `reworded`
+control still fire 118001 ([v3 result](SCN001_V3_RESULT_2026-09-27.md)). The rule
+remains a lab demo artifact under group `aegis_safe_demo`.
 
 ## Run C — Re-test
 

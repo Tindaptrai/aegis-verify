@@ -15,7 +15,7 @@ chạy A/B/C chính thức hoặc kết luận `Regression Passed` từ kit này
 Không cần Python trên Windows lab. Không chạy payload trên manager. Kit không
 SSH, không gọi API SIEM, không đọc mật khẩu hoặc tự cấu hình hệ thống.
 
-Payload (kit 0.2.0) đọc ba giá trị định danh lành tính rồi in marker và PID:
+Payload (từ kit 0.2.0, không đổi ở 0.3.0) đọc ba giá trị định danh lành tính rồi in marker và PID:
 
 ```powershell
 $facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }
@@ -250,7 +250,9 @@ Write-Host ('REHEARSAL_EXIT=' + $LASTEXITCODE)
 
 Rehearsal chọn `maintenance_check.ps1`. A chọn tên gốc, B/C chọn tên mới;
 A/B chỉ nhận baseline, C chỉ nhận `behavioral` (từ kit 0.2.0; `fixed` vẫn được
-ship và pin để tái lập thí nghiệm content-matching). API đã có guards này để dùng về sau,
+ship và pin để tái lập thí nghiệm content-matching). Từ kit 0.3.0, `behavioral` có
+thêm rule con `rule_id + 1` level 4 gắn nhãn tooling cho đúng block
+`Get-AegisPreflight` của runner tại đường dẫn lab (issue #91); ID đó cũng phải trống. API đã có guards này để dùng về sau,
 không có nghĩa đã sẵn sàng cho A/B/C evaluation chính thức.
 
 Runner đợi khoảng 10 giây từ đầu window rồi tạo đúng một child PowerShell,
