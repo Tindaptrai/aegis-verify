@@ -79,9 +79,17 @@ def parse_cowrie_wazuh_document(
     event_identifier = evidence_id(environment_id, sensor_id, source_ref, raw_hash)
     last_line = _line_end(raw)
     raw_ref = f"{source_ref}#L1-L{last_line}"
+    source_session = metadata["session"]
+    # The canonical event carries only the opaque key, never the raw session.
+    key = (
+        session_key(environment_id, sensor_id, source_session)
+        if source_session is not None
+        else None
+    )
     try:
         event = CanonicalEventV2(
             **fields,
+            session_key=key,
             event_id=event_identifier,
             environment_id=environment_id,
             ingested_at=ingestion,
@@ -95,7 +103,6 @@ def parse_cowrie_wazuh_document(
         field_path = "canonical." + str(location[0]) if location else None
         raise CowrieParseError("canonical_validation", field_path) from None
 
-    source_session = metadata["session"]
     provenance = CowrieProvenance(
         **metadata,
         environment_id=environment_id,
@@ -105,11 +112,7 @@ def parse_cowrie_wazuh_document(
         event_id=event_identifier,
         raw_event_hash=raw_hash,
         raw_event_ref=raw_ref,
-        session_key=(
-            session_key(environment_id, sensor_id, source_session)
-            if source_session is not None
-            else None
-        ),
+        session_key=key,
     )
     return CowrieParseResult(event=event, provenance=provenance)
 

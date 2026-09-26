@@ -12,12 +12,16 @@ _CODES = frozenset({
     'canonical_validation', 'io_error', 'incomplete_script', 'unsupported_fragmentation',
 })
 _FIELDS = frozenset({
-    'source_ref', 'environment_id', 'ingested_at', 'collection_mode',
+    'source_ref', 'environment_id', 'ingested_at', 'collection_mode', 'sensor_id',
     'id', 'agent', 'agent.id', 'agent.name', 'manager', 'manager.name',
     'rule', 'rule.id', 'rule.level', 'rule.groups', 'timestamp', 'data', 'data.win',
     *('data.' + field for field in
       ('timestamp', 'event_type', 'alert', 'src_ip', 'dest_ip', 'src_port', 'dest_port',
        'proto', 'flow_id', 'app_proto', 'in_iface')),
+    # Cowrie data re-rooted by the manager-alert parser.
+    *('data.' + field for field in
+      ('eventid', 'session', 'username', 'password', 'dst_ip', 'dst_port', 'protocol',
+       'sensor', 'uuid', 'arch', 'input')),
     *('data.alert.' + field for field in
       ('action', 'signature_id', 'severity', 'gid', 'rev', 'signature', 'category')),
     'data.win.system', 'data.win.eventdata',

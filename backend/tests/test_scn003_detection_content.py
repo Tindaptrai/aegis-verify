@@ -107,18 +107,17 @@ def test_username_grammar_accepts_only_run_markers(candidate, accepted):
     assert bool(pattern.match(candidate)) is accepted
 
 
-def test_the_two_ids_are_not_claimed_elsewhere_in_the_repository():
+def test_the_two_ids_belong_to_scn003_content_only():
+    """The IDs may be referenced by SCN-003 fixtures, tests, profile and docs,
+    but no other detection template or another scenario's profile may claim them."""
     hits = []
-    for path in ROOT.rglob("*"):
-        if not path.is_file() or any(part in {".git", ".venv", "node_modules", "dist", "__pycache__"}
-                                     for part in path.parts):
-            continue
-        if path.suffix not in {".py", ".json", ".xml", ".template", ".md", ".yaml", ".yml", ".rules"}:
-            continue
-        if path in (SURICATA, WAZUH, Path(__file__)) or "superpowers" in path.parts \
-                or path.name == "SCN003_DETECTION_CONTENT.md":
-            continue
-        text = path.read_text("utf-8", errors="ignore")
-        if SURICATA_SID in text or WAZUH_RULE_ID in text:
-            hits.append(path.relative_to(ROOT).as_posix())
+    for folder in (ROOT / "detections", ROOT / "scenarios"):
+        for path in folder.rglob("*"):
+            if not path.is_file() or path.suffix not in {".template", ".xml", ".rules", ".json", ".yaml", ".yml"}:
+                continue
+            if "scn-003" in path.parts or path in (SURICATA, WAZUH):
+                continue
+            text = path.read_text("utf-8", errors="ignore")
+            if SURICATA_SID in text or WAZUH_RULE_ID in text:
+                hits.append(path.relative_to(ROOT).as_posix())
     assert hits == [], hits
