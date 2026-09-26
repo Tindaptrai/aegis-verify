@@ -1,0 +1,96 @@
+{
+  "profile_schema_version": "0.1.0",
+  "profile_id": "scn003-single-cowrie-session-detected",
+  "profile_version": "0.1.0",
+  "scenario_id": "SCN-003",
+  "scenario_version": "0.1.0",
+  "scenario_fingerprint": "d84ec3dbd59081ac6e275ef62393f2eff6cdcac207c3b28332737274184d1550",
+  "rules": [
+    {
+      "assertion_id": "SCN-003-A01",
+      "role": "detection",
+      "capability": "supported",
+      "source_type": "suricata",
+      "scope": [
+        {"field": "src_ip", "op": "eq", "binding": "initiator_ip"},
+        {"field": "dst_ip", "op": "eq", "binding": "decoy_ip"},
+        {"field": "dst_port", "op": "eq", "binding": "decoy_port"},
+        {"field": "protocol", "op": "eq", "value": "TCP"}
+      ],
+      "match": [
+        {"field": "signature_id", "op": "eq", "value": "1000012"}
+      ],
+      "correlation": {
+        "anchor_assertion_id": "SCN-003-A02",
+        "join_pairs": [
+          {"target_field": "src_ip", "anchor_field": "src_ip"},
+          {"target_field": "src_port", "anchor_field": "src_port"}
+        ],
+        "min_delta_ns": -5000000000,
+        "max_delta_ns": 5000000000
+      }
+    },
+    {
+      "assertion_id": "SCN-003-A02",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "pfsense",
+      "scope": [
+        {"field": "src_ip", "op": "eq", "binding": "initiator_ip"},
+        {"field": "src_port", "op": "eq", "binding": "initiator_port"},
+        {"field": "dst_ip", "op": "eq", "binding": "firewall_dst_ip"},
+        {"field": "dst_port", "op": "eq", "binding": "firewall_dst_port"},
+        {"field": "event_provider", "op": "eq", "value": "pfSense-filterlog"},
+        {"field": "protocol", "op": "eq", "value": "tcp"}
+      ],
+      "match": [
+        {"field": "event_action", "op": "eq", "value": "allowed"},
+        {"field": "rule_id", "op": "eq", "binding": "firewall_rule_tracker"}
+      ]
+    },
+    {
+      "assertion_id": "SCN-003-A03",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "cowrie",
+      "scope": [
+        {"field": "src_ip", "op": "eq", "binding": "initiator_ip"},
+        {"field": "src_port", "op": "eq", "binding": "initiator_port"},
+        {"field": "dst_ip", "op": "eq", "binding": "cowrie_ip"},
+        {"field": "dst_port", "op": "eq", "binding": "cowrie_port"},
+        {"field": "event_provider", "op": "eq", "value": "cowrie"},
+        {"field": "protocol", "op": "eq", "binding": "honeypot_protocol"}
+      ],
+      "match": [
+        {"field": "event_action", "op": "eq", "value": "observed"},
+        {"field": "session_key", "op": "exists"}
+      ]
+    },
+    {
+      "assertion_id": "SCN-003-A04",
+      "role": "detection",
+      "capability": "supported",
+      "source_type": "wazuh",
+      "scope": [
+        {"field": "src_ip", "op": "eq", "binding": "initiator_ip"},
+        {"field": "event_provider", "op": "eq", "value": "cowrie"},
+        {"field": "protocol", "op": "eq", "binding": "honeypot_protocol"}
+      ],
+      "match": [
+        {"field": "rule_id", "op": "eq", "value": "120003"},
+        {"field": "event_action", "op": "eq", "value": "login"},
+        {"field": "username", "op": "eq", "binding": "username_marker"}
+      ],
+      "correlation": {
+        "anchor_assertion_id": "SCN-003-A03",
+        "join_pairs": [
+          {"target_field": "src_ip", "anchor_field": "src_ip"},
+          {"target_field": "protocol", "anchor_field": "protocol"},
+          {"target_field": "session_key", "anchor_field": "session_key"}
+        ],
+        "min_delta_ns": -5000000000,
+        "max_delta_ns": 5000000000
+      }
+    }
+  ]
+}
