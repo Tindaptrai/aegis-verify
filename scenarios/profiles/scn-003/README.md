@@ -6,6 +6,12 @@ bindings trong `context.json` của từng lượt, ngoài Git; `context.example
 chỉ minh hoạ tên binding bằng dải địa chỉ tài liệu RFC 5737 và một username
 marker giả.
 
+Bằng chứng lab thật đã chạy qua profile này ngày 2026-09-26, ra `Detected`;
+hash và fingerprint ở [SCN003_RESULT_2026-09-26.md](../../../docs/SCN003_RESULT_2026-09-26.md).
+Test engine dùng event tổng hợp; bundle CLI sanitized từ lượt thật ở
+[`tests/fixtures/cli/scn003-lab-sanitized/`](../../../tests/fixtures/cli/scn003-lab-sanitized/README.md)
+chứng minh đường `aegis validate` với đúng hình dạng nguồn.
+
 ## Hai telemetry root, hai miền NAT
 
 | Assertion | Vai trò | Root/witness | Scope | Join |

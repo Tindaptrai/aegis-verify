@@ -11,7 +11,9 @@ core workflow is **Gap → Rule Fix → Re-test → Pass**.
 > native-review input and bounded live Wazuh Indexer collector are available.
 > **SCN-002 reached `Prevented` on real lab evidence on 2026-09-22**, evaluated
 > offline through the engine ([result and evidence hashes](docs/SCN002_RESULT_2026-09-22.md)).
-> SCN-003 has a design issue only. All three manifests still declare `status: draft`.
+> **SCN-003 reached `Detected` on real lab evidence on 2026-09-26**, evaluated
+> offline through the engine ([result and evidence hashes](docs/SCN003_RESULT_2026-09-26.md)).
+> All three manifests still declare `status: draft`.
 > This is not production certification or live fleet monitoring. Historical run
 > binding remains unknown; successful reads do not prove least-privilege access.
 > Start with the [V1 handoff/runbook](docs/V1_HANDOFF.md) and
@@ -99,7 +101,7 @@ a lab action, evaluate log evidence or return detection/prevention results.
 | --- | --- | --- |
 | [SCN-001](scenarios/SCN-001-powershell-execution.yaml) PowerShell execution | `detected` | Local lab MVP milestone with the Gap → Fix demo kit; see [Operations acceptance](docs/OPERATIONS_ACCEPTANCE.md) and [study run](docs/SCN001_STUDY_RUN.md) |
 | [SCN-002](scenarios/SCN-002-attempted-exfiltration.yaml) attempted exfiltration | `prevented` | `Prevented` on real lab evidence, 2026-09-22; [public profile](docs/SCN002_EVALUATION_PROFILE.md), [block-round runbook](docs/SCN002_BLOCK_RUN_RUNBOOK.md), [result](docs/SCN002_RESULT_2026-09-22.md), [lab-derived sanitized bundles](tests/fixtures/cli/scn002-lab-sanitized/README.md) |
-| [SCN-003](scenarios/SCN-003-internal-deception.yaml) internal deception | `detected` | Design issue only |
+| [SCN-003](scenarios/SCN-003-internal-deception.yaml) internal deception | `detected` | `Detected` on real lab evidence, 2026-09-26; [public profile](scenarios/profiles/scn-003/README.md), [result](docs/SCN003_RESULT_2026-09-26.md), [lab-derived sanitized bundle](tests/fixtures/cli/scn003-lab-sanitized/README.md) |
 
 Ground truth changes need explicit owner approval; every manifest still says
 `status: draft`.
