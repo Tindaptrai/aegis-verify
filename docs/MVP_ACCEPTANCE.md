@@ -47,13 +47,16 @@ vận hành cục bộ.
   đúng phiên bản code đã tạo ra nó ([Validation Engine](VALIDATION_ENGINE.md)).
 - Collector live chỉ retry khi gặp HTTP 429; quyền tối thiểu do người vận hành
   rà; chưa gây lỗi thử trên lab thật.
+- Trên máy gửi của lab, giờ của Sysmon 3 lệch dần sau khi Sysmon khởi động và sau mỗi lần
+  chỉnh nhảy đồng hồ. Mỗi lượt SCN-002 phải xem `source_minus_send_s` trước khi đọc verdict
+  ([SCN002_COLLECT.md](SCN002_COLLECT.md#đọc-độ-lệch-giờ-issue-102)).
 - Công cụ cho một người vận hành, lab riêng; không phải sản phẩm production.
 
 ## 5. Kiểm chứng phần mềm
 
 | Kiểm | Kết quả |
 | --- | --- |
-| Backend đầy đủ (Windows, Python 3.12, local, `main` @ `6b7eeef`) | 3228 passed, 2 skipped (FIFO và POSIX mode, bình thường trên Windows) |
+| Backend đầy đủ (Windows, Python 3.12, local, code của `main` @ `4f238c5`) | 3284 passed, 2 skipped (FIFO và POSIX mode, bình thường trên Windows) |
 | Frontend: Vitest, TypeScript và Vite build | 86 passed; build đạt |
 | CI GitHub | hết quota Actions miễn phí tháng 9; tự chạy lại từ 2026-10-01. PR chỉ chạy Linux/Python 3.12, `main` chạy đủ ma trận ([CI.md](CI.md)) |
 
@@ -63,5 +66,8 @@ vận hành cục bộ.
 - Chọn license nếu định phân phối (repo chưa có file LICENSE).
 - Đánh dấu GitGuardian incident 37636143 là false positive (tên field `password`
   trong danh sách field chẩn đoán, không phải bí mật).
-- Giữ hay gỡ quyền truy cập lab đã cấp cho tự động hoá (sudoers hẹp, key SSH, quyền
-  ssh trong cài đặt Claude Code cục bộ).
+- Giữ hay gỡ quyền truy cập lab đã cấp cho tự động hoá (sudoers hẹp, key SSH kể cả key
+  vào máy khởi tạo SCN-003, quyền ssh trong cài đặt Claude Code cục bộ).
+- Lab: bật lại service w32time trên máy gửi SCN-002 (đang dừng sau lần khởi động lại
+  ngày 2026-09-27); chỉnh giờ máy host; cân nhắc nâng agent Wazuh trên firewall (đang là
+  4.14.4 revision `rc2`, từng ngừng đẩy log mà không báo lỗi).
