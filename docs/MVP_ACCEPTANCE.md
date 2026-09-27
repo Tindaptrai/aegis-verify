@@ -68,6 +68,6 @@ vận hành cục bộ.
   trong danh sách field chẩn đoán, không phải bí mật).
 - Giữ hay gỡ quyền truy cập lab đã cấp cho tự động hoá (sudoers hẹp, key SSH kể cả key
   vào máy khởi tạo SCN-003, quyền ssh trong cài đặt Claude Code cục bộ).
-- Lab: bật lại service w32time trên máy gửi SCN-002 (đang dừng sau lần khởi động lại
-  ngày 2026-09-27); chỉnh giờ máy host; cân nhắc nâng agent Wazuh trên firewall (đang là
-  4.14.4 revision `rc2`, từng ngừng đẩy log mà không báo lỗi).
+- ~~Bật lại w32time trên máy gửi SCN-002~~: đã chạy lại và đồng bộ ngày 2026-09-27.
+- Lab: chỉnh giờ máy host; cân nhắc nâng agent Wazuh trên firewall (đang là 4.14.4
+  revision `rc2`, từng ngừng đẩy log mà không báo lỗi).
