@@ -1,8 +1,8 @@
 # v0.2.0-lab — ghi chú phát hành (bản nháp)
 
 Trạng thái: **bản nháp, chờ chủ dự án duyệt tag**. Không tự tăng version package
-hay đặt tag. Mốc trước: `v0.1.0-lab.1`. Đề xuất đặt tag trên commit merge tài liệu
-này (hoặc `6b7eeef` nếu muốn tag trước tài liệu).
+hay đặt tag. Mốc trước: `v0.1.0-lab.1`. Đề xuất đặt tag trên commit merge bản cập
+nhật ghi chú này.
 
 ## Điểm chính
 
@@ -11,12 +11,18 @@ này (hoặc `6b7eeef` nếu muốn tag trước tài liệu).
   [Nghiệm thu MVP](MVP_ACCEPTANCE.md).
 - **Kịch bản demo offline** cho cả ba scenario và dashboard, dựa trên bundle đã
   sanitize: [DEMO_WALKTHROUGH.md](DEMO_WALKTHROUGH.md).
+- **Thu bằng chứng lab bằng sản phẩm:** `aegis collect scn002` và
+  `aegis collect scn003` đọc qua SSH chỉ đọc, kiểm đồng hồ, lọc đúng lượt và ghi
+  bundle cho `aegis validate` ([SCN-002](SCN002_COLLECT.md), [SCN-003](SCN003_COLLECT.md)).
 
-## Thay đổi từ v0.1.0-lab.1 (41 PR)
+## Thay đổi từ v0.1.0-lab.1 (44 PR)
 
 **CI, launcher:** CI fixture Windows/Linux (#34); launcher một lệnh (#35) và nhập
-credential tuỳ chọn (#45); PR chỉ chạy Linux để tiết kiệm phút Actions (PR thêm
-tài liệu này).
+credential tuỳ chọn (#45); PR chỉ chạy Linux/Python 3.12 để tiết kiệm phút Actions,
+`main` giữ đủ ma trận (#96).
+
+**Thu bằng chứng lab:** `aegis collect scn003` (#97) và `aegis collect scn002` (#99),
+chung phần lõi SSH chỉ đọc, kiểm config chặt và ghi bundle ngoài Git.
 
 **Operations (chỉ đọc, SCN-001):** service (#40), inventory agent (#41), UI (#42),
 bàn giao (#43), test khôi phục sau crash và mất nguồn (#47).
@@ -37,7 +43,8 @@ bundle lab đã sanitize (#87); kết quả và NTP bền vững cho lab (#88, #
 A/B/C chạy lại trên lab (#92).
 
 **Tài liệu:** đồng bộ README/ARCHITECTURE/OPERATIONS (#78, #79, #80); kịch bản
-demo, runbook SCN-003, quy tắc fingerprint (#93); đóng #10, #11 (#94).
+demo, runbook SCN-003, quy tắc fingerprint (#93); đóng #10, #11 (#94); nghiệm thu
+MVP và bản nháp này (#96).
 
 ## Thay đổi cần lưu ý khi nâng cấp
 
