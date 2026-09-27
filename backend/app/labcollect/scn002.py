@@ -214,6 +214,26 @@ def write_bundle(evidence: dict[str, bytes], config: Scn002LabConfig, rnd: Round
             "validate": {"scenario": SCENARIO, "profile": PROFILE}}
 
 
+def _source_instant(name: str, line: bytes) -> dt.datetime | None:
+    try:
+        record = json.loads(line)
+        if name == "sysmon3-archive.json":
+            text = record["data"]["win"]["eventdata"]["utcTime"]
+            return dt.datetime.strptime(text, "%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=dt.timezone.utc)
+        return dt.datetime.strptime(record["timestamp"], "%Y-%m-%dT%H:%M:%S.%f%z")
+    except (ValueError, KeyError, TypeError):
+        return None
+
+
+def source_minus_send(evidence: dict[str, bytes], rnd: Round) -> dict[str, float | None]:
+    """Seconds from the receipt's send time to each record's own timestamp. Diagnostic only."""
+    gaps = {}
+    for name in ("sysmon3-archive.json", "eve-alert.json", "wazuh-alert.json"):
+        instant = _source_instant(name, evidence[name])
+        gaps[name] = None if instant is None else round((instant - rnd.sent_before).total_seconds(), 3)
+    return gaps
+
+
 def collect_round(config: Scn002LabConfig, probe_line: str, out: Path, runner: Runner, *,
                   now: Callable[[], dt.datetime], check_preflight: bool = True) -> dict:
     run_id, label = parse_probe_line(probe_line)
@@ -222,4 +242,5 @@ def collect_round(config: Scn002LabConfig, probe_line: str, out: Path, runner: R
     evidence = collect_evidence(config, rnd, runner)
     summary = write_bundle(evidence, config, rnd, out, ingested_at=now())
     summary["preflight"] = checks
+    summary["source_minus_send_s"] = source_minus_send(evidence, rnd)
     return summary

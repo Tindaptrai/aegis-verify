@@ -44,6 +44,23 @@ chung phần lõi SSH, kiểm config và cách ghi bundle với SCN-003.
 Kỳ vọng khi `validate`: lượt đối chứng ra `Inconclusive` (A03 không có hành động
 chặn, đúng thiết kế); lượt Block ra `Prevented`.
 
+## Đọc độ lệch giờ (issue #102)
+
+Summary có thêm `source_minus_send_s`: thời điểm ghi trong từng bản ghi trừ đi
+`sent_before_utc` của receipt, tính bằng giây. Sysmon lấy `utcTime`, Suricata lấy
+`timestamp`, Wazuh lấy `timestamp` của alert (lúc manager tạo alert). Không đọc được
+thì là `null`. Phần này chỉ để chẩn đoán: bundle không đổi và lệnh không dừng vì nó.
+
+Profile ghép Sysmon với Suricata trong ±2 s. Nếu `validate` ra A02/A04
+`collection_not_confirmed` dù đủ file, xem các số này trước khi nghi engine:
+
+| Dấu hiệu | Nguyên nhân đã gặp (lab 2026-09-27) | Cách xử lý |
+| --- | --- | --- |
+| Sysmon lệch vài giây, Suricata gần 0, `image` là `<unknown process>` | Sysmon khởi động trước khi đồng hồ bị chỉnh nhảy. Sự kiện mạng của Sysmon đi qua phiên ETW không theo đồng hồ mới. Kiểm đồng hồ hệ thống vẫn đạt. | Khởi động lại Sysmon trên máy gửi (quyền Admin), rồi chạy một lượt **mới**. |
+| Lệnh dừng với Wazuh 0 dòng, Suricata 1 dòng | Agent Wazuh trên firewall ngừng đẩy eve mà không báo lỗi | Kiểm trên manager: archive phải có event mới của agent firewall. Khởi động lại agent. Dòng eve ghi trong lúc agent hỏng sẽ không được gửi lại, nên lượt đó ghi là hỏng do pipeline và chạy một lượt mới. |
+
+Không nới cửa sổ tương quan hay mượn bản ghi của lượt khác để lượt cũ đạt.
+
 ## Config
 
 Mẫu RFC 5737: [`examples/scn002-collect.example.json`](examples/scn002-collect.example.json).
