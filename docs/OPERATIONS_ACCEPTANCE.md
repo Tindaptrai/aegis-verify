@@ -74,6 +74,9 @@ nhân. Không đổi quyền hoặc tắt TLS để vượt lỗi. Helper này k
 
 ## Đối chiếu PRD gốc
 
+> Cập nhật 2026-09-27: bảng dưới là trạng thái ngày 2026-09-20. SCN-002 và SCN-003
+> đã chạy trên lab thật sau đó; đối chiếu hiện hành ở [MVP_ACCEPTANCE.md](MVP_ACCEPTANCE.md).
+
 | Yêu cầu | Bằng chứng có sẵn / giới hạn |
 | --- | --- |
 | 3 scenarios | Ba manifest SCN-001/002/003 được test loader giữ nguyên bytes/IDs, đều còn draft. Chưa có nghiệm thu live SCN-002 và SCN-003 trong đợt này. |

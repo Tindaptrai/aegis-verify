@@ -5,7 +5,12 @@ dispatch once available on the default branch. All PRs are checked, including
 documentation-only changes; there are no path filters that leave required checks
 pending. New runs supersede older runs for the same PR/ref.
 
-- Backend: complete pytest suite and wheel build on Windows/Linux, Python 3.11/3.12.
+- Backend: complete pytest suite and wheel build. Pull requests run Linux with
+  Python 3.12 only; pushes to `main` and manual dispatch run Windows/Linux with
+  Python 3.11/3.12. The split saves Actions minutes on this private repository,
+  where Windows minutes bill double (2026-09-27, after the monthly allowance ran
+  out). To check a branch on the full matrix before merging, run the workflow
+  manually on that branch (Actions › Fixture CI › Run workflow).
 - Frontend: `npm ci`, full Vitest suite, TypeScript and Vite build on Node 24/Linux.
 - Only `contents: read`; checkout does not persist credentials. Official Actions
   are pinned to commit SHAs. No `pull_request_target`, deployment, secrets,

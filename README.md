@@ -107,7 +107,8 @@ Ground truth changes need explicit owner approval; every manifest still says
 `status: draft`.
 
 For a 25-minute offline walkthrough of all three scenarios and the dashboard,
-see [the customer demo guide](docs/DEMO_WALKTHROUGH.md).
+see [the customer demo guide](docs/DEMO_WALKTHROUGH.md). PRD-by-PRD acceptance with
+evidence links: [MVP_ACCEPTANCE.md](docs/MVP_ACCEPTANCE.md).
 
 ## First technical milestone
 
