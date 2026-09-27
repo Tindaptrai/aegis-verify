@@ -39,6 +39,10 @@ chứng. Một lượt ứng với một probe; không tự chạy lại.
 
 ## 2. Thu bằng chứng, chỉ đọc
 
+Cách nhanh: `aegis collect scn003` làm toàn bộ mục 2 và 3, kèm kiểm trước khi chạy
+([hướng dẫn](SCN003_COLLECT.md)). Các lệnh tay dưới đây dùng khi log đã xoay vòng hoặc
+lệnh báo lỗi.
+
 **Gán biến một lần ở mỗi máy**, rồi dùng biến. Không thay tay trong từng lệnh:
 lỗi dán nguyên placeholder đã làm một lượt thu rỗng.
 

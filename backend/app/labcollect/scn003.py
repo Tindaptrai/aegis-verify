@@ -77,6 +77,13 @@ class Paths(_Closed):
     honeypot_log: str = _Path
     alerts: str = _Path
 
+    @field_validator("filterlog", "eve", "honeypot_log", "alerts")
+    @classmethod
+    def _no_dot_segments(cls, value: str) -> str:
+        if any(part in (".", "..") for part in value.split("/")):
+            raise ValueError("dot segments are not allowed")
+        return value
+
 
 class Scn003LabConfig(_Closed):
     schema_version: Literal["0.1.0"]
