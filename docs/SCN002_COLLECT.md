@@ -56,7 +56,7 @@ Profile ghép Sysmon với Suricata trong ±2 s. Nếu `validate` ra A02/A04
 
 | Dấu hiệu | Nguyên nhân đã gặp (lab 2026-09-27) | Cách xử lý |
 | --- | --- | --- |
-| Sysmon lệch vài giây, Suricata gần 0, `image` là `<unknown process>` | Sysmon khởi động trước khi đồng hồ bị chỉnh nhảy. Sự kiện mạng của Sysmon đi qua phiên ETW không theo đồng hồ mới. Kiểm đồng hồ hệ thống vẫn đạt. | Khởi động lại Sysmon trên máy gửi (quyền Admin), rồi chạy một lượt **mới**. |
+| Sysmon lệch vài giây, Suricata gần 0, `image` là `<unknown process>` | Sysmon khởi động trước khi đồng hồ bị chỉnh nhảy. Sự kiện mạng của Sysmon đi qua phiên ETW không theo đồng hồ mới. Kiểm đồng hồ hệ thống vẫn đạt. | Khởi động lại **máy gửi**. Từ bản 15, Sysmon là protected process nên `Restart-Service Sysmon64` bị từ chối kể cả với Admin. Chờ w32time đồng bộ xong rồi chạy một lượt **mới**. Không suspend/resume VM máy gửi: lab ngày 21/9 có một lần resume làm Sysmon 3 lệch hơn 2 giờ. |
 | Lệnh dừng với Wazuh 0 dòng, Suricata 1 dòng | Agent Wazuh trên firewall ngừng đẩy eve mà không báo lỗi | Kiểm trên manager: archive phải có event mới của agent firewall. Khởi động lại agent. Dòng eve ghi trong lúc agent hỏng sẽ không được gửi lại, nên lượt đó ghi là hỏng do pipeline và chạy một lượt mới. |
 
 Không nới cửa sổ tương quan hay mượn bản ghi của lượt khác để lượt cũ đạt.
