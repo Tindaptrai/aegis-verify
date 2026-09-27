@@ -1,0 +1,21 @@
+{
+  "schema_version": "0.1.0",
+  "environment_id": "example-lab",
+  "firewall": {"user": "admin", "host": "198.51.100.1"},
+  "manager": {"user": "soc", "host": "198.51.100.10"},
+  "sender": {"user": "operator", "host": "192.0.2.11"},
+  "paths": {
+    "eve_lan": "/var/log/suricata/suricata_em1/eve.json",
+    "filterlog": "/var/log/filter.log",
+    "archives": "/var/ossec/logs/archives/archives.json",
+    "alerts": "/var/ossec/logs/alerts/alerts.json"
+  },
+  "receipt_dir": "C:\\AEGIS\\probe",
+  "sender_agent_id": "012",
+  "sender_ip": "192.0.2.11",
+  "receiver_ip": "203.0.113.10",
+  "receiver_port": 45002,
+  "block_rule_tracker": "1700000002",
+  "firewall_utc_offset": "+07:00",
+  "clock_reference_ip": "198.51.100.10"
+}

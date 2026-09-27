@@ -72,4 +72,4 @@ Dùng OpenSSH của hệ thống với `BatchMode=yes`, `StrictHostKeyChecking=y
 - Chỉ đọc file log **hiện hành**. Lượt chạy trước khi log xoay vòng (nửa đêm theo
   giờ lab với Wazuh alerts và Cowrie) phải thu tay theo [runbook](SCN003_CONTROL_RUN_RUNBOOK.md).
 - Receipt của máy khởi tạo không được thu; nó không vào engine.
-- Chỉ SCN-003. SCN-002 cần issue riêng.
+- SCN-002 dùng lệnh riêng: [`aegis collect scn002`](SCN002_COLLECT.md).

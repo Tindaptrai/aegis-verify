@@ -79,6 +79,10 @@ trợ; bằng chứng chính của A03 là dòng filterlog `block`.
 
 ## 4. Thu bằng chứng, chỉ đọc
 
+Cách nhanh: `aegis collect scn002` làm toàn bộ mục này, kèm kiểm đồng hồ
+([hướng dẫn](SCN002_COLLECT.md)). Bảng dưới là quy trình tay, dùng khi log đã xoay
+vòng hoặc lệnh báo lỗi.
+
 Thứ tự thu và lệnh giống lượt đối chứng, thay UUID mới. Mỗi file ghi sha256
 ngay sau khi lưu, cùng giờ máy lúc thu.
 

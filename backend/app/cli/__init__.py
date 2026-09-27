@@ -12,7 +12,7 @@ from .reporting import render_error, render_report
 from .service import evaluate_bundle
 from ..compare import compare_runs
 from ..dashboard import DEFAULT_HOST, DEFAULT_PORT, serve
-from ..labcollect import CollectionError, collect_round, load_config, ssh_runner
+from ..labcollect import CollectionError, scn002, scn003, ssh_runner
 
 
 class _ArgumentError(Exception):
@@ -137,7 +137,7 @@ def _parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--operations-config")
 
     collect = commands.add_parser("collect", allow_abbrev=False)
-    collect.add_argument("target", choices=("scn003",))
+    collect.add_argument("target", choices=("scn002", "scn003"))
     collect.add_argument("--config", required=True)
     collect.add_argument("--key", required=True)
     collect.add_argument("--probe-line", required=True)
@@ -191,8 +191,9 @@ def _collect(options) -> int:
         config_path = Path(options.config)
         if not config_path.is_file() or config_path.stat().st_size > _MAX_COLLECT_CONFIG:
             raise CollectionError("invalid_config")
-        config = load_config(config_path.read_bytes())
-        summary = collect_round(config, options.probe_line, Path(options.out),
+        module = scn002 if options.target == "scn002" else scn003
+        config = module.load_config(config_path.read_bytes())
+        summary = module.collect_round(config, options.probe_line, Path(options.out),
                                 ssh_runner(options.key, ssh=options.ssh),
                                 now=lambda: datetime.datetime.now(datetime.timezone.utc),
                                 check_preflight=not options.skip_preflight)

@@ -11,64 +11,26 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
-import ipaddress
 import json
 import re
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import Field, ValidationError, field_validator
+
+from ._common import (
+    NAME, CollectionError, Closed, PosixPath, Runner, SshTarget, canonical_ipv4, check_chrony,
+    check_ntpq, check_output, no_dot_segments, read, ssh_command, ssh_runner, write_payload,
+)
 
 SURICATA_SID = "1000012"
 WAZUH_RULE = "120003"
 SCENARIO = "scenarios/SCN-003-internal-deception.yaml"
 PROFILE = "scenarios/profiles/scn-003/profile.json"
 EXPECTED_LINES = {"filterlog.log": 1, "eve-alert.json": 1, "cowrie-session.jsonl": 2, "wazuh-alert.json": 1}
-
-_HINTS = {
-    "invalid_config": "Review the private collector config against docs/SCN003_COLLECT.md.",
-    "invalid_probe_line": "Paste the whole 'connected ...' line the probe printed.",
-    "probe_config_mismatch": "The probe's initiator or decoy differs from the config; use the matching config.",
-    "source_unreachable": "Check SSH reachability, the key, known_hosts and read access on that host.",
-    "clock_not_synchronised": "Fix the firewall or manager clock before collecting (runbook section 0).",
-    "honeypot_not_listening": "Start the honeypot before running the probe.",
-    "unexpected_line_count": "Wait 30 s and collect again, or check the probe values; nothing was written.",
-    "output_exists": "Choose a new, empty output directory.",
-    "output_in_repository": "Write private evidence outside any Git working tree.",
-}
-
-
-class CollectionError(ValueError):
-    """Safe diagnostic: a fixed code, a hint and at most one source name. Never lab values."""
-
-    def __init__(self, code: str, source: str | None = None, detail: dict | None = None):
-        if code not in _HINTS:
-            code = "invalid_config"
-        super().__init__(code)
-        self.code, self.source, self.detail = code, source, detail or {}
-
-    def as_dict(self) -> dict:
-        return {"kind": "error", "error": {"code": self.code, "source": self.source,
-                                           "hint": _HINTS[self.code], **self.detail}}
-
-
-_NAME = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}"
-_Path = Field(pattern=r"^/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$", max_length=255)
-
-
-class _Closed(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
-
-
-class SshTarget(_Closed):
-    user: str = Field(pattern=r"^[a-z_][a-z0-9_-]{0,31}$")
-    host: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$")
-    jump: SshTarget | None = None
-
-    def address(self) -> str:
-        return f"{self.user}@{self.host}"
+_NAME, _Path, _Closed = NAME, PosixPath, Closed
+__all__ = ["CollectionError", "Scn003LabConfig", "collect_round", "load_config", "ssh_command", "ssh_runner"]
 
 
 class Paths(_Closed):
@@ -77,12 +39,7 @@ class Paths(_Closed):
     honeypot_log: str = _Path
     alerts: str = _Path
 
-    @field_validator("filterlog", "eve", "honeypot_log", "alerts")
-    @classmethod
-    def _no_dot_segments(cls, value: str) -> str:
-        if any(part in (".", "..") for part in value.split("/")):
-            raise ValueError("dot segments are not allowed")
-        return value
+    _dots = field_validator("filterlog", "eve", "honeypot_log", "alerts")(no_dot_segments)
 
 
 class Scn003LabConfig(_Closed):
@@ -106,12 +63,7 @@ class Scn003LabConfig(_Closed):
     honeypot_sensor_id: str = Field(pattern=f"^{_NAME}$")
     max_clock_offset_ms: int = Field(default=500, ge=1, le=5000)
 
-    @field_validator("initiator_ip", "decoy_ip", "firewall_dst_ip", "cowrie_ip")
-    @classmethod
-    def _ipv4(cls, value: str) -> str:
-        if str(ipaddress.IPv4Address(value)) != value:
-            raise ValueError("canonical IPv4 required")
-        return value
+    _ipv4 = field_validator("initiator_ip", "decoy_ip", "firewall_dst_ip", "cowrie_ip")(canonical_ipv4)
 
 
 def load_config(raw: bytes) -> Scn003LabConfig:
@@ -148,55 +100,13 @@ def parse_probe_line(line: str, config: Scn003LabConfig) -> Probe:
     return Probe(initiator, port, decoy, decoy_port, run_id, marker)
 
 
-Runner = Callable[[SshTarget, str], tuple[int, bytes]]
-
-
-def ssh_command(target: SshTarget, command: str, *, key_path: str, ssh: str = "ssh") -> list[str]:
-    """Argument vector for OpenSSH; never a shell string on the local side."""
-    if re.fullmatch(r"[A-Za-z0-9 _:.\\/()~-]{1,260}", key_path) is None or '"' in key_path or " " in key_path:
-        raise CollectionError("invalid_config")
-    base = [ssh, "-i", key_path, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
-            "-o", "ConnectTimeout=10", "-o", "LogLevel=ERROR"]
-    if target.jump is not None:
-        base += ["-o", f"ProxyCommand={ssh} -i {key_path} -o BatchMode=yes -o StrictHostKeyChecking=yes "
-                       f"-W %h:%p {target.jump.address()}"]
-    return base + [target.address(), command]
-
-
-def ssh_runner(key_path: str, *, ssh: str = "ssh", timeout: int = 300) -> Runner:
-    def run(target: SshTarget, command: str) -> tuple[int, bytes]:
-        try:
-            done = subprocess.run(ssh_command(target, command, key_path=key_path, ssh=ssh),
-                                  capture_output=True, timeout=timeout)
-        except (OSError, subprocess.TimeoutExpired):
-            return 255, b""
-        return done.returncode, done.stdout
-    return run
-
-
-def _read(runner: Runner, target: SshTarget, command: str, source: str, *, grep: bool) -> bytes:
-    code, out = runner(target, command)
-    if code == 0 or (grep and code == 1):
-        return out if code == 0 else b""
-    raise CollectionError("source_unreachable", source)
-
-
 def preflight(config: Scn003LabConfig, runner: Runner) -> dict:
-    peers = _read(runner, config.firewall, "ntpq -pn", "firewall", grep=False).decode("utf-8", "replace")
-    selected = [line for line in peers.splitlines() if line.startswith("*")]
-    try:
-        offset_ms = float(selected[0].split()[8]) if selected else None
-    except (IndexError, ValueError):
-        offset_ms = None
-    if offset_ms is None or abs(offset_ms) > config.max_clock_offset_ms:
-        raise CollectionError("clock_not_synchronised", "firewall")
-    tracking = _read(runner, config.manager, "chronyc tracking", "manager", grep=False).decode("utf-8", "replace")
-    if not re.search(r"^Leap status\s*:\s*Normal\s*$", tracking, re.MULTILINE):
-        raise CollectionError("clock_not_synchronised", "manager")
-    listening = _read(runner, config.honeypot, "ss -ltn", "honeypot", grep=False).decode("utf-8", "replace")
+    offset = check_ntpq(runner, config.firewall, config.max_clock_offset_ms, "firewall")
+    check_chrony(runner, config.manager, "manager")
+    listening = read(runner, config.honeypot, "ss -ltn", "honeypot", grep=False).decode("utf-8", "replace")
     if not re.search(rf"[:.]{config.cowrie_port}\s", listening):
         raise CollectionError("honeypot_not_listening", "honeypot")
-    return {"firewall_offset_ms": offset_ms, "manager_leap": "Normal", "honeypot_listening": True}
+    return {"firewall_offset_ms": offset, "manager_leap": "Normal", "honeypot_listening": True}
 
 
 def select_filterlog(raw: bytes, config: Scn003LabConfig, probe: Probe) -> list[bytes]:
@@ -229,14 +139,14 @@ def select_alerts(raw: bytes, probe: Probe) -> list[bytes]:
 def collect_evidence(config: Scn003LabConfig, probe: Probe, runner: Runner) -> dict[str, bytes]:
     reader = "cat" if config.honeypot_read_as is None else f"sudo -n -u {config.honeypot_read_as} /usr/bin/cat"
     found = {
-        "filterlog.log": select_filterlog(_read(
+        "filterlog.log": select_filterlog(read(
             runner, config.firewall, f"grep -F -- {config.firewall_rule_tracker} {config.paths.filterlog}",
             "firewall", grep=True), config, probe),
-        "eve-alert.json": select_eve(_read(
+        "eve-alert.json": select_eve(read(
             runner, config.firewall, f"grep -F -- {SURICATA_SID} {config.paths.eve}", "firewall", grep=True), probe),
-        "cowrie-session.jsonl": select_cowrie(_read(
+        "cowrie-session.jsonl": select_cowrie(read(
             runner, config.honeypot, f"{reader} {config.paths.honeypot_log}", "honeypot", grep=False), probe),
-        "wazuh-alert.json": select_alerts(_read(
+        "wazuh-alert.json": select_alerts(read(
             runner, config.manager, f"grep -F -- {probe.marker} {config.paths.alerts}", "manager", grep=True), probe),
     }
     counts = {name: len(lines) for name, lines in found.items()}
@@ -253,17 +163,9 @@ def _connect_time(cowrie: bytes) -> dt.datetime:
     raise CollectionError("unexpected_line_count")
 
 
-def _in_git_tree(path: Path) -> bool:
-    return any((parent / ".git").exists() for parent in (path, *path.parents))
-
-
 def write_bundle(evidence: dict[str, bytes], config: Scn003LabConfig, probe: Probe, out: Path,
                  *, ingested_at: dt.datetime) -> dict:
-    out = Path(out).resolve()
-    if _in_git_tree(out):
-        raise CollectionError("output_in_repository")
-    if out.exists() and (not out.is_dir() or any(out.iterdir())):
-        raise CollectionError("output_exists")
+    out = check_output(out)
     connect = _connect_time(evidence["cowrie-session.jsonl"])
     start = connect.replace(second=0, microsecond=0) - dt.timedelta(minutes=1)
     end = start + dt.timedelta(minutes=3)
