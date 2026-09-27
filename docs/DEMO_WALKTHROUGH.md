@@ -3,8 +3,9 @@
 Kịch bản này chạy **hoàn toàn offline**, trên các bundle đã sanitize trong repo.
 Không cần lab, credential hay mạng. Mọi verdict được sinh lại trên máy demo bằng
 đúng parser và engine thật; bằng chứng gốc của các lượt lab nằm ngoài Git và được
-đối chiếu qua SHA-256 trong tài liệu kết quả. Mỗi lệnh dưới đây đã chạy thử ngày
-2026-09-27 và cho đúng kết quả ghi bên cạnh.
+đối chiếu qua SHA-256 trong tài liệu kết quả. Mỗi lệnh dưới đây đã được diễn tập lại
+ngày 2026-09-27 trên một bản clone sạch từ GitHub (Python 3.13, Node 24) và cho đúng kết
+quả ghi bên cạnh. Bước 0 mất chưa tới một phút.
 
 ## 0. Chuẩn bị (một lần)
 
@@ -67,7 +68,7 @@ Kết quả **`Detected`**, exit 0. Điểm nên chỉ ra:
 - Cảnh báo Wazuh gắn đúng phiên Cowrie qua một khoá phiên mờ, không lưu session
   ID thô; mật khẩu người gõ có trong log gốc nhưng parser không đọc.
 - Cửa sổ tương quan ±2 s là số đo trên lab, không phải số chọn cho đẹp
-  ([kết quả](SCN003_RESULT_2026-09-26.md): sáu lượt, năm `Detected`, một lượt
+  ([kết quả](SCN003_RESULT_2026-09-26.md): bảy lượt, sáu `Detected`, một lượt
   `Missing telemetry` do lỗi đồng bộ giờ và đã giải thích).
 
 ## 4. Dashboard (5 phút)
@@ -76,7 +77,9 @@ Kết quả **`Detected`**, exit 0. Điểm nên chỉ ra:
 .\.venv\Scripts\python.exe -m aegis_verify dashboard --reports demo-reports --static frontend\dist
 ```
 
-Mở địa chỉ server in ra. Sidebar có ba run và một bản so sánh. Nên chỉ vào:
+Mở địa chỉ server in ra (mặc định `http://127.0.0.1:8765`). Sidebar có ba run và một bản
+so sánh. Console trình duyệt có một lỗi 404 ở `/api/operations/bootstrap`: đó là hành vi
+đúng khi không bật Operations, không phải lỗi demo. Nên chỉ vào:
 
 - tab Assertions: từng assertion, vai trò (telemetry/detection/prevention),
   outcome và evidence ID;
@@ -112,7 +115,7 @@ Bằng chứng thô của SCN-001 chứa hostname lab nên không nằm trong re
 
 | Câu hỏi | Trả lời trung thực |
 | --- | --- |
-| Có chạy live không? | Có công cụ thu thập live từ Wazuh Indexer (chỉ đọc) và đã chạy trên lab; demo này dùng bundle đã sanitize để ai cũng tái lập được. |
+| Có chạy live không? | Có. Có công cụ thu live từ Wazuh Indexer (chỉ đọc), và lệnh `aegis collect scn002`/`scn003` thu một lượt từ lab qua SSH chỉ đọc. Ngày 2026-09-27 các lệnh này đã thu các lượt ra `Prevented` và `Detected` trên lab thật. Demo này dùng bundle đã sanitize để ai cũng tái lập được. |
 | Có phải production không? | Không. Đây là công cụ kiểm chứng cho một người vận hành, lab riêng; chưa có multi-tenant, xác thực nhiều người dùng hay tự chạy scenario. |
 | "Detected" có nghĩa hệ thống an toàn? | Không. Nó chỉ nói bằng chứng của lượt đó khớp profile; không phải kết luận về máy hay mạng. |
 | Kết quả có bị chỉnh cho đẹp? | Không sửa ground truth, profile hay cửa sổ để lấy verdict; mọi thay đổi có PR, lý do và số đo. |
@@ -121,5 +124,6 @@ Bằng chứng thô của SCN-001 chứa hostname lab nên không nằm trong re
 ## 7. Nếu có lab (tuỳ chọn)
 
 Một lượt SCN-003 live mất khoảng 5 phút theo
-[runbook](SCN003_CONTROL_RUN_RUNBOOK.md). Không chạy SCN-001 A/B/C trước khách:
+[runbook](SCN003_CONTROL_RUN_RUNBOOK.md): chạy một probe, chờ 30 s, rồi dùng
+[`aegis collect scn003`](SCN003_COLLECT.md) và `aegis validate`. Không chạy SCN-001 A/B/C trước khách:
 cần cài và gỡ rule trên manager và khoảng 40 phút.
