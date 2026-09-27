@@ -69,5 +69,7 @@ vận hành cục bộ.
 - Giữ hay gỡ quyền truy cập lab đã cấp cho tự động hoá (sudoers hẹp, key SSH kể cả key
   vào máy khởi tạo SCN-003, quyền ssh trong cài đặt Claude Code cục bộ).
 - ~~Bật lại w32time trên máy gửi SCN-002~~: đã chạy lại và đồng bộ ngày 2026-09-27.
-- Lab: chỉnh giờ máy host; cân nhắc nâng agent Wazuh trên firewall (đang là 4.14.4
-  revision `rc2`, từng ngừng đẩy log mà không báo lỗi).
+- Lab: chỉnh giờ máy host. Agent Wazuh trên firewall cùng phiên bản với manager (4.14.4),
+  nên không nâng riêng được. Lần agent ngừng đẩy log ngày 2026-09-27 chưa rõ nguyên nhân;
+  trước mỗi lượt, kiểm manager có event mới từ agent firewall
+  ([SCN002_COLLECT.md](SCN002_COLLECT.md#đọc-độ-lệch-giờ-issue-102)).
