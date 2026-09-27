@@ -53,8 +53,8 @@ vận hành cục bộ.
 
 | Kiểm | Kết quả |
 | --- | --- |
-| Backend đầy đủ (Windows, Python 3.12, local) | xem PR thêm tài liệu này |
-| Frontend: Vitest, TypeScript và Vite build | xem PR thêm tài liệu này |
+| Backend đầy đủ (Windows, Python 3.12, local, `main` @ `6b7eeef`) | 3228 passed, 2 skipped (FIFO và POSIX mode, bình thường trên Windows) |
+| Frontend: Vitest, TypeScript và Vite build | 86 passed; build đạt |
 | CI GitHub | hết quota Actions miễn phí tháng 9; tự chạy lại từ 2026-10-01. PR chỉ chạy Linux/Python 3.12, `main` chạy đủ ma trận ([CI.md](CI.md)) |
 
 ## 6. Việc chủ dự án quyết
