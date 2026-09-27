@@ -12,7 +12,7 @@ Commit đối chiếu: `main` @ `6b7eeef`. Kiểm local trên commit đó: xem m
 | Yêu cầu | Trạng thái | Bằng chứng |
 | --- | --- | --- |
 | 3 security scenarios | ✅ cả ba đã chạy trên lab thật | SCN-001 [v2](SCN001_V2_APPROVAL_AND_PINS.md), [v3](SCN001_V3_RESULT_2026-09-27.md); SCN-002 [kết quả](SCN002_RESULT_2026-09-22.md); SCN-003 [kết quả](SCN003_RESULT_2026-09-26.md) |
-| 4 connectors | ✅ Wazuh, Suricata, pfSense, Cowrie; parser riêng trong `connectors/`, đầu ra canonical | [README](../README.md) bảng parser key; Wazuh Indexer đọc live (chỉ đọc): [WAZUH_LIVE_CONNECTOR.md](WAZUH_LIVE_CONNECTOR.md) |
+| 4 connectors | ✅ Wazuh, Suricata, pfSense, Cowrie; parser riêng trong `connectors/`, đầu ra canonical | [README](../README.md) bảng parser key; Wazuh Indexer đọc live (chỉ đọc): [WAZUH_LIVE_CONNECTOR.md](WAZUH_LIVE_CONNECTOR.md); thu lab chỉ đọc cho SCN-002/003: [`aegis collect`](SCN002_COLLECT.md) |
 | Canonical Event Model | ✅ | [CANONICAL_EVENT.md](CANONICAL_EVENT.md), [CANONICAL_EVENT_V2.md](CANONICAL_EVENT_V2.md) |
 | Validation Engine | ✅ | [VALIDATION_ENGINE.md](VALIDATION_ENGINE.md); profile công khai `scenarios/profiles/` |
 | Evidence Timeline | ✅ timeline trong report CLI, sắp theo thời gian, giá trị thiếu để trống | `aegis validate` report; tab Timeline của dashboard |
