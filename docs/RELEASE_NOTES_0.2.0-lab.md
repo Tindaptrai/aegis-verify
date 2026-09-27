@@ -1,8 +1,7 @@
-# v0.2.0-lab — ghi chú phát hành (bản nháp)
+# v0.2.0-lab — ghi chú phát hành
 
-Trạng thái: **bản nháp, chờ chủ dự án duyệt tag**. Không tự tăng version package
-hay đặt tag. Mốc trước: `v0.1.0-lab.1`. Đề xuất đặt tag trên commit merge bản cập
-nhật ghi chú này.
+Phát hành 2026-09-27: tag `v0.2.0-lab` trên `a846f78` (GitHub pre-release), chủ dự án
+duyệt trong chat. Version package không đổi. Mốc trước: `v0.1.0-lab.1`.
 
 ## Điểm chính
 
