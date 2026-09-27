@@ -1,14 +1,18 @@
 """Safe command dispatcher for offline evidence validation."""
 
 import argparse
+import datetime
+import json
 import os
 import sys
+from pathlib import Path
 
 from ..intake import IntakeError
 from .reporting import render_error, render_report
 from .service import evaluate_bundle
 from ..compare import compare_runs
 from ..dashboard import DEFAULT_HOST, DEFAULT_PORT, serve
+from ..labcollect import CollectionError, collect_round, load_config, ssh_runner
 
 
 class _ArgumentError(Exception):
@@ -131,6 +135,15 @@ def _parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--port", type=int, default=DEFAULT_PORT)
     dashboard.add_argument("--static")
     dashboard.add_argument("--operations-config")
+
+    collect = commands.add_parser("collect", allow_abbrev=False)
+    collect.add_argument("target", choices=("scn003",))
+    collect.add_argument("--config", required=True)
+    collect.add_argument("--key", required=True)
+    collect.add_argument("--probe-line", required=True)
+    collect.add_argument("--out", required=True)
+    collect.add_argument("--ssh", default="ssh")
+    collect.add_argument("--skip-preflight", action="store_true")
     return parser
 
 
@@ -158,10 +171,40 @@ def _duplicates(arguments: list[str]) -> bool:
         "--port",
         "--static",
         "--operations-config",
+        "--config",
+        "--key",
+        "--probe-line",
+        "--out",
+        "--ssh",
     ):
         if sum(item == option or item.startswith(option + "=") for item in arguments) > 1:
             return True
     return False
+
+
+_MAX_COLLECT_CONFIG = 65536
+
+
+def _collect(options) -> int:
+    """Read-only lab collection; prints one JSON summary or one JSON error."""
+    try:
+        config_path = Path(options.config)
+        if not config_path.is_file() or config_path.stat().st_size > _MAX_COLLECT_CONFIG:
+            raise CollectionError("invalid_config")
+        config = load_config(config_path.read_bytes())
+        summary = collect_round(config, options.probe_line, Path(options.out),
+                                ssh_runner(options.key, ssh=options.ssh),
+                                now=lambda: datetime.datetime.now(datetime.timezone.utc),
+                                check_preflight=not options.skip_preflight)
+    except CollectionError as error:
+        _write_stream("stderr", json.dumps(error.as_dict(), indent=2) + "\n")
+        return 2
+    except OSError:
+        return 2 if _emit_error(IntakeError("output_error", stage="output"), "json") else 4
+    except Exception:
+        _emit_error(IntakeError("internal_error"), "json")
+        return 4
+    return 0 if _write_stream("stdout", json.dumps(summary, indent=2) + "\n") else 4
 
 
 def main(argv=None) -> int:
@@ -179,6 +222,9 @@ def main(argv=None) -> int:
     except _ArgumentError:
         error = IntakeError("invalid_arguments")
         return 2 if _emit_error(error, error_format) else 4
+
+    if options.command == "collect":
+        return _collect(options)
 
     if options.command == "dashboard":
         if not 0 <= options.port <= 65535:

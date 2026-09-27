@@ -1,0 +1,25 @@
+{
+  "schema_version": "0.1.0",
+  "environment_id": "example-lab",
+  "firewall": {"user": "admin", "host": "198.51.100.1"},
+  "manager": {"user": "soc", "host": "198.51.100.10"},
+  "honeypot": {"user": "soc", "host": "198.51.100.20", "jump": {"user": "soc", "host": "198.51.100.10"}},
+  "paths": {
+    "filterlog": "/var/log/filter.log",
+    "eve": "/var/log/suricata/suricata_em0/eve.json",
+    "honeypot_log": "/home/cowrie/cowrie/var/log/cowrie/cowrie.json",
+    "alerts": "/var/ossec/logs/alerts/alerts.json"
+  },
+  "honeypot_read_as": "cowrie",
+  "initiator_ip": "192.0.2.10",
+  "decoy_ip": "203.0.113.30",
+  "decoy_port": 23,
+  "firewall_dst_ip": "198.51.100.20",
+  "firewall_dst_port": 2223,
+  "cowrie_ip": "198.51.100.20",
+  "cowrie_port": 2223,
+  "honeypot_protocol": "telnet",
+  "firewall_rule_tracker": "1700000003",
+  "firewall_utc_offset": "+07:00",
+  "honeypot_sensor_id": "cowrie"
+}
