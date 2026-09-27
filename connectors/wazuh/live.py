@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler, ProxyHandler
 
 from aegis_verify.models import PreciseTimestamp
+from aegis_verify.private_fs import mkdir_private
 from ._json import decode_document, MAX_BYTES
 from .errors import WazuhParseError
 from .parser import parse_wazuh_document
@@ -180,7 +181,7 @@ def collect(config, output, *, transport=None):
     transport = transport or HttpsTransport(config)
     output = Path(output)
     try:
-        output.mkdir(mode=0o700)
+        mkdir_private(output)
     except FileExistsError:
         raise LiveError('output_exists') from None
     except OSError:
@@ -307,7 +308,7 @@ def collect_adaptive(config, output, *, transport=None, max_attempts=63):
     transport = transport or HttpsTransport(config)
     output = Path(output)
     try:
-        output.mkdir(mode=0o700)
+        mkdir_private(output)
     except FileExistsError:
         raise LiveError('output_exists') from None
     except OSError:

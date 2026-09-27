@@ -179,6 +179,8 @@ $acl.AddAccessRule($rule)
         store = JobStore(root)
         store.save(record())
         assert store.load() == [record()]
+        output = store.new_output(record()['id'])
+        config.verify_private_root(output, excluded_roots=())
     (root / 'jobs').mkdir(exist_ok=True)
     # A protected, publicly-readable child remains unsafe even under private root.
     broaden_child = """

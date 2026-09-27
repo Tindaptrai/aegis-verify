@@ -1,15 +1,47 @@
 """Adaptive collection must split only overflow, without gaps or partial success."""
 import json
+import os
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 import pytest
 from aegis_verify.connectors.wazuh import live
 from test_wazuh_live import config, page, Transport, HIT
+from aegis_verify.dashboard.operations_config import verify_private_root
+from aegis_verify import private_fs
 
 
 def run(config_value, output, transport, **kwargs):
     assert hasattr(live, 'collect_adaptive'), 'adaptive collector is not implemented'
     return live.collect_adaptive(config_value, output, transport=transport, **kwargs)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows ACL integration')
+def test_windows_adaptive_output_and_leaf_have_owner_only_acl(tmp_path):
+    out = tmp_path / 'batch'
+    run(config(), out, Transport([page([], total=0)]))
+    verify_private_root(out, excluded_roots=())
+    verify_private_root(out / 'attempt-0001', excluded_roots=())
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows ACL integration')
+def test_windows_adaptive_leaf_acl_failure_stops_before_source_request(tmp_path, monkeypatch):
+    original_run = private_fs.subprocess.run
+    calls = 0
+    def fail_leaf(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise subprocess.CalledProcessError(1, args[0])
+        return original_run(*args, **kwargs)
+    monkeypatch.setattr(private_fs.subprocess, 'run', fail_leaf)
+    transport = Transport([page([], total=0)])
+    out = tmp_path / 'batch'
+    with pytest.raises(live.LiveError, match='^output_error$'):
+        run(config(), out, transport)
+    assert transport.calls == []
+    assert (out / 'INCOMPLETE').exists()
+    assert not (out / 'batch.json').exists()
 
 
 def test_overflow_has_distinct_error(tmp_path):

@@ -9,6 +9,7 @@ from uuid import UUID
 from ..intake.io import decode_config, read_local
 from ..intake.errors import IntakeError
 from ..models import PreciseTimestamp
+from ..private_fs import mkdir_private
 from .operations_config import OperationsError, local_path, verify_private_root, verify_private_file
 
 ERROR_CODES = frozenset({'interrupted', 'collection_failed', 'incomplete_collection',
@@ -66,7 +67,7 @@ class JobStore:
         self.root = local_path(root, directory=True)
         try:
             for name in ('metadata', 'jobs'):
-                (self.root / name).mkdir(mode=0o700, exist_ok=True)
+                mkdir_private(self.root / name, exist_ok=True)
                 verify_private_root(self.root / name, excluded_roots=())
         except OSError:
             raise OperationsError('storage_failed') from None
@@ -130,7 +131,8 @@ class JobStore:
             parent = local_path(self.root / 'jobs', directory=True)
             verify_private_root(parent, excluded_roots=())
             path = parent / job_id
-            path.mkdir(mode=0o700, exist_ok=False)
+            mkdir_private(path)
+            verify_private_root(path, excluded_roots=())
             return path
         except OSError:
             raise OperationsError('storage_failed') from None

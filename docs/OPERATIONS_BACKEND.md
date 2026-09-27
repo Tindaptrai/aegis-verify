@@ -9,8 +9,11 @@ scenario or creates a security verdict. Default dashboard behavior stays read-on
 Prepare an existing owner-only evidence directory **outside** the checkout,
 report directory and static assets. POSIX requires current owner and mode 0700;
 Windows requires current-user ownership and only current-user allow ACEs, including
-inheritable FullControl for files and subdirectories. The backend checks ACLs but
-does not change them. Run it as the operator, not as a different privileged user.
+inheritable FullControl for files and subdirectories. The backend checks the
+existing root and child ACLs. Newly created job and collection directories receive
+an owner-only ACL before evidence is written; existing ACLs are never repaired or
+loosened. This is needed on Windows Python 3.13, where mkdir mode 0700 also grants
+Administrators/SYSTEM access. Run it as the operator, not as a different privileged user.
 Elevated Windows sessions whose default object owner is Administrators are not
 supported: new child objects fail the current-user ownership check. Use a normal
 non-elevated operator session; do not loosen the ACL check to work around this.

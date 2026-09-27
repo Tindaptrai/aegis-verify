@@ -38,7 +38,9 @@ with operator-reviewed local values (they are not literal command arguments):
 
 The parent directory must already exist and be accessible only to the operator.
 On Windows, enforce the parent ACL before collecting. The output directory must
-not exist. No files are overwritten. Do not place unreviewed evidence in tracked
+not exist. The collector applies and checks an owner-only ACL on each new output
+directory before writing evidence, including on Python 3.13. No files are
+overwritten. Do not place unreviewed evidence in tracked
 directories; use a private location or the ignored `raw-evidence/` directory.
 
 `direct` is an explicit operator statement about topology. Use `forwarded` or
