@@ -1,0 +1,106 @@
+# Issue #112 — Indexer CA chain, review and rotation plan
+
+Status: **plan only** (2026-09-27). No lab certificate, trust store, service, rule,
+credential or evidence has been changed under this issue. The lab administrator
+must review the certificate inventory, replacement chain and rollback before any
+rotation. Keep all private values and certificate files outside Git.
+
+## Observed failure and scope
+
+The owner's read-only check over a temporary approved tunnel reached the Wazuh
+Indexer on Windows Python 3.12 and received the expected unauthenticated HTTP 401.
+Python 3.13 failed TLS verification first with OpenSSL verify code 92, `CA cert
+does not include key usage extension`. The separate Wazuh Server API returned
+HTTP 401 on both Python versions. The tunnel was closed. These observations are
+recorded in [issue #112](https://github.com/Tindaptrai/aegis-verify/issues/112).
+
+Python 3.13 enables `VERIFY_X509_STRICT` in `ssl.create_default_context()`.
+OpenSSL's strict verifier requires a CA certificate to include the Key Usage
+extension. This is a certificate-chain problem; do not disable strict verification,
+hostname checks or TLS in AEGIS to make collection work. The exact offending CA
+certificate and its fingerprint **have not yet been identified**. A replacement
+cannot be chosen safely until the chain and every consumer are inventoried.
+
+References: [Python 3.13 SSL change](https://docs.python.org/3.13/whatsnew/3.13.html#ssl),
+[OpenSSL strict verification](https://docs.openssl.org/3.2/man1/openssl-verification-options/),
+[Wazuh certificate deployment](https://documentation.wazuh.com/current/user-manual/wazuh-indexer-cluster/certificate-deployment.html).
+
+## 1. Read-only inventory, before a change request
+
+The operator and lab administrator work in the private lab record, not in this
+repository. Use the previously approved temporary tunnel and the configured CA
+bundle. No credentials are needed for the initial TLS/HTTP 401 probe.
+
+1. Record the deployed Indexer node certificate chain, the configured local CA
+   bundle, and the certificate paths referenced by Indexer, Wazuh dashboard,
+   Filebeat and any other Indexer clients. Record each certificate's SHA-256
+   fingerprint, subject, issuer, serial, validity, Basic Constraints, Key Usage,
+   Extended Key Usage and SAN. Never copy a private key into the record or repo.
+2. Inspect **each CA certificate** in the presented and trusted chain. Name the
+   certificate missing Key Usage by its fingerprint and chain position. Verify
+   whether the configured CA bundle and the live Indexer chain refer to the same
+   trust anchor. Do not assume the root is the offender merely because the error
+   contains `CA cert`.
+3. Reproduce the strict-chain failure with the approved hostname and CA bundle.
+   Check that the failure occurs before HTTP, while the Server API remains a
+   separate passing control. Preserve sanitized command output and fingerprints
+   in the private lab record. A 401 proves TLS reached HTTP; it does not prove
+   the collector account's permissions.
+4. Inventory all trust consumers and node/client certificates signed by the
+   affected CA. Wazuh uses its CA across Indexer, dashboard and Filebeat, so a
+   root CA replacement may require coordinated certificate and trust updates.
+   Confirm the actual topology and Wazuh version before selecting commands.
+
+Stop if a fingerprint, hostname, certificate role or consumer is uncertain.
+
+## 2. Change package for administrator review
+
+Prepare the following outside Git. The administrator reviews and approves the
+complete package and maintenance window before deployment:
+
+- The exact offending CA fingerprint, why strict verification rejects it, and
+  the list of dependent certificates, services and trust files.
+- A newly issued, version-appropriate CA/chain with `CA:TRUE` Basic Constraints
+  and Key Usage permitting certificate signing (`keyCertSign`); appropriate
+  node/client certificates with reviewed SAN and usage. Validate the replacement
+  chain offline with strict verification and the intended DNS identity. A signed
+  certificate's extension cannot be repaired by editing its PEM text.
+- Secure backup of the currently deployed public certificates, private keys,
+  trust files and relevant service configuration, plus their fingerprints and
+  permissions. Specify the exact restore order, responsible administrator and
+  expected service interruption. Keep backups and keys in approved private
+  storage, never in an evidence bundle or the Git checkout.
+- A consumer-by-consumer deployment sequence that avoids a half-rotated trust
+  state. Use the procedure for the lab's installed Wazuh version and topology;
+  verify Indexer cluster health and event forwarding after each service restart.
+
+The local AEGIS CA bundle is updated only after the administrator confirms the
+new public CA fingerprint through a trusted channel. Keep the old bundle for
+rollback until acceptance completes. Do not change AEGIS parsing, scenario
+ground truth, detection rules or raw evidence for this issue.
+
+## 3. Post-rotation validation
+
+1. Reopen a temporary approved tunnel. With Windows Python 3.13,
+   `ssl.create_default_context(cafile=...)` must verify the Indexer certificate
+   and hostname and reach the expected unauthenticated HTTP 401. Repeat the
+   Server API control on Python 3.12 and 3.13. Keep strict verification on.
+2. Confirm Indexer, dashboard and Filebeat are healthy and that a known recent
+   event still reaches the Indexer. Compare new peer/CA fingerprints with the
+   administrator-approved change package.
+3. With the approved least-privilege Indexer principal, run one read-only,
+   bounded collection of a known window into a new owner-only output directory.
+   Review `query_complete`, `record_count`, cleanup status, the exact query
+   window, evidence IDs, raw references and SHA-256 hashes. Validate a nonempty
+   bundle only with a separately reviewed profile/context. An empty query is
+   diagnostic and must not become a missing-detection verdict.
+4. Save a sanitized acceptance record with Python/OpenSSL versions, certificate
+   fingerprints, service health, collection scope, result counts and the private
+   evidence record location. The lab administrator and project owner review it
+   before closing #112. Restore the old chain and trust configuration if TLS,
+   service health or forwarding fails; record the failed step and recheck the
+   original Python 3.12 path after rollback.
+
+Until this is complete, use the tested Python 3.12 environment for an optional
+live Indexer demonstration. The [offline customer walkthrough](DEMO_WALKTHROUGH.md)
+uses sanitized bundles and does not depend on Indexer connectivity.
