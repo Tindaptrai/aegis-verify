@@ -101,6 +101,8 @@ def test_block_round_is_prevented_and_bytes_match_the_lab_bundle(tmp_path):
     summary = scn002.collect_round(config(), probe("block"), out, FakeRunner("block"), now=NOW)
     assert summary["label"] == "block" and summary["source_port"] == 64307
     assert summary["preflight"] == {"firewall_offset_ms": -0.032, "manager_leap": "Normal", "sender_offset_ms": 8.06}
+    assert summary["source_minus_send_s"] == {
+        "sysmon3-archive.json": 0.191, "eve-alert.json": -0.059, "wazuh-alert.json": 1.28}
     for name in ("sysmon3-archive.json", "eve-alert.json", "filterlog.log", "wazuh-alert.json"):
         assert (out / name).read_bytes() == (LAB / "block" / name).read_bytes(), name
     assert evaluate(out)["evaluation"]["final_status"] == "Prevented"
@@ -116,6 +118,30 @@ def test_control_round_has_no_filterlog_and_stays_inconclusive(tmp_path):
     outcomes = {a["assertion_id"]: a["outcome"] for a in report["evaluation"]["assertions"]}
     assert outcomes["SCN-002-A03"] == "inconclusive"
     assert {outcomes[k] for k in ("SCN-002-A01", "SCN-002-A02", "SCN-002-A04")} == {"satisfied"}
+
+
+def test_skewed_sysmon_clock_is_reported_and_bytes_are_kept(tmp_path):
+    # Lab 2026-09-27: Sysmon's network events kept a clock from before a w32time step.
+    skewed = {path: data.replace(b"2026-09-22 13:48:33.809", b"2026-09-22 13:48:28.909")
+              for path, data in sources("control").items()}
+    out = tmp_path / "control"
+    summary = scn002.collect_round(config(), probe("control"), out, FakeRunner("control", files=skewed), now=NOW)
+    assert summary["source_minus_send_s"] == {
+        "sysmon3-archive.json": -4.491, "eve-alert.json": 0.064, "wazuh-alert.json": 0.552}
+    lab = (LAB / "control" / "sysmon3-archive.json").read_bytes()
+    assert (out / "sysmon3-archive.json").read_bytes() == lab.replace(b"13:48:33.809", b"13:48:28.909")
+    outcomes = {a["assertion_id"]: a["outcome"] for a in evaluate(out)["evaluation"]["assertions"]}
+    assert outcomes["SCN-002-A02"] != "satisfied"
+
+
+def test_unreadable_source_time_is_null(tmp_path):
+    files = sources("control")
+    alerts = "/var/ossec/logs/alerts/alerts.json"
+    files[alerts] = files[alerts].replace(b'{"timestamp":"2026-09-22T13:48:33.952+0000"', b'{"timestamp":"later"')
+    summary = scn002.collect_round(config(), probe("control"), tmp_path / "control",
+                                   FakeRunner("control", files=files), now=NOW)
+    assert summary["source_minus_send_s"]["wazuh-alert.json"] is None
+    assert summary["source_minus_send_s"]["eve-alert.json"] == 0.064
 
 
 def test_remote_commands_are_read_only_and_fixed(tmp_path):
