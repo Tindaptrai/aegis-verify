@@ -109,7 +109,12 @@ Hai điểm nên nói thật:
 - "False negative" chỉ được kết luận khi có xác nhận thu thập đầy đủ; thiếu xác
   nhận thì engine trả `Inconclusive`.
 
-Bằng chứng thô của SCN-001 chứa hostname lab nên không nằm trong repo.
+Bằng chứng thô của SCN-001 chứa hostname lab nên không nằm trong repo. Nếu máy
+demo có hồ sơ riêng của bộ v3, chép bốn report (A, B, C và comparison B → C)
+vào thư mục `--reports`. Trang Tổng quan sẽ hiện SCN-001 với lịch sử ba lượt và
+so sánh B → C ngay trên dashboard ([kết quả v3, mục 9](SCN001_V3_RESULT_2026-09-27.md)).
+Không có hồ sơ riêng thì SCN-001 hiện "Chưa chạy"; đó là trạng thái đúng, không
+phải lỗi.
 
 ## 6. Câu hỏi hay gặp
 
