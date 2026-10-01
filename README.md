@@ -6,18 +6,22 @@ AEGIS Verify replays safe security scenarios, normalizes telemetry from open-sou
 security controls, and verifies every security conclusion against raw evidence. Its
 core workflow is **Gap → Rule Fix → Re-test → Pass**.
 
-> Status (2026-09-26): controlled demo/lab V1 is integrated through PRs #28–#30.
-> The fixture-driven CLI, regression comparison, read-only dashboard, optional
-> native-review input and bounded live Wazuh Indexer collector are available.
-> **SCN-002 reached `Prevented` on real lab evidence on 2026-09-22**, evaluated
-> offline through the engine ([result and evidence hashes](docs/SCN002_RESULT_2026-09-22.md)).
-> **SCN-003 reached `Detected` on real lab evidence on 2026-09-26**, evaluated
-> offline through the engine ([result and evidence hashes](docs/SCN003_RESULT_2026-09-26.md)).
-> All three manifests still declare `status: draft`.
-> This is not production certification or live fleet monitoring. Historical run
-> binding remains unknown; successful reads do not prove least-privilege access.
-> Start with the [V1 handoff/runbook](docs/V1_HANDOFF.md) and
-> [draft release notes](docs/V1_RELEASE_NOTES.md). No release tag is declared here.
+> Status (2026-10-01, release **0.3.0**, Apache-2.0): lab MVP. All three scenarios
+> reached their expected outcome on real lab evidence, evaluated offline through the
+> engine:
+> - SCN-001 `Regression Passed` ([v3 result](docs/SCN001_V3_RESULT_2026-09-27.md));
+> - SCN-002 `Prevented` ([result](docs/SCN002_RESULT_2026-09-22.md));
+> - SCN-003 `Detected` ([result](docs/SCN003_RESULT_2026-09-26.md)).
+>
+> Read-only collectors exist for the Wazuh Indexer (Python 3.11–3.13) and for
+> SCN-002/SCN-003 lab rounds (`aegis collect`). This is a single-operator lab tool,
+> not production certification or live fleet monitoring. Collection assurance is
+> attested by the operator, and all three manifests still declare `status: draft`.
+>
+> **New to the project or running it in another lab?** Start with the
+> [lab onboarding guide](docs/LAB_ONBOARDING.md), then the
+> [offline demo](docs/DEMO_WALKTHROUGH.md). Release notes:
+> [0.3.0](docs/RELEASE_NOTES_0.3.0.md).
 
 ## MVP
 
@@ -64,8 +68,9 @@ python -m venv .venv
 
 Requires Python >=3.11. Runtime dependencies are `pydantic` and `PyYAML` only.
 Tests use synthetic data and reviewed, sanitized samples, not proof of an incident.
-CI runs the backend suite on Ubuntu and Windows with Python 3.11 and 3.12, plus
-the frontend tests and build ([CI notes](docs/CI.md)).
+CI runs the backend suite on Ubuntu with Python 3.11–3.13 and on Windows with 3.11
+and 3.13, plus the frontend tests and build. Pull requests run Linux, and also
+Windows/3.13 when they touch Windows-specific code ([CI notes](docs/CI.md)).
 
 ## Current implementation: bundle parsers
 
@@ -194,5 +199,6 @@ complete.
 
 ## License
 
-No license has been selected. All rights are reserved unless the repository owner
-adds a license.
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).
+Lab evidence and private configurations are not part of the repository and are not
+covered by this license.
