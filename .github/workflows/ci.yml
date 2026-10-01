@@ -21,10 +21,15 @@ jobs:
     strategy:
       fail-fast: false
       # Pull requests run one Linux job to save Actions minutes (Windows bills 2x on a
-      # private repo); pushes to main and manual dispatch keep the full matrix.
+      # private repo); windows-pr.yml adds a Windows job when a PR touches
+      # Windows-specific code. Pushes to main and manual dispatch run Linux on
+      # 3.11-3.13 and Windows on the oldest and newest supported Python.
       matrix:
         os: ${{ fromJSON(github.event_name == 'pull_request' && '["ubuntu-latest"]' || '["ubuntu-latest", "windows-latest"]') }}
-        python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.11", "3.12"]') }}
+        python: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.11", "3.12", "3.13"]') }}
+        exclude:
+          - os: windows-latest
+            python: '3.12'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:

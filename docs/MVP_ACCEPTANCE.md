@@ -60,7 +60,7 @@ vận hành cục bộ.
 | Backend đầy đủ (Linux, Python 3.11, `main` @ `cec9e5d`, thay CI khi hết quota) | 3202 passed, 84 skipped (đều là test chỉ chạy trên Windows); `pip check` và build wheel đạt |
 | Frontend: Vitest, TypeScript và Vite build | 86 passed; build đạt (Windows và Linux, Node 24) |
 | Diễn tập [demo](DEMO_WALKTHROUGH.md) trên clone sạch, 2026-09-27 | mọi lệnh cho đúng kết quả ghi trong kịch bản |
-| CI GitHub | hết quota Actions miễn phí tháng 9; tự chạy lại từ 2026-10-01. PR chỉ chạy Linux/Python 3.12, `main` chạy đủ ma trận ([CI.md](CI.md)) |
+| CI GitHub | chạy lại từ 2026-10-01, `main` xanh. PR chạy Linux/Python 3.12, cộng Windows/3.13 nếu PR đổi code riêng của Windows; `main` chạy Linux 3.11–3.13 và Windows 3.11, 3.13 ([CI.md](CI.md)) |
 
 ## 6. Việc chủ dự án quyết
 
