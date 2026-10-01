@@ -38,8 +38,10 @@ with operator-reviewed local values (they are not literal command arguments):
 
 The parent directory must already exist and be accessible only to the operator.
 On Windows, enforce the parent ACL before collecting. The output directory must
-not exist. The collector applies and checks an owner-only ACL on each new output
-directory before writing evidence, including on Python 3.13. No files are
+not exist. The collector creates each new output directory with an owner-only ACL
+in the same call, before writing evidence, including on Python 3.13. In an elevated
+session the directory is owned by Administrators while the ACL still grants only the
+operator. No files are
 overwritten. Do not place unreviewed evidence in tracked
 directories; use a private location or the ignored `raw-evidence/` directory.
 

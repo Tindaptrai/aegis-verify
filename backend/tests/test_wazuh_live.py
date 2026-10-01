@@ -3,7 +3,6 @@ import json
 import os
 import ssl
 import io
-import subprocess
 from urllib.error import HTTPError, URLError
 from http.client import IncompleteRead
 from pathlib import Path
@@ -12,8 +11,8 @@ import pytest
 
 from aegis_verify.connectors.wazuh.live import Config, LiveError, collect, HttpsTransport
 from aegis_verify.connectors.wazuh import parse_wazuh_document
-from aegis_verify.dashboard.operations_config import verify_private_file, verify_private_root
 from aegis_verify import private_fs
+from windows_acl import assert_owner_only
 
 ROOT = Path(__file__).resolve().parents[2]
 RAW = (ROOT / 'tests/fixtures/wazuh/win4688.sanitized.json').read_bytes()
@@ -72,21 +71,20 @@ def test_collect_preserves_response_and_fixture_mapping(tmp_path):
 def test_windows_collection_output_has_owner_only_acl(tmp_path):
     out = tmp_path / 'new'
     collect(config(), out, transport=Transport([page([], total=0)]))
-    verify_private_root(out, excluded_roots=())
-    verify_private_file(out / 'collection.json')
+    assert_owner_only(out)
+    assert_owner_only(out / 'collection.json', directory=False)
 
 
-@pytest.mark.skipif(os.name != 'nt', reason='Windows ACL integration')
-def test_windows_acl_setup_failure_never_queries_source_or_writes_evidence(tmp_path, monkeypatch):
-    def reject(*args, **kwargs):
-        raise subprocess.CalledProcessError(1, args[0])
-    monkeypatch.setattr(private_fs.subprocess, 'run', reject)
+def test_output_directory_failure_never_queries_source_or_writes_evidence(tmp_path, monkeypatch):
+    def reject(target):
+        raise OSError('injected')
+    monkeypatch.setattr(private_fs, '_create', reject)
     transport = Transport([page([], total=0)])
     out = tmp_path / 'new'
     with pytest.raises(LiveError, match='^output_error$'):
         collect(config(), out, transport=transport)
     assert transport.calls == []
-    assert list(out.iterdir()) == []
+    assert not out.exists()
 
 @pytest.mark.parametrize('bad', [
     page([HIT], timed_out=True),

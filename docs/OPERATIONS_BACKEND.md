@@ -10,8 +10,9 @@ Prepare an existing owner-only evidence directory **outside** the checkout,
 report directory and static assets. POSIX requires current owner and mode 0700;
 Windows requires current-user ownership and only current-user allow ACEs, including
 inheritable FullControl for files and subdirectories. The backend checks the
-existing root and child ACLs. Newly created job and collection directories receive
-an owner-only ACL before evidence is written; existing ACLs are never repaired or
+existing root and child ACLs. Newly created job and collection directories are
+created with an owner-only ACL in the same call (`CreateDirectoryW` with a protected
+DACL), so there is no window with broader access; existing ACLs are never repaired or
 loosened. This is needed on Windows Python 3.13, where mkdir mode 0700 also grants
 Administrators/SYSTEM access. Run it as the operator, not as a different privileged user.
 Elevated Windows sessions whose default object owner is Administrators are not

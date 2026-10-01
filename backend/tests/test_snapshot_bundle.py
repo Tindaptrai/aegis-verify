@@ -6,15 +6,14 @@ import importlib
 import json
 import os
 from pathlib import Path
-import subprocess
 import tempfile
 
 import pytest
 
 from aegis_verify.connectors.wazuh.manager_snapshot import ManagerSnapshotScope
 from aegis_verify.cli.service import evaluate_bundle
-from aegis_verify.dashboard.operations_config import verify_private_file, verify_private_root
 from aegis_verify import private_fs
+from windows_acl import assert_owner_only
 
 FIXTURES = Path(__file__).resolve().parents[2] / 'tests/fixtures/wazuh/windows-telemetry'
 
@@ -242,21 +241,17 @@ def test_windows_snapshot_directories_have_owner_only_acl(api, sample):
     _, kwargs = sample
     out = api.prepare_snapshot_bundle((), **kwargs)
     for directory in (out, out / 'snapshots', out / 'documents'):
-        verify_private_root(directory, excluded_roots=())
-    verify_private_file(out / 'snapshot-bundle.json')
+        assert_owner_only(directory)
+    assert_owner_only(out / 'snapshot-bundle.json', directory=False)
 
 
-@pytest.mark.skipif(os.name != 'nt', reason='Windows ACL integration')
-def test_windows_snapshot_child_acl_failure_stops_before_evidence_write(api, sample, monkeypatch):
-    original_run = private_fs.subprocess.run
-    calls = 0
-    def fail_child(*args, **kwargs):
-        nonlocal calls
-        calls += 1
-        if calls == 3:
-            raise subprocess.CalledProcessError(1, args[0])
-        return original_run(*args, **kwargs)
-    monkeypatch.setattr(private_fs.subprocess, 'run', fail_child)
+def test_snapshot_child_directory_failure_stops_before_evidence_write(api, sample, monkeypatch):
+    create = private_fs._create
+    def fail_documents(target):
+        if target.name == 'documents':
+            raise OSError('injected')
+        create(target)
+    monkeypatch.setattr(private_fs, '_create', fail_documents)
     _, kwargs = sample
     with pytest.raises(api.SnapshotBundleError):
         api.prepare_snapshot_bundle((), **kwargs)

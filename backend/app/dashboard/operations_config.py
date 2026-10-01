@@ -63,13 +63,8 @@ def validate_windows_acl(data, *, directory=True):
         raise OperationsError('private_root_required') from None
 
 
-def _check_private_acl(path):
-    if os.name != 'nt':
-        info = path.stat()
-        required = 0o700 if path.is_dir() else 0o600
-        if info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_mode & required != required:
-            raise OperationsError('private_root_required')
-        return
+def read_windows_acl(path):
+    """Owner, current user and access rules of one Windows path, as decoded JSON."""
     # Static code only. The literal path is child-process environment data, never
     # interpolated PowerShell source; no profile, policy changes or visible window.
     script = """
@@ -90,15 +85,29 @@ $rules = @($acl.GetAccessRules($true, $true, $sidType) | ForEach-Object {
 })
 @{owner=$owner; current=$current; rules=$rules; directory=$directory} | ConvertTo-Json -Depth 4 -Compress
 """
-    executable = Path(os.environ.get('SystemRoot', '')) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    system_root = os.environ.get('SystemRoot', '')
+    if not os.path.isabs(system_root):
+        # Never resolve powershell.exe relative to the working directory.
+        raise OSError('system_root_unavailable')
+    executable = Path(system_root) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    result = subprocess.run([str(executable), '-NoLogo', '-NoProfile', '-NonInteractive',
+        '-EncodedCommand', base64.b64encode(script.encode('utf-16le')).decode('ascii')],
+        env={**os.environ, 'AEGIS_OPERATIONS_ACL_PATH': str(path)}, capture_output=True,
+        timeout=10, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), check=True)
+    if len(result.stdout) > 65536:
+        raise ValueError
+    return json.loads(result.stdout)
+
+
+def _check_private_acl(path):
+    if os.name != 'nt':
+        info = path.stat()
+        required = 0o700 if path.is_dir() else 0o600
+        if info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_mode & required != required:
+            raise OperationsError('private_root_required')
+        return
     try:
-        result = subprocess.run([str(executable), '-NoLogo', '-NoProfile', '-NonInteractive',
-            '-EncodedCommand', base64.b64encode(script.encode('utf-16le')).decode('ascii')],
-            env={**os.environ, 'AEGIS_OPERATIONS_ACL_PATH': str(path)}, capture_output=True,
-            timeout=10, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0), check=True)
-        if len(result.stdout) > 65536:
-            raise ValueError
-        data = json.loads(result.stdout)
+        data = read_windows_acl(path)
         validate_windows_acl(data, directory=data['directory'])
     except (OSError, ValueError, subprocess.SubprocessError):
         raise OperationsError('private_root_required') from None
