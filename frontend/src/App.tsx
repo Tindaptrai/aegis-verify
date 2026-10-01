@@ -12,20 +12,26 @@ import { createOperationsClient, type OperationsClient } from './operations/api'
 import type { Bootstrap } from './operations/contracts';
 import { AgentsView } from './operations/AgentsView';
 import { CollectionsView } from './operations/CollectionsView';
+import { createOverviewClient, type OverviewClient } from './overview/api';
+import { OverviewPage } from './overview/OverviewPage';
+import { ScenarioDetailPage } from './overview/ScenarioDetailPage';
 
 export interface AppProps {
   api: ApiClient;
   operationsClient?: OperationsClient;
+  overviewClient?: OverviewClient;
 }
 
 function initialTab(value: string | null): RunTab {
   return value === 'timeline' ? 'timeline' : 'assertions';
 }
 
-export function App({ api, operationsClient }: AppProps) {
+export function App({ api, operationsClient, overviewClient }: AppProps) {
   const [operations] = useState(() => operationsClient ?? createOperationsClient());
+  const [overview] = useState(() => overviewClient ?? createOverviewClient());
   const [capabilities, setCapabilities] = useState<Bootstrap | null>(null);
-  const [page, setPage] = useState(() => readRoute().page ?? 'reports');
+  const [page, setPage] = useState(() => readRoute().page ?? 'overview');
+  const [scenario, setScenario] = useState<string | null>(() => readRoute().scenario ?? null);
   const [jobId, setJobId] = useState(() => readRoute().job ?? null);
   const [index, setIndex] = useState<LoadState<ReportIndex>>({ status: 'loading' });
   const [selected, setSelected] = useState<string | null>(() => readRoute().report);
@@ -38,9 +44,28 @@ export function App({ api, operationsClient }: AppProps) {
     const controller = new AbortController();
     void operations.bootstrap(controller.signal).then(data => {
       if (!controller.signal.aborted) setCapabilities(data);
-    }).catch(() => { if (!controller.signal.aborted) { setCapabilities(null); setPage('reports'); } });
+    }).catch(() => {
+      if (controller.signal.aborted) return;
+      setCapabilities(null);
+      // Only the capability-gated pages fall back; the overview and reports stay put.
+      setPage((current) => (current === 'agents' || current === 'collections' ? 'reports' : current));
+    });
     return () => controller.abort();
   }, [operations]);
+
+  // A pasted link or back/forward changes only the hash; follow it instead of
+  // leaving the screen out of step with the address bar.
+  useEffect(() => {
+    const follow = () => {
+      const route = readRoute();
+      setPage(route.page ?? 'overview');
+      setScenario(route.scenario ?? null);
+      if (route.report !== null) setSelected(route.report);
+      if (route.tab !== null) setTab(initialTab(route.tab));
+    };
+    window.addEventListener('hashchange', follow);
+    return () => window.removeEventListener('hashchange', follow);
+  }, []);
 
   const loadIndex = useCallback(() => {
     setIndex({ status: 'loading' });
@@ -62,11 +87,11 @@ export function App({ api, operationsClient }: AppProps) {
   }, [index, selected]);
 
   useEffect(() => {
-    writeRoute({ report: selected, tab: selected === null ? null : tab, page, job: jobId });
-  }, [selected, tab, page, jobId]);
+    writeRoute({ report: selected, tab: selected === null ? null : tab, page, job: jobId, scenario });
+  }, [selected, tab, page, jobId, scenario]);
 
   useEffect(() => {
-    if (selected === null) {
+    if (selected === null || page !== 'reports') {
       setReport(null);
       return;
     }
@@ -78,23 +103,34 @@ export function App({ api, operationsClient }: AppProps) {
     return () => {
       cancelled = true;
     };
-  }, [api, selected, reportTick]);
+  }, [api, selected, reportTick, page]);
 
   const refresh = () => {
     loadIndex();
     setReportTick((value) => value + 1);
   };
 
+  const openReport = (name: string) => {
+    setSelected(name);
+    setTab('assertions');
+    setPage('reports');
+  };
+  const pages = capabilities ? (['overview', 'reports', 'collections', 'agents'] as const) : (['overview', 'reports'] as const);
+
   return (
     <div className="app">
       <Sidebar state={index} selected={selected} query={query} onQuery={setQuery}
         onSelect={name => { setSelected(name); setPage('reports'); }} onRetry={loadIndex}
-        operationsNav={capabilities && <nav className="operations-nav" aria-label="Workspace">
-          {(['reports', 'collections', 'agents'] as const).map(item => <button key={item} aria-current={page === item ? 'page' : undefined}
-            onClick={() => setPage(item)}>{({ reports: 'Reports', collections: 'Collections', agents: 'Agents' })[item]}</button>)}
+        operationsNav={<nav className="operations-nav" aria-label="Workspace">
+          {pages.map(item => <button key={item} aria-current={page === item ? 'page' : undefined}
+            onClick={() => { setPage(item); if (item === 'overview') setScenario(null); }}>
+            {({ overview: 'Tổng quan', reports: 'Reports', collections: 'Collections', agents: 'Agents' })[item]}</button>)}
         </nav>} />
       <main className="main">
-        {capabilities && page === 'agents' ? <AgentsView client={operations} config={capabilities} /> :
+        {page === 'overview' ? (scenario !== null
+          ? <ScenarioDetailPage client={overview} api={api} id={scenario} onBack={() => setScenario(null)} onOpenReport={openReport} />
+          : <OverviewPage client={overview} onOpenScenario={setScenario} onOpenReport={openReport} />) :
+          capabilities && page === 'agents' ? <AgentsView client={operations} config={capabilities} /> :
           capabilities && page === 'collections' ? <CollectionsView client={operations} config={capabilities} initialJobId={jobId} onJob={setJobId} /> : <Content
           index={index}
           selected={selected}

@@ -1,0 +1,151 @@
+{
+  "kind": "scenario_index",
+  "kpi": {
+    "by_status": {
+      "Detected": 0,
+      "False negative": 0,
+      "Inconclusive": 0,
+      "Missing telemetry": 0,
+      "Other": 0,
+      "Prevented": 0
+    },
+    "not_run": 0,
+    "run": 0,
+    "total": 0
+  },
+  "last_report_modified": "2026-09-21T14:13:27Z",
+  "registry": {
+    "configured": false,
+    "error": null,
+    "errors": [],
+    "manifest_count": 0
+  },
+  "report_errors": [
+    {
+      "code": "invalid_json",
+      "field": null,
+      "name": "malformed-truncated.json",
+      "stage": "inputs"
+    }
+  ],
+  "report_storage_error": null,
+  "scenarios": [],
+  "unregistered": [
+    {
+      "latest_run": {
+        "assertions": {
+          "false_negative": 0,
+          "inconclusive": 0,
+          "missing_telemetry": 0,
+          "satisfied": 4,
+          "total": 4
+        },
+        "collection_assurance": {
+          "unknown": 4
+        },
+        "engine_semantics_version": "0.1.0",
+        "evidence_referenced": 4,
+        "file_modified": "2026-09-21T14:13:24Z",
+        "final_status": "Prevented",
+        "kind": "evaluation",
+        "name": "scn002-block.json",
+        "profile_id": "scn002-udp-marker-prevention",
+        "profile_version": "0.1.0",
+        "run_id": "scn002-block-2fb0b7700fd54fee81ebfe19bb78ecd9",
+        "scenario_fingerprint": "95f7ea34d04eba04f74a269a5d94a59891296d10a4f91f57a8cd91d1fbff4102",
+        "scenario_id": "SCN-002",
+        "scenario_version": "0.1.0",
+        "sources": {
+          "pfsense": 1,
+          "suricata": 1,
+          "wazuh": 2
+        },
+        "window_end": "2026-09-22T14:29:30Z",
+        "window_start": "2026-09-22T14:27:30Z"
+      },
+      "reports": [
+        "scn002-block.json",
+        "scn002-compare.json",
+        "scn002-control.json"
+      ],
+      "scenario_id": "SCN-002"
+    },
+    {
+      "latest_run": {
+        "assertions": {
+          "false_negative": 0,
+          "inconclusive": 0,
+          "missing_telemetry": 0,
+          "satisfied": 4,
+          "total": 4
+        },
+        "collection_assurance": {
+          "unknown": 4
+        },
+        "engine_semantics_version": "0.1.0",
+        "evidence_referenced": 4,
+        "file_modified": "2026-09-21T14:13:27Z",
+        "final_status": "Detected",
+        "kind": "evaluation",
+        "name": "scn003.json",
+        "profile_id": "scn003-single-cowrie-session-detected",
+        "profile_version": "0.1.0",
+        "run_id": "scn003-cac43623545449cb8d0544522941666d",
+        "scenario_fingerprint": "d84ec3dbd59081ac6e275ef62393f2eff6cdcac207c3b28332737274184d1550",
+        "scenario_id": "SCN-003",
+        "scenario_version": "0.1.0",
+        "sources": {
+          "cowrie": 2,
+          "pfsense": 1,
+          "suricata": 1,
+          "wazuh": 1
+        },
+        "window_end": "2026-09-26T14:53:00Z",
+        "window_start": "2026-09-26T14:50:00Z"
+      },
+      "reports": [
+        "scn003.json"
+      ],
+      "scenario_id": "SCN-003"
+    },
+    {
+      "latest_run": {
+        "assertions": {
+          "false_negative": 1,
+          "inconclusive": 0,
+          "missing_telemetry": 0,
+          "satisfied": 1,
+          "total": 2
+        },
+        "collection_assurance": {
+          "caller-attested": 1,
+          "unknown": 1
+        },
+        "engine_semantics_version": "0.1.0",
+        "evidence_referenced": 1,
+        "file_modified": "2026-09-21T14:13:21Z",
+        "final_status": "False negative",
+        "kind": "evaluation",
+        "name": "before-false-negative.json",
+        "profile_id": "synthetic-dashboard-profile",
+        "profile_version": "0.1.0",
+        "run_id": "synthetic-run-before-gap",
+        "scenario_fingerprint": "52b2eaff66d8f4ba027f2ffff2f3ca98b61f0dd3778e8418f652529d7ac66a59",
+        "scenario_id": "SCN-999",
+        "scenario_version": "0.1.0",
+        "sources": {
+          "wazuh": 1
+        },
+        "window_end": "2026-01-01T00:01:00Z",
+        "window_start": "2026-01-01T00:00:00Z"
+      },
+      "reports": [
+        "after-detected.json",
+        "before-false-negative.json",
+        "comparison-regression-passed.json"
+      ],
+      "scenario_id": "SCN-999"
+    }
+  ],
+  "version": "0.1.0"
+}

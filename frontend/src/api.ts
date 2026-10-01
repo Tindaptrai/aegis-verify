@@ -25,9 +25,9 @@ export interface ApiClient {
   report(name: string): Promise<LoadState<AnyReport>>;
 }
 
-type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
+export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-async function readJson(
+export async function readJson(
   fetchImpl: FetchLike,
   url: string,
 ): Promise<{ status: 'ok'; body: unknown } | { status: 'malformed'; reason: string } | { status: 'backend-error'; reason: string }> {

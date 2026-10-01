@@ -1,0 +1,149 @@
+{
+  "components": [
+    {
+      "details": {},
+      "id": "api",
+      "last_activity": null,
+      "name": "Dashboard API",
+      "reason": null,
+      "source": "this_response",
+      "status": "healthy",
+      "summary": "endpoint_responding"
+    },
+    {
+      "details": {
+        "invalid": 0,
+        "manifests": 3,
+        "unregistered_reports": 3
+      },
+      "id": "scenario_registry",
+      "last_activity": null,
+      "name": "Scenario registry",
+      "reason": "unregistered_reports",
+      "source": "scenarios_directory",
+      "status": "degraded",
+      "summary": "scenario_manifests"
+    },
+    {
+      "details": {
+        "files": 8,
+        "readable": 7,
+        "unreadable": 1
+      },
+      "id": "report_storage",
+      "last_activity": "2026-09-21T14:13:27Z",
+      "name": "Report storage",
+      "reason": "unreadable_reports",
+      "source": "reports_directory",
+      "status": "degraded",
+      "summary": "cli_reports"
+    },
+    {
+      "details": {
+        "backend_engine_version": "0.1.0",
+        "report_engine_versions": [
+          "0.1.0"
+        ]
+      },
+      "id": "validation_engine",
+      "last_activity": null,
+      "name": "Validation engine",
+      "reason": "dashboard_does_not_run_engine",
+      "source": "reports",
+      "status": "unknown",
+      "summary": "engine_not_run_by_dashboard"
+    },
+    {
+      "details": {},
+      "id": "evidence_collection",
+      "last_activity": null,
+      "name": "Evidence collection",
+      "reason": "dashboard_started_without_operations",
+      "source": "operations_job_store",
+      "status": "not_configured",
+      "summary": "operations_indexer_collection"
+    },
+    {
+      "details": {
+        "seen_in_reports": {
+          "parsed": 1,
+          "report": "scn003.json",
+          "window_end": "2026-09-26T14:53:00Z"
+        }
+      },
+      "id": "connector_wazuh",
+      "last_activity": null,
+      "name": "wazuh",
+      "reason": "no_live_connector",
+      "source": "none",
+      "status": "not_configured",
+      "summary": "connector"
+    },
+    {
+      "details": {
+        "seen_in_reports": {
+          "parsed": 1,
+          "report": "scn003.json",
+          "window_end": "2026-09-26T14:53:00Z"
+        }
+      },
+      "id": "connector_suricata",
+      "last_activity": null,
+      "name": "suricata",
+      "reason": "no_live_connector",
+      "source": "none",
+      "status": "not_configured",
+      "summary": "connector"
+    },
+    {
+      "details": {
+        "seen_in_reports": {
+          "parsed": 1,
+          "report": "scn003.json",
+          "window_end": "2026-09-26T14:53:00Z"
+        }
+      },
+      "id": "connector_pfsense",
+      "last_activity": null,
+      "name": "pfsense",
+      "reason": "no_live_connector",
+      "source": "none",
+      "status": "not_configured",
+      "summary": "connector"
+    },
+    {
+      "details": {
+        "seen_in_reports": {
+          "parsed": 2,
+          "report": "scn003.json",
+          "window_end": "2026-09-26T14:53:00Z"
+        }
+      },
+      "id": "connector_cowrie",
+      "last_activity": null,
+      "name": "cowrie",
+      "reason": "no_live_connector",
+      "source": "none",
+      "status": "not_configured",
+      "summary": "connector"
+    }
+  ],
+  "generated_at": "2026-10-01T06:00:00Z",
+  "kind": "system_status",
+  "overall": {
+    "reasons": [
+      {
+        "component": "scenario_registry",
+        "reason": "unregistered_reports",
+        "status": "degraded"
+      },
+      {
+        "component": "report_storage",
+        "reason": "unreadable_reports",
+        "status": "degraded"
+      }
+    ],
+    "status": "degraded"
+  },
+  "version": "0.1.0"
+}

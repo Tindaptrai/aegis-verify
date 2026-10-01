@@ -1,0 +1,57 @@
+{
+  "comparisons": [],
+  "kind": "scenario_detail",
+  "latest_run": null,
+  "report_errors": [
+    {
+      "code": "invalid_json",
+      "field": null,
+      "name": "malformed-truncated.json",
+      "stage": "inputs"
+    }
+  ],
+  "run_state": "not_run",
+  "runs": [],
+  "scenario": {
+    "assertions": [
+      {
+        "description": "PowerShell process execution telemetry exists.",
+        "id": "SCN-001-A01",
+        "source": "sysmon"
+      },
+      {
+        "description": "PowerShell script or command telemetry exists.",
+        "id": "SCN-001-A02",
+        "source": "powershell"
+      },
+      {
+        "description": "Wazuh detection references the execution evidence.",
+        "id": "SCN-001-A03",
+        "source": "wazuh"
+      }
+    ],
+    "description": "Execute an approved, non-destructive PowerShell test script and verify that endpoint telemetry and the expected Wazuh detection are present.",
+    "expected_outcome": "detected",
+    "expected_sources": [
+      "sysmon",
+      "powershell",
+      "wazuh"
+    ],
+    "file": "SCN-001-powershell-execution.yaml",
+    "fingerprint": "729c4430e65269773334873a27819afde363638dfc93efa5519f5e28bba2ec25",
+    "id": "SCN-001",
+    "name": "PowerShell Execution",
+    "safety": {
+      "authorization_required": true,
+      "destructive": false,
+      "notes": "Run only in the approved lab with a reviewed test payload."
+    },
+    "status": "draft",
+    "tags": [
+      "regression-demo",
+      "gap-fix-retest"
+    ],
+    "version": "0.1.0"
+  },
+  "version": "0.1.0"
+}

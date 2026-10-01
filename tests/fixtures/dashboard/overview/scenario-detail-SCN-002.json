@@ -1,0 +1,174 @@
+{
+  "comparisons": [
+    {
+      "after_run_id": "scn002-block-2fb0b7700fd54fee81ebfe19bb78ecd9",
+      "after_status": "Prevented",
+      "before_run_id": "scn002-control-72340d493a7e4330ad2af25bbbd282d2",
+      "before_status": "Inconclusive",
+      "comparison_status": "Inconclusive",
+      "file_modified": "2026-09-21T14:13:25Z",
+      "kind": "comparison",
+      "name": "scn002-compare.json",
+      "scenario_id": "SCN-002",
+      "scenario_version": "0.1.0",
+      "window_end": "2026-09-22T14:29:30Z"
+    }
+  ],
+  "kind": "scenario_detail",
+  "latest_run": {
+    "assertions": {
+      "false_negative": 0,
+      "inconclusive": 0,
+      "missing_telemetry": 0,
+      "satisfied": 4,
+      "total": 4
+    },
+    "collection_assurance": {
+      "unknown": 4
+    },
+    "engine_semantics_version": "0.1.0",
+    "evidence_referenced": 4,
+    "file_modified": "2026-09-21T14:13:24Z",
+    "final_status": "Prevented",
+    "kind": "evaluation",
+    "manifest_match": true,
+    "mismatch": null,
+    "name": "scn002-block.json",
+    "profile_id": "scn002-udp-marker-prevention",
+    "profile_version": "0.1.0",
+    "run_id": "scn002-block-2fb0b7700fd54fee81ebfe19bb78ecd9",
+    "scenario_fingerprint": "95f7ea34d04eba04f74a269a5d94a59891296d10a4f91f57a8cd91d1fbff4102",
+    "scenario_id": "SCN-002",
+    "scenario_version": "0.1.0",
+    "sources": {
+      "pfsense": 1,
+      "suricata": 1,
+      "wazuh": 2
+    },
+    "window_end": "2026-09-22T14:29:30Z",
+    "window_start": "2026-09-22T14:27:30Z"
+  },
+  "report_errors": [
+    {
+      "code": "invalid_json",
+      "field": null,
+      "name": "malformed-truncated.json",
+      "stage": "inputs"
+    }
+  ],
+  "run_state": "run",
+  "runs": [
+    {
+      "assertions": {
+        "false_negative": 0,
+        "inconclusive": 0,
+        "missing_telemetry": 0,
+        "satisfied": 4,
+        "total": 4
+      },
+      "collection_assurance": {
+        "unknown": 4
+      },
+      "engine_semantics_version": "0.1.0",
+      "evidence_referenced": 4,
+      "file_modified": "2026-09-21T14:13:24Z",
+      "final_status": "Prevented",
+      "kind": "evaluation",
+      "manifest_match": true,
+      "mismatch": null,
+      "name": "scn002-block.json",
+      "profile_id": "scn002-udp-marker-prevention",
+      "profile_version": "0.1.0",
+      "run_id": "scn002-block-2fb0b7700fd54fee81ebfe19bb78ecd9",
+      "scenario_fingerprint": "95f7ea34d04eba04f74a269a5d94a59891296d10a4f91f57a8cd91d1fbff4102",
+      "scenario_id": "SCN-002",
+      "scenario_version": "0.1.0",
+      "sources": {
+        "pfsense": 1,
+        "suricata": 1,
+        "wazuh": 2
+      },
+      "window_end": "2026-09-22T14:29:30Z",
+      "window_start": "2026-09-22T14:27:30Z"
+    },
+    {
+      "assertions": {
+        "false_negative": 0,
+        "inconclusive": 1,
+        "missing_telemetry": 0,
+        "satisfied": 3,
+        "total": 4
+      },
+      "collection_assurance": {
+        "unknown": 4
+      },
+      "engine_semantics_version": "0.1.0",
+      "evidence_referenced": 3,
+      "file_modified": "2026-09-21T14:13:26Z",
+      "final_status": "Inconclusive",
+      "kind": "evaluation",
+      "manifest_match": true,
+      "mismatch": null,
+      "name": "scn002-control.json",
+      "profile_id": "scn002-udp-marker-prevention",
+      "profile_version": "0.1.0",
+      "run_id": "scn002-control-72340d493a7e4330ad2af25bbbd282d2",
+      "scenario_fingerprint": "95f7ea34d04eba04f74a269a5d94a59891296d10a4f91f57a8cd91d1fbff4102",
+      "scenario_id": "SCN-002",
+      "scenario_version": "0.1.0",
+      "sources": {
+        "suricata": 1,
+        "wazuh": 2
+      },
+      "window_end": "2026-09-22T13:49:30Z",
+      "window_start": "2026-09-22T13:47:30Z"
+    }
+  ],
+  "scenario": {
+    "assertions": [
+      {
+        "description": "Endpoint telemetry proves the approved transfer attempt occurred.",
+        "id": "SCN-002-A01",
+        "source": "wazuh"
+      },
+      {
+        "description": "Suricata records the expected network alert.",
+        "id": "SCN-002-A02",
+        "source": "suricata"
+      },
+      {
+        "description": "pfSense records a block action for the correlated flow.",
+        "id": "SCN-002-A03",
+        "source": "pfsense"
+      },
+      {
+        "description": "Wazuh records the detection derived from the Suricata marker alert for the same flow.",
+        "id": "SCN-002-A04",
+        "source": "wazuh"
+      }
+    ],
+    "description": "Attempt an approved outbound transfer to a controlled test endpoint and verify network detection, firewall prevention, and Wazuh correlation.",
+    "expected_outcome": "prevented",
+    "expected_sources": [
+      "wazuh",
+      "suricata",
+      "pfsense"
+    ],
+    "file": "SCN-002-attempted-exfiltration.yaml",
+    "fingerprint": "95f7ea34d04eba04f74a269a5d94a59891296d10a4f91f57a8cd91d1fbff4102",
+    "id": "SCN-002",
+    "name": "Attempted Exfiltration",
+    "safety": {
+      "authorization_required": true,
+      "destructive": false,
+      "notes": "Use non-sensitive test data and an allowlisted lab destination only."
+    },
+    "status": "draft",
+    "tags": [
+      "inc-002",
+      "prevention"
+    ],
+    "version": "0.1.0"
+  },
+  "version": "0.1.0"
+}
