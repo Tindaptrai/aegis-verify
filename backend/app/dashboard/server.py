@@ -20,6 +20,7 @@ import re
 
 from ..intake import IntakeError, decode_config, local_path, read_local
 from ..intake.io import MAX_CONFIG_BYTES
+from .overview import OverviewError, ScenarioRegistry, build_scenario_detail, build_scenario_index, build_system_status
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
@@ -107,7 +108,7 @@ def _error_body(error: IntakeError) -> dict:
                                        "field": error.field, "hint": error.hint}}
 
 
-def _handler(store: ReportStore, static_dir, operations=None):
+def _handler(store: ReportStore, static_dir, operations=None, registry=None):
     static_root = None if static_dir is None else local_path(static_dir, directory=True, stage="inputs")
 
     class Handler(BaseHTTPRequestHandler):
@@ -138,6 +139,18 @@ def _handler(store: ReportStore, static_dir, operations=None):
             self._send(status, body, "application/json; charset=utf-8")
 
         def _api(self, path: str):
+            if path == "/api/scenarios":
+                self._json(HTTPStatus.OK, build_scenario_index(registry, store))
+                return
+            if path.startswith("/api/scenarios/"):
+                try:
+                    self._json(HTTPStatus.OK, build_scenario_detail(registry, store, path[len("/api/scenarios/"):]))
+                except OverviewError as error:
+                    self._json(HTTPStatus.NOT_FOUND, {"kind": "error", "error": {"code": error.code}})
+                return
+            if path == "/api/system/status":
+                self._json(HTTPStatus.OK, build_system_status(registry, store, operations))
+                return
             if path == "/api/reports":
                 try:
                     self._json(HTTPStatus.OK, build_index(store))
@@ -237,8 +250,14 @@ def _handler(store: ReportStore, static_dir, operations=None):
     return Handler
 
 
-def make_server(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir=None, operations_config=None):
-    """Build the loopback server; ``port=0`` picks a free port (tests)."""
+def make_server(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir=None, operations_config=None,
+                scenarios_dir=None):
+    """Build the loopback server; ``port=0`` picks a free port (tests).
+
+    ``scenarios_dir`` enables the scenario overview; without it the overview reports
+    the registry as not configured instead of guessing which scenarios exist.
+    """
+    registry = None if scenarios_dir is None else ScenarioRegistry(scenarios_dir)
     operations = None
     if operations_config is not None:
         from .operations_config import load_operations_config, OperationsError
@@ -261,7 +280,7 @@ def make_server(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir
                 operations.jobs.shutdown()
             super().server_close()
 
-    server = DashboardServer((host, port), _handler(store, static_dir, operations))
+    server = DashboardServer((host, port), _handler(store, static_dir, operations, registry))
     server.daemon_threads = True
     if operations is not None:
         operations.authority = f'{server.server_address[0]}:{server.server_address[1]}'
@@ -269,12 +288,13 @@ def make_server(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir
 
 
 def serve(reports_dir, *, host=DEFAULT_HOST, port=DEFAULT_PORT, static_dir=None, announce=print,
-          operations_config=None):
+          operations_config=None, scenarios_dir=None):
     server = make_server(reports_dir, host=host, port=port, static_dir=static_dir,
-                         operations_config=operations_config)
+                         operations_config=operations_config, scenarios_dir=scenarios_dir)
     bound_host, bound_port = server.server_address[:2]
     announce(f"dashboard: http://{bound_host}:{bound_port}/ (reports: {len(ReportStore(reports_dir).names())}, "
-             f"static: {'yes' if static_dir else 'no'}); Ctrl+C to stop")
+             f"scenarios: {'yes' if scenarios_dir else 'no'}, static: {'yes' if static_dir else 'no'}); "
+             f"Ctrl+C to stop")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

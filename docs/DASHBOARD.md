@@ -86,6 +86,60 @@ Các findings native thu riêng không tự cập nhật report lịch sử; rea
 Tests: `frontend/src/binding.test.tsx`; toàn frontend 59 tests và build đã qua
 ngày 2026-09-19 (ngày 2026-09-27: 86 tests, gồm timeline rỗng, và build đạt). Chỉ dùng synthetic fixtures trong tests, không đưa log lab vào Git.
 
+## Tổng quan kịch bản và trạng thái hệ thống (API, 2026-10-01)
+
+Ba endpoint chỉ đọc mới, dùng thư viện chuẩn, không thêm dependency. Bật bằng
+`aegis dashboard --scenarios <thư mục manifest>`. `Start-Aegis.ps1` tự truyền thư
+mục `scenarios/` của checkout nếu có. Không có `--scenarios` thì registry được báo là
+**not configured**; server không tự đoán có những kịch bản nào.
+
+| Endpoint | Nội dung |
+| --- | --- |
+| `GET /api/scenarios` | Một dòng cho **mỗi manifest**, kể cả kịch bản chưa chạy. Gồm metadata manifest, `run_state` (`run`, `not_run`, `stale_only`), lượt chạy gần nhất, số lượt, số so sánh, KPI theo kịch bản, report không có manifest (`unregistered`) và report không đọc được. |
+| `GET /api/scenarios/<SCN-nnn>` | Manifest đầy đủ (mục tiêu, nguồn kỳ vọng, assertion, safety), mọi lượt chạy mới nhất trước, có `manifest_match` và `mismatch`, cùng các report so sánh. ID không hợp lệ hoặc không có trong registry trả 404 `scenario_not_found`; thiếu registry trả 404 `not_configured`. |
+| `GET /api/system/status` | Trạng thái tổng và từng thành phần, mỗi thành phần kèm `source`, `reason` và `last_activity`. |
+
+Quy tắc dữ liệu:
+
+- **Ghép manifest với report** theo scenario ID, version và scenario fingerprint.
+  Report của version cũ hoặc của manifest đã sửa (fingerprint khác) vẫn nằm trong
+  lịch sử, có `mismatch` là `version` hoặc `fingerprint`. Nó **không** được dùng làm
+  kết quả gần nhất của manifest hiện tại (`run_state` là `stale_only`).
+- **"Gần nhất"** xếp theo `window_end`, tức `comparison_inputs.context.end` của report
+  (cửa sổ chạy do context khai báo). Report không có cửa sổ xếp cuối.
+  `file_modified` là thời gian sửa file report, ghi đúng là thời gian file, không
+  bao giờ thay cho cửa sổ chạy.
+- **Mọi số đếm** (assertion theo outcome, evidence được tham chiếu, collection
+  assurance, số bản ghi parsed theo `source_type` của ledger) đều chép từ report.
+  Trường thiếu hoặc sai kiểu là `null`. Backend không đánh giá lại assertion.
+- **KPI đếm theo kịch bản**, dựa trên kết quả gần nhất của manifest hiện tại.
+  `Other` gom các `final_status` không thuộc năm trạng thái của engine.
+
+Trạng thái hệ thống mô tả việc AEGIS **có đủ dữ liệu** hay không, không phải mức an
+toàn của môi trường được giám sát. Giá trị: `healthy`, `degraded`, `error`, `unknown`,
+`not_configured`, `no_data`.
+
+| Thành phần | Cách xác định |
+| --- | --- |
+| Dashboard API | `healthy` khi chính endpoint này trả lời |
+| Scenario registry | `not_configured` nếu thiếu `--scenarios`; `error` nếu không đọc được thư mục; `degraded` nếu có manifest lỗi, trùng ID hoặc report không có manifest; `no_data` nếu chưa có manifest |
+| Report storage | `error` nếu không đọc được thư mục; `degraded` nếu có report không đọc được; `no_data` nếu chưa có report; `last_activity` là thời gian sửa file mới nhất |
+| Validation engine | luôn `unknown`, vì dashboard không chạy engine; kèm version engine thấy trong report |
+| Evidence collection | `not_configured` nếu không bật Operations hoặc chưa cấu hình Indexer; `error` nếu job store bị chặn; theo job mới nhất: `healthy` khi đã hoàn tất, `degraded` khi thất bại hoặc gián đoạn, `unknown` khi chưa có job hoặc đang chạy |
+| Connector Wazuh, Suricata, pfSense, Cowrie | `not_configured` vì không có connector live. Riêng Wazuh, khi Operations có Indexer, đi theo trạng thái thu ở trên. `seen_in_reports` chỉ ghi report gần nhất có bản ghi của nguồn đó; đây **không** phải sức khoẻ connector. |
+
+Trạng thái tổng là mức xấu nhất của registry, report storage và evidence collection
+(chỉ tính collection khi nó `healthy`, `degraded` hoặc `error`), theo thứ tự `error` >
+`degraded` > `not_configured` > `no_data` > `healthy`, kèm danh sách lý do. Engine và
+connector chỉ mang tính thông tin, không kéo trạng thái tổng.
+
+Test: `backend/tests/test_dashboard_overview.py` (có report, chưa chạy, nhiều report,
+report hỏng, report không có manifest, manifest đã đổi theo version và theo
+fingerprint, manifest lỗi hoặc trùng, thiếu registry, thư mục biến mất, các trạng
+thái job Operations, HTTP, CLI) và test launcher trong
+`backend/tests/test_dashboard_launcher.py`. Giao diện dùng các endpoint này làm ở
+bước sau.
+
 ## Ngoài phạm vi (theo issue)
 
 Không auth, không multi-tenant, không billing, không production hosting, không
