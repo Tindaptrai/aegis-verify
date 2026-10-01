@@ -12,6 +12,7 @@ from ..connectors.wazuh.manager_snapshot import (
 )
 from ..intake import IntakeError, decode_config, local_path
 from ..intake.io import MAX_CONFIG_BYTES
+from ..private_fs import mkdir_private
 from ._bundle_io import checked_file, read_file, output_target, write_file, inventory, strict_path
 from ._bundle_render import digest, render
 
@@ -67,9 +68,9 @@ def prepare_snapshot_bundle(snapshots, *, scope, profile, context, destination):
         target = output_target(destination)
         source_bytes = _read_sources(snapshots)
         payload, completion, _ = render(source_bytes, scope, profile, context)
-        target.mkdir(mode=0o700)  # Exclusive; no exist_ok or overwrite.
-        (target / 'snapshots').mkdir(mode=0o700)
-        (target / 'documents').mkdir(mode=0o700)
+        mkdir_private(target)  # Exclusive; no exist_ok or overwrite.
+        mkdir_private(target / 'snapshots')
+        mkdir_private(target / 'documents')
         for relative, raw in payload.items():
             write_file(target, relative, raw)
         # Re-read all expected payloads before publishing the completion marker.

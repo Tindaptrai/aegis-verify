@@ -78,7 +78,10 @@ run scenarios, modify detection rules, administer agents, or generate verdicts.
 Follow [backend configuration and ACL requirements](OPERATIONS_BACKEND.md).
 Use an existing private JSON config and owner-only evidence root outside the
 checkout, reports and static directories. Windows must use a normal non-elevated
-operator session; the backend checks permissions but never changes them.
+operator session; the backend checks existing permissions and applies an owner-only
+ACL to directories it creates before writing evidence. It never repairs an
+existing directory's ACL. Use Python 3.11 or later; Windows Python 3.12 and 3.13
+require the same non-elevated, owner-only setup.
 
 Supply credential pairs in the **same process environment** as the launcher:
 

@@ -1,15 +1,43 @@
 """Adaptive collection must split only overflow, without gaps or partial success."""
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 import pytest
 from aegis_verify.connectors.wazuh import live
 from test_wazuh_live import config, page, Transport, HIT
+from aegis_verify import private_fs
+from windows_acl import assert_owner_only
 
 
 def run(config_value, output, transport, **kwargs):
     assert hasattr(live, 'collect_adaptive'), 'adaptive collector is not implemented'
     return live.collect_adaptive(config_value, output, transport=transport, **kwargs)
+
+
+@pytest.mark.skipif(os.name != 'nt', reason='Windows ACL integration')
+def test_windows_adaptive_output_and_leaf_have_owner_only_acl(tmp_path):
+    out = tmp_path / 'batch'
+    run(config(), out, Transport([page([], total=0)]))
+    assert_owner_only(out)
+    assert_owner_only(out / 'attempt-0001')
+
+
+def test_adaptive_leaf_directory_failure_stops_before_source_request(tmp_path, monkeypatch):
+    create = private_fs._create
+    def fail_leaf(target):
+        if target.name == 'attempt-0001':
+            raise OSError('injected')
+        create(target)
+    monkeypatch.setattr(private_fs, '_create', fail_leaf)
+    transport = Transport([page([], total=0)])
+    out = tmp_path / 'batch'
+    with pytest.raises(live.LiveError, match='^output_error$'):
+        run(config(), out, transport)
+    assert transport.calls == []
+    assert (out / 'INCOMPLETE').exists()
+    assert not (out / 'attempt-0001').exists()
+    assert not (out / 'batch.json').exists()
 
 
 def test_overflow_has_distinct_error(tmp_path):
