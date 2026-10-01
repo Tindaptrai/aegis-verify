@@ -76,8 +76,9 @@ skipped (`main` @ `cec9e5d`); frontend 86 passed.
 
 - ~~Đặt tag phát hành~~: đã đặt `v0.2.0-lab` ngày 2026-09-27 ([ghi chú](RELEASE_NOTES_0.2.0-lab.md)).
 - ~~Chọn license~~: Apache-2.0, 2026-10-01 ([LICENSE](../LICENSE), release 0.3.0).
-- Đánh dấu GitGuardian incident 37636143 là false positive (tên field `password`
-  trong danh sách field chẩn đoán, không phải bí mật).
+- ~~Đánh dấu GitGuardian incident 37636143 là false positive~~: chủ dự án đã đánh
+  dấu ngày 2026-10-01 (tên field `password` trong danh sách field chẩn đoán, không
+  phải bí mật).
 - Giữ hay gỡ quyền truy cập lab đã cấp cho tự động hoá (sudoers hẹp, key SSH kể cả key
   vào máy khởi tạo SCN-003, quyền ssh trong cài đặt Claude Code cục bộ).
 - ~~Bật lại w32time trên máy gửi SCN-002~~: đã chạy lại và đồng bộ ngày 2026-09-27.
