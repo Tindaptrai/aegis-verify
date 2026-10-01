@@ -87,6 +87,12 @@ try {
     $probe.Stop()
 }
 
+$scenarioArguments = @()
+$scenarioDirectory = Join-Path $PSScriptRoot 'scenarios'
+if (Test-Path -LiteralPath $scenarioDirectory -PathType Container) {
+    # The overview lists the checkout's reviewed manifests; without them it reports "not configured".
+    $scenarioArguments = @('--scenarios', $scenarioDirectory)
+}
 $operationsArguments = @()
 if ($PSBoundParameters.ContainsKey('OperationsConfig')) {
     $operationsArguments = @('--operations-config', $OperationsConfig)
@@ -96,7 +102,7 @@ if ($PSBoundParameters.ContainsKey('OperationsConfig')) {
 }
 if (-not $PSBoundParameters.ContainsKey('PromptCredentials')) {
     # Preserve the existing environment-driven path without prompting or changing credentials.
-    & $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port @operationsArguments
+    & $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port @scenarioArguments @operationsArguments
     exit $LASTEXITCODE
 }
 
@@ -134,7 +140,7 @@ try {
     }
     $stage = 'launcher_start_failed'
     # The server binds again; the existing CLI reports a port race or invalid config.
-    & $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port @operationsArguments
+    & $pythonExecutable -u -m aegis_verify dashboard --reports $reportDirectory --static $staticDirectory --host 127.0.0.1 --port $Port @scenarioArguments @operationsArguments
     $exitCode = $LASTEXITCODE
 } catch {
     # Never print an exception containing credential input or process environment.

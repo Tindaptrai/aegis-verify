@@ -135,6 +135,7 @@ def _parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--port", type=int, default=DEFAULT_PORT)
     dashboard.add_argument("--static")
     dashboard.add_argument("--operations-config")
+    dashboard.add_argument("--scenarios")
 
     collect = commands.add_parser("collect", allow_abbrev=False)
     collect.add_argument("target", choices=("scn002", "scn003"))
@@ -234,6 +235,7 @@ def main(argv=None) -> int:
         try:
             return serve(options.reports, host=options.host, port=options.port,
                          static_dir=options.static, operations_config=options.operations_config,
+                         scenarios_dir=options.scenarios,
                          announce=lambda text: _write_stream("stdout", text + "\n"))
         except IntakeError as error:
             return 2 if _emit_error(error, "text") else 4

@@ -131,6 +131,27 @@ def test_operations_config_forwarded_as_one_argument(shell, layout):
     assert args[args.index('--reports') + 1] == str(layout[1])
 
 
+def _forwarded_arguments(shell, layout):
+    fake = layout[1].parent / 'python boundary.ps1'
+    fake.write_text("if ($args -contains '-u') { ConvertTo-Json -InputObject @($args) -Compress }; $global:LASTEXITCODE = 0")
+    cmd = command(shell, layout)
+    cmd[-1] = str(fake)
+    with socket.socket() as probe:
+        probe.bind(('127.0.0.1', 0))
+        port = probe.getsockname()[1]
+    result = subprocess.run(cmd + ['-Port', str(port)], capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.splitlines()[-1])
+
+
+def test_checkout_scenarios_are_forwarded_only_when_present(shell, layout):
+    assert '--scenarios' not in _forwarded_arguments(shell, layout)
+    scenarios = layout[0].parent / 'scenarios'
+    scenarios.mkdir()
+    args = _forwarded_arguments(shell, layout)
+    assert args[args.index('--scenarios') + 1] == str(scenarios)
+
+
 def test_missing_default_venv_does_not_fall_back_to_path(shell, layout):
     result = subprocess.run(command(shell, layout)[:-2], capture_output=True,
                             text=True, timeout=20)
