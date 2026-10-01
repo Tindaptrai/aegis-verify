@@ -74,6 +74,30 @@ complete package and maintenance window before deployment:
   state. Use the procedure for the lab's installed Wazuh version and topology;
   verify Indexer cluster health and event forwarding after each service restart.
 
+### Lower-impact option to evaluate first: re-issue the same CA
+
+If the offending certificate is a CA whose private key the administrator still
+holds, it may not need a new key at all. Issue a replacement certificate for the
+**same key pair and subject**, keeping the Subject Key Identifier, with a new serial,
+`basicConstraints=critical,CA:TRUE` and `keyUsage=critical,keyCertSign,cRLSign`.
+Certificates already signed by that CA keep verifying, because their issuer name
+and signature still match the same subject and key. Only trust stores then need the
+re-issued certificate, starting with the AEGIS CA bundle, and the node certificates,
+Indexer, dashboard and Filebeat can stay as they are.
+
+This is a hypothesis for the review, not a tested procedure:
+
+- Test it offline first: `openssl verify -x509_strict -CAfile <re-issued CA>
+  <current node certificate>` must pass, and the Python 3.13 probe in section 3
+  must pass with the re-issued CA as `cafile` while the Indexer still presents its
+  current chain. Recent OpenSSL builds the chain from trusted certificates first,
+  but whether a CA copy sent by the server still affects the result has to be checked.
+- If the offender is an intermediate rather than the root, re-issue that
+  intermediate the same way, signed by its own issuer.
+- The CA private key stays in the administrator's approved storage. Never copy it
+  into this repository or an evidence bundle.
+- If any check fails, fall back to the full rotation above.
+
 The local AEGIS CA bundle is updated only after the administrator confirms the
 new public CA fingerprint through a trusted channel. Keep the old bundle for
 rollback until acceptance completes. Do not change AEGIS parsing, scenario
