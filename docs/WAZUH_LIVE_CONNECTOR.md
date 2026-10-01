@@ -17,7 +17,10 @@ PowerShell session. Do not paste their values into chat or commit them:
 
 - `WAZUH_INDEXER_URL`: HTTPS origin, no embedded credentials/path/query.
 - `WAZUH_INDEXER_USERNAME`, `WAZUH_INDEXER_PASSWORD`: read-only principal.
-- `WAZUH_INDEXER_CA_FILE`: optional local CA bundle; otherwise system trust.
+- `WAZUH_INDEXER_CA_FILE`: optional local CA bundle; otherwise system trust. Python 3.13
+  verifies strictly: a CA certificate without Key Usage fails with verify code 92.
+  Re-issue that CA with the same key and add Key Usage; never relax verification
+  ([#112](INDEXER_CA_ROTATION_ISSUE_112.md)).
 
 TLS certificate and hostname verification are always enabled. No insecure switch,
 redirects or ambient proxy are accepted. `.env.example` documents names but `.env`

@@ -1,9 +1,8 @@
 # Issue #112 — Indexer CA chain, review and rotation plan
 
-Status: **plan only** (2026-09-27). No lab certificate, trust store, service, rule,
-credential or evidence has been changed under this issue. The lab administrator
-must review the certificate inventory, replacement chain and rollback before any
-rotation. Keep all private values and certificate files outside Git.
+Status: **done** (2026-10-01) with the lower-impact option in section 2, re-issuing
+the same CA. The plan below is kept as written on 2026-09-27; the outcome is in the
+last section. Keep all private values and certificate files outside Git.
 
 ## Observed failure and scope
 
@@ -128,3 +127,44 @@ ground truth, detection rules or raw evidence for this issue.
 Until this is complete, use the tested Python 3.12 environment for an optional
 live Indexer demonstration. The [offline customer walkthrough](DEMO_WALKTHROUGH.md)
 uses sanitized bundles and does not depend on Indexer connectivity.
+
+## Outcome (2026-10-01)
+
+- **Offending certificate.** A read-only inventory found it: the Wazuh root CA. It
+  has `CA:TRUE` but no Key Usage, and the Indexer and dashboard present only leaf
+  certificates signed directly by it. The Server API uses a separate self-signed,
+  non-CA certificate and was not affected. `openssl verify -x509_strict`
+  reproduced error 92 at depth 1.
+- **Offline test.** The same-key option was proven first with a throwaway CA of the
+  same shape, including the `OU, O, L` name order:
+  - `openssl verify -x509_strict` passed with the re-issued CA;
+  - a real Python 3.13 TLS handshake passed, even when the server also sent the old CA;
+  - Python 3.12 accepted both CAs.
+
+  The Subject Key Identifier computed from the real root's public key equals the
+  existing one. The commands were then rehearsed on the manager's own OpenSSL 3.0.
+- **The change.** The project owner, as lab administrator, re-issued the root
+  certificate on the manager with sudo. They used the same key and subject, a new
+  serial, `basicConstraints=critical,CA:TRUE` and
+  `keyUsage=critical,keyCertSign,cRLSign`. The temporary key copy was shredded. No
+  node certificate, Wazuh service or Wazuh trust file was changed; Indexer,
+  dashboard and Filebeat still trust the original root. Only the AEGIS operator's
+  local `cafile` now points at the re-issued certificate, and its fingerprint was
+  confirmed through the owner's terminal. Rollback is pointing `cafile` back to the
+  original root.
+- **Acceptance.** Through a temporary tunnel, with no credentials, Windows Python
+  3.13 rejected the old CA with verify code 92 and reached HTTP 401 with the
+  re-issued CA. The Server API reached HTTP 401 on Python 3.12 and 3.13. A
+  read-only `--adaptive` collection with the least-privilege principal then ran on
+  Python 3.13 over a known 21-minute window:
+  - `query_complete` true, `cleanup_failed` false, `collection_assurance` unknown;
+  - 268 records in four contiguous leaves (38/83/55/92);
+  - every manifest and input hash matched;
+  - 268 canonical events with 268 distinct evidence IDs.
+
+  Three earlier attempts kept their `INCOMPLETE` markers and are not evaluated: a
+  mistyped principal, a non-adaptive run over the 100-record limit, and one
+  unlogged failure.
+
+Python 3.13 is no longer limited to the offline demo for live Indexer collection.
+
