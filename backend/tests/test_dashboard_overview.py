@@ -362,3 +362,14 @@ def test_cli_rejects_a_missing_scenarios_directory_before_serving(tmp_path):
                              "--scenarios", str(tmp_path / "missing"), "--port", "0"],
                             capture_output=True, text=True, check=False, timeout=60)
     assert result.returncode == 2 and result.stdout == ""
+
+
+def test_frontend_overview_fixtures_match_the_backend():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "prepare_dashboard_overview_fixtures", ROOT / "scripts" / "prepare_dashboard_overview_fixtures.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    checked_in = ROOT / "tests" / "fixtures" / "dashboard" / "overview"
+    for name, payload in module.build_fixtures().items():
+        assert (checked_in / name).read_text(encoding="utf-8") == module.encode(payload), name

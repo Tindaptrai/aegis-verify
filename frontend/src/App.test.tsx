@@ -56,7 +56,8 @@ const sidebar = () => screen.getByRole('complementary', { name: 'Danh sách repo
 const main = () => screen.getByRole('main');
 
 beforeEach(() => {
-  window.history.replaceState(null, '', '/');
+  // The landing page is now the scenario overview; these tests cover the report pages.
+  window.history.replaceState(null, '', '/#page=reports');
 });
 
 describe('App states', () => {

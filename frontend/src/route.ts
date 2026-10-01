@@ -1,28 +1,45 @@
 // Selection lives in the URL hash so a reload, a shared link or a headless
-// screenshot lands on the same report and tab. Nothing else is stored.
+// screenshot lands on the same page, report, tab or scenario. Nothing else is stored.
+
+export type Page = 'overview' | 'reports' | 'agents' | 'collections';
 
 export interface Route {
   report: string | null;
   tab: string | null;
-  page?: 'reports' | 'agents' | 'collections';
+  page?: Page;
   job?: string | null;
+  scenario?: string | null;
 }
+
+const PAGES: readonly Page[] = ['overview', 'reports', 'agents', 'collections'];
+const JOB = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
+const SCENARIO = /^SCN-[0-9]{3}$/;
 
 export function readRoute(hash: string = window.location.hash): Route {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
-  const page = params.get('page');
+  const requested = params.get('page');
+  const report = params.get('report');
   const job = params.get('job');
-  return { report: params.get('report'), tab: params.get('tab'),
-    page: page === 'agents' || page === 'collections' ? page : 'reports',
-    job: job && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(job) ? job : null };
+  const scenario = params.get('scenario');
+  // An old link with only a report keeps opening that report; otherwise the
+  // scenario overview is the landing page.
+  const page: Page = PAGES.includes(requested as Page) ? (requested as Page) : report !== null ? 'reports' : 'overview';
+  return { report, tab: params.get('tab'), page,
+    job: job && JOB.test(job) ? job : null,
+    scenario: scenario && SCENARIO.test(scenario) ? scenario : null };
 }
 
 export function routeHash(route: Route): string {
   const params = new URLSearchParams();
-  if (route.report) params.set('report', route.report);
-  if (route.tab) params.set('tab', route.tab);
-  if (route.page === 'agents' || route.page === 'collections') params.set('page', route.page);
-  if (route.page === 'collections' && route.job && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(route.job)) params.set('job', route.job);
+  const page = route.page ?? 'overview';
+  if (page === 'overview') {
+    if (route.scenario && SCENARIO.test(route.scenario)) params.set('scenario', route.scenario);
+  } else {
+    if (route.report) params.set('report', route.report);
+    if (route.tab) params.set('tab', route.tab);
+    if (page !== 'reports' || !route.report) params.set('page', page);
+    if (page === 'collections' && route.job && JOB.test(route.job)) params.set('job', route.job);
+  }
   const encoded = params.toString();
   return encoded === '' ? '' : `#${encoded}`;
 }

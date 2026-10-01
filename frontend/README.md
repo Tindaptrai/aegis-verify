@@ -16,10 +16,18 @@ bộ tối thiểu có test component mà không cần cấu hình riêng.
 Backend (không thêm dependency Python; server stdlib chỉ bind loopback, chỉ GET):
 
 ```powershell
-.\.venv\Scripts\python.exe -m aegis_verify dashboard --reports tests\fixtures\dashboard --static frontend\dist
+.\.venv\Scripts\python.exe -m aegis_verify dashboard --reports tests\fixtures\dashboard --scenarios scenarios --static frontend\dist
 ```
 
-Mở `http://127.0.0.1:8765/`. `--reports` là thư mục chứa file `*.json` do CLI
+Mở `http://127.0.0.1:8765/`. Trang đầu là **Tổng quan**, gồm:
+
+- trạng thái dữ liệu và vận hành, kèm lý do;
+- KPI theo kịch bản;
+- System status;
+- bảng mọi kịch bản, kể cả kịch bản chưa chạy, có tìm, lọc và sắp xếp;
+- chi tiết từng kịch bản qua `#scenario=SCN-nnn`.
+
+Bỏ `--scenarios` thì registry hiện **Not configured** và KPI là "Không có dữ liệu". Link `#report=…` cũ vẫn mở thẳng trang report. `--reports` là thư mục chứa file `*.json` do CLI
 tạo; `--static` (tùy chọn) phục vụ bản build của frontend từ cùng cổng.
 Đổi cổng bằng `--port`; `--host` mặc định `127.0.0.1`.
 
@@ -59,6 +67,9 @@ backend-error (mạng lỗi, HTTP 5xx). Backend server có test riêng trong
 | `GET /api/reports/<name>` | report nguyên bản; 422 nếu malformed, 404 nếu không có |
 | report `evaluation` | scenario, run ID, `final_status`, `counts` theo outcome, số evidence, từng assertion với evidence IDs / unevaluable IDs / witness pairs / assurance, mục `timeline` (thứ tự do backend cung cấp) |
 | report `comparison` | run trước/sau, `comparison.status`, số lượng theo state, từng assertion trước/sau với evidence thêm/bỏ/giữ |
+| `GET /api/scenarios` | dòng cho mỗi manifest: `run_state`, kết quả gần nhất (nguyên văn `final_status`), assertion đạt/tổng, evidence, collection assurance, cửa sổ chạy; KPI; report không có manifest; report không đọc được |
+| `GET /api/scenarios/<id>` | manifest (mục tiêu, assertion, safety), lịch sử lượt chạy kèm `manifest_match`, so sánh; lượt gần nhất được hiển thị bằng chính report qua `GET /api/reports/<name>` |
+| `GET /api/system/status` | trạng thái tổng và từng thành phần với `status`, `reason`, `source`, `last_activity`; hiển thị nguyên mã nếu frontend không biết |
 
 Report tạo trước khi CLI có mục `timeline` vẫn hiển thị được: phần timeline
 báo rõ "không có thời điểm trong report" và liệt kê evidence index theo ID.

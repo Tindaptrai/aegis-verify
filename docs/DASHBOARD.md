@@ -137,8 +137,30 @@ Test: `backend/tests/test_dashboard_overview.py` (có report, chưa chạy, nhi�
 report hỏng, report không có manifest, manifest đã đổi theo version và theo
 fingerprint, manifest lỗi hoặc trùng, thiếu registry, thư mục biến mất, các trạng
 thái job Operations, HTTP, CLI) và test launcher trong
-`backend/tests/test_dashboard_launcher.py`. Giao diện dùng các endpoint này làm ở
-bước sau.
+`backend/tests/test_dashboard_launcher.py`.
+
+### Giao diện (phần b)
+
+- **Trang Tổng quan** là trang mặc định. Từ trên xuống:
+  - banner "Trạng thái dữ liệu và vận hành", kèm lý do và câu nói rõ đây không phải mức an toàn;
+  - hàng KPI;
+  - thẻ System status: mỗi thẻ có trạng thái, mô tả, lý do, hoạt động gần nhất và nguồn. Với connector, dòng "Thấy trong report" ghi rõ không phải trạng thái connector;
+  - bảng mọi kịch bản;
+  - danh sách report không đọc được và report không có manifest.
+- **Không có registry hoặc backend lỗi:** KPI hiển thị "Không có dữ liệu", không bao giờ là 0. Badge trạng thái luôn có chữ.
+- **Bảng kịch bản:**
+  - tìm theo ID, tên hoặc profile; lọc theo trạng thái manifest và theo kết quả (có lựa chọn "Chưa chạy");
+  - sắp xếp theo mức cần chú ý (đã duyệt), ID hoặc thời gian chạy; kịch bản không có cửa sổ chạy xếp cuối;
+  - dòng chưa chạy được đánh dấu riêng.
+- **Chi tiết kịch bản** (`#scenario=SCN-nnn`):
+  - mục tiêu, kết quả kỳ vọng, nguồn, tags, safety, fingerprint và assertion của manifest;
+  - lịch sử lượt chạy (manifest khớp hay khác) và các so sánh;
+  - lượt gần nhất hiển thị bằng chính `RunView` từ report: assertion, evidence ID, evidence chưa đánh giá được, collection assurance, timeline.
+  - Kịch bản chưa chạy hoặc chỉ có lượt của manifest cũ thì không tải report nào và nói rõ không có kết luận.
+- **Điều hướng:** đổi hash (dán link, Back/Forward) được app theo dõi.
+- **Test:**
+  - `frontend/src/overview/overview.test.tsx` dùng fixture sinh từ backend thật trong `tests/fixtures/dashboard/overview/`. Backend có test bảo đảm fixture khớp output hiện tại.
+  - Các test report cũ chuyển sang `#page=reports`, vì trang mặc định đã đổi.
 
 ## Ngoài phạm vi (theo issue)
 

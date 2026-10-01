@@ -34,6 +34,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
 afterEach(() => { vi.useRealTimers(); });
 
 it('keeps report-only usable when bootstrap is unavailable', async () => {
+  window.history.replaceState(null, '', '/#page=reports');
   const f = fixture({ bootstrap: new Response('{}', { status: 404 }) });
   render(<App api={{ index: async () => ({ status: 'ready', value: { kind: 'report_index', version: '0.1.0', reports: [] } }),
     report: async () => ({ status: 'backend-error', reason: 'unused' }) }} operationsClient={f.client} />);
@@ -57,7 +58,7 @@ it('opens capability-gated operations pages while preserving report selection', 
 
 it('routes only known pages and valid job ids', () => {
   expect(readRoute('#page=collections&job=invalid').job).toBeNull();
-  expect(readRoute('#page=malicious').page).toBe('reports');
+  expect(readRoute('#page=malicious').page).toBe('overview');
   expect(routeHash({ report: null, tab: null, page: 'collections', job: id })).toBe(`#page=collections&job=${id}`);
 });
 
