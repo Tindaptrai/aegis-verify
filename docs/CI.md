@@ -2,15 +2,26 @@
 
 `.github/workflows/ci.yml` runs for pull requests, pushes to `main`, and manual
 dispatch once available on the default branch. All PRs are checked, including
-documentation-only changes; there are no path filters that leave required checks
+documentation-only changes; `ci.yml` has no path filters that leave required checks
 pending. New runs supersede older runs for the same PR/ref.
 
 - Backend: complete pytest suite and wheel build. Pull requests run Linux with
-  Python 3.12 only; pushes to `main` and manual dispatch run Windows/Linux with
-  Python 3.11/3.12. The split saves Actions minutes on this private repository,
-  where Windows minutes bill double (2026-09-27, after the monthly allowance ran
-  out). To check a branch on the full matrix before merging, run the workflow
-  manually on that branch (Actions › Fixture CI › Run workflow).
+  Python 3.12 only; pushes to `main` and manual dispatch run Linux with Python
+  3.11/3.12/3.13 and Windows with 3.11 and 3.13 (the oldest and newest supported
+  versions; 3.12 is the usual local development version). The split saves Actions
+  minutes on this private repository, where Windows minutes bill double
+  (2026-09-27, after the monthly allowance ran out). To check a branch on the full
+  matrix before merging, run the workflow manually on that branch (Actions ›
+  Fixture CI › Run workflow).
+- Windows PR checks (`windows-pr.yml`, #114): a pull request that changes code with
+  Windows-specific behaviour also runs the backend suite on Windows/Python 3.13.
+  The trigger paths are ACL creation (`private_fs.py`), the dashboard and
+  Operations, the demo pipeline and SCN-001 runner, intake I/O, the Wazuh
+  collectors, PowerShell scripts, their Windows-only tests, `pyproject.toml` and
+  the workflows. #111 passed Linux PR checks but failed 311 tests on the
+  (elevated) Windows runners; this job exists to catch that before merge. It is
+  path-filtered, so it is not suitable as a required check. A Windows job costs
+  about 12 billed minutes.
 - Frontend: `npm ci`, full Vitest suite, TypeScript and Vite build on Node 24/Linux.
 - Only `contents: read`; checkout does not persist credentials. Official Actions
   are pinned to commit SHAs. No `pull_request_target`, deployment, secrets,
