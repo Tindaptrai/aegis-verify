@@ -4,6 +4,7 @@ import { text } from '../format';
 import { EmptyState, ErrorPanel, Notice, Skeleton } from './Feedback';
 import { StatusBadge } from './StatusBadge';
 import type { ReactNode } from 'react';
+import { Icon } from './Icon';
 
 export function orderEntries(entries: IndexEntry[]): IndexEntry[] {
   const runs = entries.filter((entry) => entry.error === null && entry.kind === 'evaluation');
@@ -47,20 +48,22 @@ export function Sidebar({
   return (
     <aside className="sidebar" aria-label="Danh sách report">
       <div className="brand">
-        <span className="brand-mark" aria-hidden="true" />
+        <span className="brand-mark" aria-hidden="true"><Icon name="shield" /></span>
         <div>
           <p className="brand-name">AEGIS Verify</p>
           <p className="brand-sub">Results dashboard · chỉ đọc</p>
         </div>
       </div>
       {operationsNav}
+      <p className="library-label">Thư viện report</p>
       <label className="search">
+        <Icon name="search" />
         <span className="visually-hidden">Tìm report</span>
         <input
           type="search"
           value={query}
           onChange={(event) => onQuery(event.target.value)}
-          placeholder="Tìm run, scenario, trạng thái, file"
+          placeholder="Tìm report…"
           autoComplete="off"
           disabled={state.status !== 'ready'}
         />
@@ -68,6 +71,7 @@ export function Sidebar({
       <nav className="nav">
         <SidebarBody state={state} selected={selected} query={query} onSelect={onSelect} onRetry={onRetry} />
       </nav>
+      <p className="sidebar-foot">AEGIS Verify <span>Evidence first.</span></p>
     </aside>
   );
 }
@@ -171,7 +175,7 @@ function NavItem({ entry, selected, onSelect }: { entry: IndexEntry; selected: b
       onClick={() => onSelect(entry.name)}
     >
       <span className="nav-primary">
-        <span className={entry.kind === 'evaluation' ? 'mono' : ''}>{primary}</span>
+        <span className={entry.kind === 'evaluation' ? 'mono' : ''} title={primary}>{primary}</span>
         {unreadable ? <span className="badge bad sm">lỗi</span> : <StatusBadge value={status} size="sm" />}
       </span>
       <span className="nav-secondary">{secondary}</span>

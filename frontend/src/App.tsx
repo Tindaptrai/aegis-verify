@@ -6,6 +6,7 @@ import { EmptyState, ErrorPanel, Skeleton } from './components/Feedback';
 import { RunView, type RunTab } from './components/RunView';
 import { orderEntries, Sidebar } from './components/Sidebar';
 import { StatusBadge } from './components/StatusBadge';
+import { Icon } from './components/Icon';
 import { text } from './format';
 import { readRoute, writeRoute } from './route';
 import { createOperationsClient, type OperationsClient } from './operations/api';
@@ -119,11 +120,12 @@ export function App({ api, operationsClient, overviewClient }: AppProps) {
 
   return (
     <div className="app">
-      <Sidebar state={index} selected={selected} query={query} onQuery={setQuery}
+      <Sidebar state={index} selected={page === 'reports' ? selected : null} query={query} onQuery={setQuery}
         onSelect={name => { setSelected(name); setPage('reports'); }} onRetry={loadIndex}
         operationsNav={<nav className="operations-nav" aria-label="Workspace">
           {pages.map(item => <button key={item} aria-current={page === item ? 'page' : undefined}
             onClick={() => { setPage(item); if (item === 'overview') setScenario(null); }}>
+            <Icon name={item} />
             {({ overview: 'Tổng quan', reports: 'Reports', collections: 'Collections', agents: 'Agents' })[item]}</button>)}
         </nav>} />
       <main className="main">
@@ -286,6 +288,7 @@ function Header({
       <div className="page-actions">
         {status !== null ? <StatusBadge value={status} /> : null}
         <button type="button" className="btn" onClick={onRefresh}>
+          <Icon name="refresh" />
           Tải lại
         </button>
       </div>
