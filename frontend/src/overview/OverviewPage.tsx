@@ -3,6 +3,7 @@ import type { LoadState } from '../api';
 import { FINAL_STATUSES } from '../contracts';
 import { EmptyState, ErrorPanel, Notice, Skeleton } from '../components/Feedback';
 import { StatusBadge } from '../components/StatusBadge';
+import { Icon } from '../components/Icon';
 import { MISSING, text } from '../format';
 import type { OverviewClient } from './api';
 import type { ScenarioIndex, ScenarioRow, SystemComponent, SystemStatus } from './contracts';
@@ -47,13 +48,13 @@ export function OverviewPage({ client, onOpenScenario, onOpenReport }: OverviewP
           </p>
         </div>
         <div className="page-actions">
-          <button type="button" className="btn" onClick={refresh}>Tải lại</button>
+          <button type="button" className="btn" onClick={refresh}><Icon name="refresh" />Tải lại</button>
         </div>
       </header>
       <OverallBanner status={status} />
       <KpiRow index={index} />
-      <SystemStatusGrid status={status} />
       <ScenarioSection index={index} onOpenScenario={onOpenScenario} onOpenReport={onOpenReport} onRetry={refresh} />
+      <SystemStatusGrid status={status} />
     </div>
   );
 }

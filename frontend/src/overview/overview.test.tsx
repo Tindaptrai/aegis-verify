@@ -306,6 +306,19 @@ describe('Scenario detail', () => {
 });
 
 describe('App navigation', () => {
+  it('marks a report as current only while the report page is open', async () => {
+    render(<App api={reportApi()} overviewClient={client()}
+      operationsClient={{ bootstrap: async () => { throw new Error('off'); } } as never} />);
+    const library = screen.getByRole('complementary', { name: 'Danh sách report' });
+    const report = await within(library).findByRole('button', { name: /scn002-block.json — scn002-block.json/ });
+    expect(report).not.toHaveAttribute('aria-current');
+    fireEvent.click(report);
+    await waitFor(() => expect(report).toHaveAttribute('aria-current', 'page'));
+    fireEvent.click(within(library).getByRole('button', { name: 'Tổng quan' }));
+    await screen.findByRole('heading', { name: 'Tổng quan' });
+    expect(report).not.toHaveAttribute('aria-current');
+  });
+
   it('lands on the overview, opens a scenario, goes back and opens a report', async () => {
     const api = reportApi();
     render(<App api={api} overviewClient={client({ detail: { 'SCN-002': detailState(detail002) } })}
