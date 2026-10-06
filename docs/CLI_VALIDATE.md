@@ -75,6 +75,7 @@ lấy giờ hiện tại, không cho context khai báo lại environment/source_
 | `wazuh-cowrie-alert-v1` | Một bản ghi **alert** của manager sinh từ `cowrie.login.failed`, cho event `source_type: wazuh`, `event_provider: cowrie`, `rule_id` Wazuh, `username`, tuple và `session_key` (SCN-003-A04); từ chối search-hit, record còn `password`, event khác login failed; context `collection_mode` và `sensor_id` (cùng nhãn với parser Cowrie trực tiếp). Xem [WAZUH_COWRIE_ALERT.md](WAZUH_COWRIE_ALERT.md) |
 | `suricata-wazuh-alert-v1` | Một Wazuh-exported Suricata alert; `deployment_mode`: `ids`/`ips`/`unknown` |
 | `suricata-eve-jsonl-v1` | EVE JSONL alert/flow; `sensor_id`, `deployment_mode` |
+| `snort3-alert-json-v1` | Snort 3 `alert_json` thô với danh sách trường đã pin, giờ UTC có năm; `sensor_id`, `deployment_mode`. Xem [SNORT3_ALERT_JSON_PARSER.md](SNORT3_ALERT_JSON_PARSER.md) |
 | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | BSD filterlog IPv4 TCP/UDP; `sensor_id`, `source_year`, `source_utc_offset` |
 | `cowrie-wazuh-v1` | Một Wazuh-exported Cowrie document; `sensor_id` |
 | `cowrie-jsonl-v1` | Native Cowrie JSONL; `sensor_id` |

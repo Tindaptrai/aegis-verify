@@ -84,6 +84,15 @@ def test_empty_bundle_does_not_fabricate_events(tmp_path):
             1,
         ),
         (
+            "snort/lab-c-probe-20261006.sanitized.jsonl",
+            "snort3-alert-json-v1",
+            "snort-alert",
+            {"sensor_id": "sensor-1", "deployment_mode": "ids"},
+            "snort",
+            9,
+            9,
+        ),
+        (
             "pfsense/tcp-block.sanitized.log",
             "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
             "pfsense-log",

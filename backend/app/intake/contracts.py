@@ -90,6 +90,11 @@ class SuricataEveContext(_Context):
     deployment_mode: Literal["ids", "ips", "unknown"]
 
 
+class SnortAlertJsonContext(_Context):
+    sensor_id: SafeLabel
+    deployment_mode: Literal["ids", "ips", "unknown"]
+
+
 class PfSenseFilterlogContext(_Context):
     sensor_id: SafeLabel
     source_year: Annotated[StrictInt, Field(ge=1, le=9999)]
@@ -119,6 +124,7 @@ ParserContext = (
     WazuhWin4688Context
     | SuricataWazuhContext
     | SuricataEveContext
+    | SnortAlertJsonContext
     | PfSenseFilterlogContext
     | CowrieWazuhContext
     | CowrieJsonlContext
@@ -133,6 +139,7 @@ ParserKey = Literal[
     "wazuh-cowrie-alert-v1",
     "suricata-wazuh-alert-v1",
     "suricata-eve-jsonl-v1",
+    "snort3-alert-json-v1",
     "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
     "cowrie-wazuh-v1",
     "cowrie-jsonl-v1",
@@ -151,6 +158,7 @@ _CONTEXT_TYPES = {
     "wazuh-cowrie-alert-v1": WazuhCowrieAlertContext,
     "suricata-wazuh-alert-v1": SuricataWazuhContext,
     "suricata-eve-jsonl-v1": SuricataEveContext,
+    "snort3-alert-json-v1": SnortAlertJsonContext,
     "pfsense-filterlog-bsd-ipv4-tcp-udp-v1": PfSenseFilterlogContext,
     "cowrie-wazuh-v1": CowrieWazuhContext,
     "cowrie-jsonl-v1": CowrieJsonlContext,

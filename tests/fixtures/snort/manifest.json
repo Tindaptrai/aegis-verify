@@ -1,0 +1,138 @@
+{
+  "manifest_version": 1,
+  "source_sha256": "6573e8539dde3846a107b389e39d40c3fcd35536887fb078f1cef78ce2f7b46a",
+  "source_size_bytes": 6735,
+  "source_physical_lines": 18,
+  "source_tool": "Snort 3.12.2.0 with DAQ 3.0.27, logger alert_json (file = true), process.utc = true, output.show_year = true",
+  "pinned_fields": "seconds timestamp pkt_num proto pkt_gen pkt_len dir src_addr src_port dst_addr dst_port service rule action msg class priority",
+  "derivation": "Source lines 10-18 of one Lab C alert_json file: a harmless probe run on 2026-10-06 (local rules sid 1000001-1000003, marker strings only). Only IPv4 addresses are replaced; every other byte is preserved. The original stays outside Git.",
+  "parser_context": {
+    "environment_id": "fixture-lab-c",
+    "sensor_id": "fixture-snort",
+    "ingested_at": "2026-10-06T11:13:16Z",
+    "deployment_mode": "ids"
+  },
+  "context_basis": "deployment_mode is ids: the sensor reads a mirror port and cannot drop. Ingestion time is the evidence collection time of the source file.",
+  "file": "lab-c-probe-20261006.sanitized.jsonl",
+  "derivative_sha256": "4d06b1c9e60a7231879a7def4757b204e7e414ad9fbc00fd56cefa0bae6145f6",
+  "source_ref": "snort-l0010-l0018-sha256-4d06b1c9e60a7231879a7def4757b204e7e414ad9fbc00fd56cefa0bae6145f6",
+  "lines": [
+    {
+      "source_line": 10,
+      "source_line_sha256": "c1e9b66b11e74da799f8f89f2e39e50e67334e1130ab1924a93501dd87dcc5c8",
+      "derivative_line": 1,
+      "derivative_line_sha256": "57b116f0820a3226575293a16fa73565cdbd21220daf397d6b0aba7b1a4a6cd3",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000001:1",
+      "expected_proto": "ICMP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    },
+    {
+      "source_line": 11,
+      "source_line_sha256": "689f5ec4d2b34f29f60ed923a7d216829714ad7ed9dd892b62ad476cd1dc25b5",
+      "derivative_line": 2,
+      "derivative_line_sha256": "58da2c6f5da8c2538580f3acb96222b48bc75b5780adcd1dd7d3cecc65f5c983",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000001:1",
+      "expected_proto": "ICMP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    },
+    {
+      "source_line": 12,
+      "source_line_sha256": "73e921c4798bae84d0e39091efce3bf64a97df3fa72b16738e94b71aa997e452",
+      "derivative_line": 3,
+      "derivative_line_sha256": "a3700ed2df9250f6e08ca34b380b00e01a8b72103498fa7429598997aa9c420f",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000001:1",
+      "expected_proto": "ICMP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    },
+    {
+      "source_line": 13,
+      "source_line_sha256": "4c679d4590d2e7c00a7c7483a88d5fbcc0b807c71b0bf3c0bab1be8848578667",
+      "derivative_line": 4,
+      "derivative_line_sha256": "17200cabdcb16b95e1739acadc2352d385f7b9fefa351bd4900a9dbe1413e562",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000002:1",
+      "expected_proto": "UDP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    },
+    {
+      "source_line": 14,
+      "source_line_sha256": "387cfb4ba354937a9742499597444fa750886d4983eb554cf99846e61cfb9fb7",
+      "derivative_line": 5,
+      "derivative_line_sha256": "a3622359fde61817df7c97ad3ff8ed716fa2c4a58cf70390d1842549f4b25363",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000002:1",
+      "expected_proto": "UDP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    },
+    {
+      "source_line": 15,
+      "source_line_sha256": "532d43aabddd913dcdd6cc692e5c91a2a64a62a8130079c3186f413c84e15f00",
+      "derivative_line": 6,
+      "derivative_line_sha256": "074779178c9440eb4145131fe9ee5026f447576dfaadb5c418767c06b55e1393",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000002:1",
+      "expected_proto": "UDP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    },
+    {
+      "source_line": 16,
+      "source_line_sha256": "d0163d4ef52524982363b0f031e0def39fadb18d02fc6ffd4328cb182eeb2500",
+      "derivative_line": 7,
+      "derivative_line_sha256": "a2dce5a25dec5d6d59ac909590c112799c4ea958876a986501b235d28d8060f1",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000003:2",
+      "expected_proto": "TCP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    },
+    {
+      "source_line": 17,
+      "source_line_sha256": "e99d4fada5ce64563a12378fe39de977239234221394b5b8a1752423f3ab5581",
+      "derivative_line": 8,
+      "derivative_line_sha256": "a2975cb77fbfdd357a69dd8de6eb7d195189cb6aec74956103e863eb482320a9",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000003:2",
+      "expected_proto": "TCP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    },
+    {
+      "source_line": 18,
+      "source_line_sha256": "5f99feb0e31cafa1cf085ac1891d92ee273ffd6250cbfca02c3548f9a32564b1",
+      "derivative_line": 9,
+      "derivative_line_sha256": "5b0752b3c69b734acd21f79abf41088d818637e0c2d40b37ef07677d8137a7c5",
+      "expected_status": "parsed",
+      "expected_rule": "1:1000003:2",
+      "expected_proto": "TCP",
+      "transformations": [
+        "Replace the Lab C endpoint address with 192.0.2.10.",
+        "Replace the Lab C USER gateway address with 192.0.2.1."
+      ]
+    }
+  ]
+}
