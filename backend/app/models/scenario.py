@@ -17,6 +17,7 @@ class ScenarioSource(StrEnum):
     SURICATA = "suricata"
     PFSENSE = "pfsense"
     COWRIE = "cowrie"
+    SNORT = "snort"
 
 
 class ExpectedOutcome(StrEnum):
