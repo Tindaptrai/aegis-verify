@@ -75,7 +75,7 @@ Windows/3.13 when they touch Windows-specific code ([CI notes](docs/CI.md)).
 ## Current implementation: bundle parsers
 
 A bundle's `inputs.json` names one parser key per file. The registry currently
-accepts twelve keys; the [CLI guide](docs/CLI_VALIDATE.md) lists each key's input
+accepts thirteen keys; the [CLI guide](docs/CLI_VALIDATE.md) lists each key's input
 and required context.
 
 | Source | Keys | Guide |
@@ -84,6 +84,7 @@ and required context.
 | Wazuh, network | `wazuh-sysmon3-archive-v1` (manager archive, UDP), `wazuh-suricata-alert-v1` (Wazuh alert raised from a Suricata alert) | [Wazuh from Suricata](docs/WAZUH_SURICATA_ALERT.md) |
 | Suricata | `suricata-wazuh-alert-v1` (search hit), `suricata-eve-jsonl-v1` (direct EVE) | [A](docs/SURICATA_WAZUH_ALERT.md), [B](docs/SURICATA_EVE_JSONL.md) |
 | pfSense | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | [filterlog](docs/PFSENSE_FIXTURE_PARSER.md) |
+| OPNsense | `opnsense-filterlog-bsd-v1` (BSD syslog as received; IPv4 TCP/UDP/ICMP, IPv6 UDP/ICMPv6) | [filterlog](docs/OPNSENSE_FILTERLOG_PARSER.md) |
 | Snort 3 | `snort3-alert-json-v1` (raw `alert_json`, pinned field list) | [alert_json](docs/SNORT3_ALERT_JSON_PARSER.md) |
 | Cowrie | `cowrie-wazuh-v1`, `cowrie-jsonl-v1` | [Cowrie](docs/COWRIE_FIXTURE_PARSER.md) |
 

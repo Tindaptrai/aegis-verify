@@ -18,6 +18,7 @@ class ScenarioSource(StrEnum):
     PFSENSE = "pfsense"
     COWRIE = "cowrie"
     SNORT = "snort"
+    OPNSENSE = "opnsense"
 
 
 class ExpectedOutcome(StrEnum):

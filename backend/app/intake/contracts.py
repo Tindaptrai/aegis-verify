@@ -141,6 +141,7 @@ ParserKey = Literal[
     "suricata-eve-jsonl-v1",
     "snort3-alert-json-v1",
     "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
+    "opnsense-filterlog-bsd-v1",
     "cowrie-wazuh-v1",
     "cowrie-jsonl-v1",
 ]
@@ -160,6 +161,9 @@ _CONTEXT_TYPES = {
     "suricata-eve-jsonl-v1": SuricataEveContext,
     "snort3-alert-json-v1": SnortAlertJsonContext,
     "pfsense-filterlog-bsd-ipv4-tcp-udp-v1": PfSenseFilterlogContext,
+    # OPNsense BSD syslog lacks the same facts as pfSense: the caller supplies
+    # sensor_id, the year and the UTC offset.
+    "opnsense-filterlog-bsd-v1": PfSenseFilterlogContext,
     "cowrie-wazuh-v1": CowrieWazuhContext,
     "cowrie-jsonl-v1": CowrieJsonlContext,
 }
