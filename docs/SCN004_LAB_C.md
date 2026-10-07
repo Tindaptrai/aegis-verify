@@ -5,6 +5,9 @@ Manifest: [`scenarios/SCN-004-attempted-exfiltration-lab-c.yaml`](../scenarios/S
 [`scenarios/profiles/scn-004/profile.json`](../scenarios/profiles/scn-004/profile.json).
 Test offline: `backend/tests/test_scn004_profile.py`.
 
+Chạy lại một đợt: [LABC_RUNBOOK.md](LABC_RUNBOOK.md). Kết quả đợt nghiệm thu và hồ sơ
+truy xuất bằng chứng: [SCN004_LAB_C_ACCEPTANCE.md](SCN004_LAB_C_ACCEPTANCE.md).
+
 ## 1. Vì sao cần kịch bản riêng
 
 SCN-004 giữ ý đồ của SCN-002: máy gửi thử đẩy dữ liệu ra một đích kiểm soát được,
@@ -259,6 +262,8 @@ khác và không lượt nào nới cửa sổ tương quan.
 
 **16/16 lượt đúng kết quả kỳ vọng.** Một lượt bị loại trước đó vì lỗi quy trình (thu
 bằng chứng trước khi gửi probe) và được ghi lại là không hợp lệ, không tính vào 16 lượt.
+Bảng từng lượt, evidence ID và hồ sơ truy xuất nguồn gốc nằm ở
+[SCN004_LAB_C_ACCEPTANCE.md](SCN004_LAB_C_ACCEPTANCE.md).
 
 Chạy lặp và phục hồi: 11 lượt ở phiên 1, sau đó khởi động lại máy ảo sensor và Wazuh
 bằng "Restart Guest" rồi chạy 2 lượt nữa ở phiên 2 — Snort bắt gói lại, hai agent
