@@ -74,12 +74,14 @@ Kết quả **`Detected`**, exit 0. Điểm nên chỉ ra:
 ## 4. Dashboard (5 phút)
 
 ```powershell
-.\.venv\Scripts\python.exe -m aegis_verify dashboard --reports demo-reports --static frontend\dist
+.\.venv\Scripts\python.exe -m aegis_verify dashboard --reports demo-reports --static frontend\dist --scenarios scenarios
 ```
 
 Mở địa chỉ server in ra (mặc định `http://127.0.0.1:8765`). Sidebar có ba run và một bản
-so sánh. Console trình duyệt có một lỗi 404 ở `/api/operations/bootstrap`: đó là hành vi
-đúng khi không bật Operations, không phải lỗi demo. Nên chỉ vào:
+so sánh. Thiếu `--scenarios` thì Scenario registry báo `not_configured` và trang Tổng
+quan không có kịch bản nào, nên luôn truyền thư mục manifest khi demo. Console trình
+duyệt có một lỗi 404 ở `/api/operations/bootstrap`: đó là hành vi đúng khi không bật
+Operations, không phải lỗi demo. Nên chỉ vào:
 
 - tab Assertions: từng assertion, vai trò (telemetry/detection/prevention),
   outcome và evidence ID;
