@@ -18,6 +18,11 @@ _FIELDS = frozenset({
     *('data.' + field for field in
       ('timestamp', 'event_type', 'alert', 'src_ip', 'dest_ip', 'src_port', 'dest_port',
        'proto', 'flow_id', 'app_proto', 'in_iface')),
+    'decoder', 'decoder.name', 'full_log', 'location',
+    # Snort alert_json fields as the json decoder copies them into data.
+    *('data.' + field for field in
+      ('seconds', 'pkt_num', 'pkt_gen', 'pkt_len', 'dir', 'src_addr', 'dst_addr',
+       'src_port', 'dst_port', 'service', 'rule', 'action', 'msg', 'class', 'priority')),
     # Cowrie data re-rooted by the manager-alert parser.
     *('data.' + field for field in
       ('eventid', 'session', 'username', 'password', 'dst_ip', 'dst_port', 'protocol',

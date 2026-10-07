@@ -136,6 +136,7 @@ ParserKey = Literal[
     "wazuh-powershell4104-v1",
     "wazuh-sysmon3-archive-v1",
     "wazuh-suricata-alert-v1",
+    "wazuh-snort-alert-v1",
     "wazuh-cowrie-alert-v1",
     "suricata-wazuh-alert-v1",
     "suricata-eve-jsonl-v1",
@@ -156,6 +157,9 @@ _CONTEXT_TYPES = {
     # A manager alert raised from a Suricata alert: the Wazuh rule is the
     # detection, so the caller facts are the Wazuh ones, not deployment_mode.
     "wazuh-suricata-alert-v1": WazuhWin4688Context,
+    # A manager alert raised from a Snort alert: same caller facts as the other
+    # Wazuh profiles; the Snort sensor facts live in the direct Snort entry.
+    "wazuh-snort-alert-v1": WazuhWin4688Context,
     "wazuh-cowrie-alert-v1": WazuhCowrieAlertContext,
     "suricata-wazuh-alert-v1": SuricataWazuhContext,
     "suricata-eve-jsonl-v1": SuricataEveContext,

@@ -14,6 +14,10 @@ from .suricata_alert import (
     SuricataAlertProvenance, SuricataAlertResult,
     parse_wazuh_suricata_alert_record,
 )
+from .snort_alert import (
+    SnortAlertProvenance, SnortAlertResult,
+    parse_wazuh_snort_alert_record,
+)
 from .cowrie_alert import (
     CowrieAlertProvenance, CowrieAlertResult,
     parse_wazuh_cowrie_alert_record,
@@ -27,5 +31,7 @@ __all__ = ['WazuhDiagnostic', 'WazuhParseError', 'WazuhParseResult', 'WazuhProve
            'parse_wazuh_sysmon3_archive_record',
            'SuricataAlertProvenance', 'SuricataAlertResult',
            'parse_wazuh_suricata_alert_record',
+           'SnortAlertProvenance', 'SnortAlertResult',
+           'parse_wazuh_snort_alert_record',
            'CowrieAlertProvenance', 'CowrieAlertResult',
            'parse_wazuh_cowrie_alert_record']
