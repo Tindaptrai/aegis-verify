@@ -50,6 +50,8 @@ def test_yaml_reader_preserves_authored_contract():
      ["wazuh", "suricata", "pfsense"], ["wazuh", "suricata", "pfsense", "wazuh"]),
     ("SCN-003-internal-deception.yaml", "SCN-003", "detected",
      ["suricata", "pfsense", "cowrie", "wazuh"], ["suricata", "pfsense", "cowrie", "wazuh"]),
+    ("SCN-004-attempted-exfiltration-lab-c.yaml", "SCN-004", "prevented",
+     ["wazuh", "snort", "opnsense"], ["wazuh", "snort", "opnsense"]),
 ])
 def test_committed_manifests_load_without_writes(filename, scenario_id, outcome, sources, assertion_sources):
     path = REPO / "scenarios" / filename

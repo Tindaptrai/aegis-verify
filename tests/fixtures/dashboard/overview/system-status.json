@@ -13,7 +13,7 @@
     {
       "details": {
         "invalid": 0,
-        "manifests": 3,
+        "manifests": 4,
         "unregistered_reports": 3
       },
       "id": "scenario_registry",
