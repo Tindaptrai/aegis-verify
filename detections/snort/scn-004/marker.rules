@@ -1,0 +1,4 @@
+# SCN-004 marker rule for Snort 3 (Lab C). It matches only the marker string the
+# probe puts in the first 64 bytes of one UDP datagram; addresses and ports stay
+# "any" so a moved receiver cannot silently turn into a detection gap.
+alert udp any any -> any any ( msg:"AEGIS SCN-004 marker UDP"; content:"AEGIS-SCN004-TEST", depth 64; sid:1000010; rev:1; )

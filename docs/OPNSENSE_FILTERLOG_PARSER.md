@@ -149,4 +149,3 @@ dòng còn lại của file gốc, không bỏ qua dòng nào.
 - TCP trên IPv6 và các protocol khác (IGMP, CARP...): cần mẫu thật trước.
 - Dòng log của rule NAT hay port forward.
 - Parser cho alert Wazuh sinh từ OPNsense.
-- Profile kịch bản cho Lab C.

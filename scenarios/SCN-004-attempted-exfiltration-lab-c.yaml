@@ -1,0 +1,35 @@
+# Lab C manifest: the intent of SCN-002 with the sources Lab C has (Sysmon via
+# Wazuh, Snort 3, OPNsense). SCN-002 cannot be reused there: each assertion names
+# its source and a profile rule binds only to that exact source type.
+id: SCN-004
+name: Attempted Exfiltration (Snort and OPNsense)
+version: 0.1.0
+status: draft
+description: >-
+  Attempt an approved outbound transfer to a controlled test endpoint and verify
+  endpoint telemetry, Snort network detection and OPNsense firewall prevention
+  for the same flow.
+safety:
+  destructive: false
+  authorization_required: true
+  notes: >-
+    Send one marked UDP datagram with non-sensitive test data to a documentation
+    address or an allowlisted lab destination only.
+expected_sources:
+  - wazuh
+  - snort
+  - opnsense
+expected_outcome: prevented
+assertions:
+  - id: SCN-004-A01
+    description: Endpoint telemetry proves the approved transfer attempt occurred.
+    source: wazuh
+  - id: SCN-004-A02
+    description: Snort records the marker alert for the same flow.
+    source: snort
+  - id: SCN-004-A03
+    description: OPNsense records a block action for the correlated flow.
+    source: opnsense
+tags:
+  - lab-c
+  - prevention

@@ -1,0 +1,42 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "lab-c-sanitized",
+  "files": [
+    {
+      "path": "sysmon3-archive.json",
+      "source_ref": "labc-sysmon3-8541573e",
+      "display_label": "Lab C sender (Sysmon 3)",
+      "parser": "wazuh-sysmon3-archive-v1",
+      "sha256": "e314f984b3654e402fd78a5081e341ab2f644b01f826e22384a4837f8b87e416",
+      "context": {
+        "ingested_at": "2026-10-07T09:17:39Z",
+        "collection_mode": "direct"
+      }
+    },
+    {
+      "path": "snort-alert.jsonl",
+      "source_ref": "labc-snort-8541573e",
+      "display_label": "Lab C Snort 3 (user segment)",
+      "parser": "snort3-alert-json-v1",
+      "sha256": "8ac860774a3bf998c7faf5ae5fbd09bcd6df6fc273686dd11cf74ff3a12e12b6",
+      "context": {
+        "ingested_at": "2026-10-07T09:17:39Z",
+        "sensor_id": "labc-snort-user",
+        "deployment_mode": "ids"
+      }
+    },
+    {
+      "path": "filterlog.log",
+      "source_ref": "labc-opnsense-8541573e",
+      "display_label": "Lab C OPNsense filterlog",
+      "parser": "opnsense-filterlog-bsd-v1",
+      "sha256": "b2e31b408850d919ae73831b314268f2fe1551525e9d171ac204f527d98f7683",
+      "context": {
+        "ingested_at": "2026-10-07T09:17:39Z",
+        "sensor_id": "labc-opnsense",
+        "source_year": 2026,
+        "source_utc_offset": "+00:00"
+      }
+    }
+  ]
+}

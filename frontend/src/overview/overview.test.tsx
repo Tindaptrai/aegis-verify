@@ -113,7 +113,7 @@ describe('row selection', () => {
     const mt = { ...withStatus(scn002, 'Missing telemetry'), id: 'SCN-011' };
     const odd = { ...withStatus(scn002, 'Something new'), id: 'SCN-012' };
     const ordered = selectRows([...rows, fn, mt, odd], DEFAULT_QUERY).map((row) => row.id);
-    expect(ordered).toEqual(['SCN-010', 'SCN-011', 'SCN-012', 'SCN-001', 'SCN-002', 'SCN-003']);
+    expect(ordered).toEqual(['SCN-010', 'SCN-011', 'SCN-012', 'SCN-001', 'SCN-004', 'SCN-002', 'SCN-003']);
     expect(resultKey(odd)).toBe('other');
     expect(attentionRank({ ...scn002, run_state: 'stale_only', latest_run: null })).toBe(attentionRank(rows[0]!));
   });
@@ -121,14 +121,14 @@ describe('row selection', () => {
   it('searches by ID, name or profile and filters by result and manifest status', () => {
     expect(selectRows(rows, { ...DEFAULT_QUERY, query: 'deception' }).map((row) => row.id)).toEqual(['SCN-003']);
     expect(selectRows(rows, { ...DEFAULT_QUERY, query: 'scn002-udp' }).map((row) => row.id)).toEqual(['SCN-002']);
-    expect(selectRows(rows, { ...DEFAULT_QUERY, result: 'not_run' }).map((row) => row.id)).toEqual(['SCN-001']);
+    expect(selectRows(rows, { ...DEFAULT_QUERY, result: 'not_run' }).map((row) => row.id)).toEqual(['SCN-001', 'SCN-004']);
     expect(selectRows(rows, { ...DEFAULT_QUERY, result: 'Prevented' }).map((row) => row.id)).toEqual(['SCN-002']);
     expect(selectRows(rows, { ...DEFAULT_QUERY, manifestStatus: 'ready' })).toEqual([]);
   });
 
   it('sorts by run time with unrun scenarios last and by ID', () => {
-    expect(selectRows(rows, { ...DEFAULT_QUERY, sort: 'run_time' }).map((row) => row.id)).toEqual(['SCN-003', 'SCN-002', 'SCN-001']);
-    expect(selectRows(rows, { ...DEFAULT_QUERY, sort: 'id' }).map((row) => row.id)).toEqual(['SCN-001', 'SCN-002', 'SCN-003']);
+    expect(selectRows(rows, { ...DEFAULT_QUERY, sort: 'run_time' }).map((row) => row.id)).toEqual(['SCN-003', 'SCN-002', 'SCN-001', 'SCN-004']);
+    expect(selectRows(rows, { ...DEFAULT_QUERY, sort: 'id' }).map((row) => row.id)).toEqual(['SCN-001', 'SCN-002', 'SCN-003', 'SCN-004']);
   });
 });
 
@@ -137,13 +137,13 @@ describe('Overview page', () => {
     render(<OverviewPage client={client()} onOpenScenario={vi.fn()} onOpenReport={vi.fn()} />);
     const kpis = await screen.findByRole('region', { name: 'Chỉ số kịch bản' });
     const kpi = (label: string) => within(kpis).getByText(label).nextElementSibling?.textContent;
-    expect(kpi('Tổng kịch bản')).toBe('3');
+    expect(kpi('Tổng kịch bản')).toBe('4');
     expect(kpi('Đã chạy')).toBe('2');
-    expect(kpi('Chưa chạy')).toBe('1');
+    expect(kpi('Chưa chạy')).toBe('2');
     expect(kpi('Detected')).toBe('1');
     expect(kpi('Prevented')).toBe('1');
     expect(kpi('False negative')).toBe('0');
-    expect(rowIds()).toEqual(['SCN-001', 'SCN-002', 'SCN-003']);
+    expect(rowIds()).toEqual(['SCN-001', 'SCN-004', 'SCN-002', 'SCN-003']);
     const unrun = within(table()).getAllByRole('row').find((row) => row.textContent?.includes('SCN-001'))!;
     expect(unrun).toHaveClass('is-not-run');
     expect(within(unrun).getByText('Chưa chạy')).toBeInTheDocument();
@@ -192,13 +192,13 @@ describe('Overview page', () => {
     render(<OverviewPage client={client()} onOpenScenario={onOpenScenario} onOpenReport={vi.fn()} />);
     const search = await screen.findByRole('searchbox', { name: 'Tìm kịch bản theo ID, tên hoặc profile' });
     fireEvent.change(search, { target: { value: 'exfil' } });
-    expect(rowIds()).toEqual(['SCN-002']);
+    expect(rowIds()).toEqual(['SCN-004', 'SCN-002']);
     fireEvent.change(search, { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Kết quả'), { target: { value: 'not_run' } });
-    expect(rowIds()).toEqual(['SCN-001']);
+    expect(rowIds()).toEqual(['SCN-001', 'SCN-004']);
     fireEvent.change(screen.getByLabelText('Kết quả'), { target: { value: 'all' } });
     fireEvent.change(screen.getByLabelText('Sắp xếp'), { target: { value: 'run_time' } });
-    expect(rowIds()).toEqual(['SCN-003', 'SCN-002', 'SCN-001']);
+    expect(rowIds()).toEqual(['SCN-003', 'SCN-002', 'SCN-001', 'SCN-004']);
     fireEvent.change(screen.getByLabelText('Kết quả'), { target: { value: 'False negative' } });
     expect(screen.getByText('Không có kịch bản khớp bộ lọc')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Kết quả'), { target: { value: 'all' } });

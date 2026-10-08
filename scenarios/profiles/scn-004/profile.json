@@ -1,0 +1,82 @@
+{
+  "profile_schema_version": "0.1.0",
+  "profile_id": "scn004-udp-marker-prevention",
+  "profile_version": "0.1.0",
+  "scenario_id": "SCN-004",
+  "scenario_version": "0.1.0",
+  "scenario_fingerprint": "778619bc836fc26938ff75749f0ec01aeabd0735276c5f9dadd9c07758932d47",
+  "rules": [
+    {
+      "assertion_id": "SCN-004-A01",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "wazuh",
+      "scope": [
+        {"field": "src_ip", "op": "eq", "binding": "sender_ip"},
+        {"field": "dst_ip", "op": "eq", "binding": "receiver_ip"},
+        {"field": "dst_port", "op": "eq", "binding": "receiver_port"},
+        {"field": "event_provider", "op": "eq", "value": "Microsoft-Windows-Sysmon"},
+        {"field": "protocol", "op": "eq", "value": "udp"}
+      ],
+      "match": [
+        {"field": "event_action", "op": "eq", "value": "observed"},
+        {"field": "src_port", "op": "exists"}
+      ]
+    },
+    {
+      "assertion_id": "SCN-004-A02",
+      "role": "detection",
+      "capability": "supported",
+      "source_type": "snort",
+      "scope": [
+        {"field": "src_ip", "op": "eq", "binding": "sender_ip"},
+        {"field": "dst_ip", "op": "eq", "binding": "receiver_ip"},
+        {"field": "dst_port", "op": "eq", "binding": "receiver_port"},
+        {"field": "event_provider", "op": "eq", "value": "snort"},
+        {"field": "protocol", "op": "eq", "value": "UDP"}
+      ],
+      "match": [
+        {"field": "signature_id", "op": "eq", "value": "1000010"}
+      ],
+      "correlation": {
+        "anchor_assertion_id": "SCN-004-A01",
+        "join_pairs": [
+          {"target_field": "src_ip", "anchor_field": "src_ip"},
+          {"target_field": "dst_ip", "anchor_field": "dst_ip"},
+          {"target_field": "src_port", "anchor_field": "src_port"},
+          {"target_field": "dst_port", "anchor_field": "dst_port"}
+        ],
+        "min_delta_ns": -2000000000,
+        "max_delta_ns": 2000000000
+      }
+    },
+    {
+      "assertion_id": "SCN-004-A03",
+      "role": "prevention",
+      "capability": "supported",
+      "source_type": "opnsense",
+      "scope": [
+        {"field": "src_ip", "op": "eq", "binding": "sender_ip"},
+        {"field": "dst_ip", "op": "eq", "binding": "receiver_ip"},
+        {"field": "dst_port", "op": "eq", "binding": "receiver_port"},
+        {"field": "event_provider", "op": "eq", "value": "OPNsense-filterlog"},
+        {"field": "protocol", "op": "eq", "value": "udp"}
+      ],
+      "match": [
+        {"field": "event_action", "op": "eq", "value": "blocked"},
+        {"field": "rule_id", "op": "eq", "binding": "block_rule_label"}
+      ],
+      "correlation": {
+        "anchor_assertion_id": "SCN-004-A01",
+        "join_pairs": [
+          {"target_field": "src_ip", "anchor_field": "src_ip"},
+          {"target_field": "dst_ip", "anchor_field": "dst_ip"},
+          {"target_field": "src_port", "anchor_field": "src_port"},
+          {"target_field": "dst_port", "anchor_field": "dst_port"}
+        ],
+        "min_delta_ns": -2000000000,
+        "max_delta_ns": 2000000000
+      }
+    }
+  ]
+}

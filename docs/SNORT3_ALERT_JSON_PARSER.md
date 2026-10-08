@@ -89,6 +89,5 @@ Git) và trên nguyên file gốc 18 dòng: đọc được hết, không lỗi.
 
 ## 7. Chưa làm
 
-- Profile kịch bản cho Lab C và quan hệ giữa alert Snort với nguồn khác.
 - Parser cho alert Wazuh sinh từ Snort.
 - Mẫu thật cho IPv6, cho `would_*`/`drop` (IPS) và cho alert không có IP header.

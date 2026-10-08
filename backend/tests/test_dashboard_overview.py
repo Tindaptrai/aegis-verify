@@ -80,12 +80,13 @@ def test_index_lists_every_manifest_including_never_run(lab):
     assert index["kind"] == "scenario_index"
     assert index["registry"]["configured"] is True and index["registry"]["errors"] == []
     rows = {row["id"]: row for row in index["scenarios"]}
-    assert set(rows) == {"SCN-001", "SCN-002", "SCN-003"}
+    assert set(rows) == {"SCN-001", "SCN-002", "SCN-003", "SCN-004"}
     assert rows["SCN-001"]["run_state"] == "not_run"
     assert rows["SCN-001"]["latest_run"] is None and rows["SCN-001"]["run_count"] == 0
     assert rows["SCN-001"]["status"] == "draft" and rows["SCN-001"]["expected_outcome"] == "detected"
     assert rows["SCN-003"]["run_state"] == "run"
     assert rows["SCN-003"]["latest_run"]["final_status"] == "Detected"
+    assert rows["SCN-004"]["run_state"] == "not_run" and rows["SCN-004"]["expected_outcome"] == "prevented"
 
 
 def test_latest_run_is_chosen_by_run_window_end_and_counts_come_from_the_report(lab, lab_reports):
@@ -106,7 +107,7 @@ def test_latest_run_is_chosen_by_run_window_end_and_counts_come_from_the_report(
 def test_kpis_count_scenarios_by_their_latest_run(lab):
     registry, store = lab
     kpi = build_scenario_index(registry, store)["kpi"]
-    assert kpi == {"total": 3, "run": 2, "not_run": 1, "by_status": {
+    assert kpi == {"total": 4, "run": 2, "not_run": 2, "by_status": {
         "Detected": 1, "Prevented": 1, "False negative": 0, "Missing telemetry": 0, "Inconclusive": 0, "Other": 0}}
 
 
@@ -140,7 +141,7 @@ def test_report_of_a_changed_manifest_is_history_not_the_current_result(tmp_path
     assert [(run["name"], run["manifest_match"], run["mismatch"]) for run in detail["runs"]] == [
         ("scn003.json", False, "version")]
     kpi = build_scenario_index(registry, store)["kpi"]
-    assert kpi["run"] == 0 and kpi["not_run"] == 3
+    assert kpi["run"] == 0 and kpi["not_run"] == 4
 
 
 def test_edited_manifest_with_same_version_is_detected_by_fingerprint(tmp_path, lab_reports):
@@ -179,7 +180,7 @@ def test_detail_of_unknown_or_invalid_scenario_id_is_not_found(lab):
 
 def test_invalid_and_duplicate_manifests_are_reported(tmp_path, lab_reports):
     scenarios = _scenarios(tmp_path)
-    (scenarios / "SCN-004-broken.yaml").write_text("id: SCN-004\nname: [unterminated\n", encoding="utf-8")
+    (scenarios / "SCN-900-broken.yaml").write_text("id: SCN-900\nname: [unterminated\n", encoding="utf-8")
     shutil.copy(scenarios / "SCN-001-powershell-execution.yaml", scenarios / "SCN-001-copy.yaml")
     (scenarios / "notes.txt").write_text("ignored", encoding="utf-8")
     store = ReportStore(_write(tmp_path / "reports", {}))
@@ -187,8 +188,8 @@ def test_invalid_and_duplicate_manifests_are_reported(tmp_path, lab_reports):
     assert sorted((e["file"], e["code"]) for e in index["registry"]["errors"]) == [
         ("SCN-001-copy.yaml", "duplicate_scenario_id"),
         ("SCN-001-powershell-execution.yaml", "duplicate_scenario_id"),
-        ("SCN-004-broken.yaml", "invalid_scenario")]
-    assert {row["id"] for row in index["scenarios"]} == {"SCN-002", "SCN-003"}
+        ("SCN-900-broken.yaml", "invalid_scenario")]
+    assert {row["id"] for row in index["scenarios"]} == {"SCN-002", "SCN-003", "SCN-004"}
 
 
 def test_without_registry_reports_are_grouped_but_nothing_is_claimed(tmp_path, lab_reports):
@@ -319,7 +320,7 @@ def _get(url):
 
 def test_http_endpoints_serve_index_detail_and_status(served):
     status, index = _get(served + "/api/scenarios")
-    assert status == 200 and index["kind"] == "scenario_index" and index["kpi"]["total"] == 3
+    assert status == 200 and index["kind"] == "scenario_index" and index["kpi"]["total"] == 4
     status, detail = _get(served + "/api/scenarios/SCN-002")
     assert status == 200 and detail["scenario"]["id"] == "SCN-002"
     status, system = _get(served + "/api/system/status")
