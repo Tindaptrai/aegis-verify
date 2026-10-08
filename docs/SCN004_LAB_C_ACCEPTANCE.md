@@ -25,7 +25,7 @@ gốc đối chiếu được từng dòng.
 | Mỗi lượt độc lập, không dùng lại log | mỗi lượt có `run_id`, cửa sổ, binding, report, exit code riêng | 16/16 lượt; công cụ tự từ chối lượt có cửa sổ chứa gói của lượt khác | bảng 1 (cổng nguồn khác nhau từng lượt), bảng 2 (evidence ID khác nhau từng lượt) | Đạt |
 | Chạy lặp qua khởi động lại máy ảo | lượt sau khi khởi động lại vẫn đạt | 11 lượt phiên 1, khởi động lại sensor và máy Wazuh, 2 lượt phiên 2 đều `Prevented` | [SCN004_LAB_C.md](SCN004_LAB_C.md) mục 11 | Đạt |
 | Capture filterlog đọc hết; dòng hỏng phải báo ra | đọc toàn bộ từng dòng; có dòng hỏng thì báo capture không đầy đủ, giữ nguyên bản gốc | capture của đợt: 22.401/22.401 dòng đọc được, 0 skipped; capture trước đó bị từ chối tại dòng 1707, hồ sơ ghi đủ 2 dòng hỏng | mục 6 | Đạt |
-| Alert SIEM thành một assertion được duyệt | A04 trong scenario, có bằng chứng của bước SIEM trong report | scenario `0.2.0` có A04; hai lượt **live** ngày 8-10 (`b51324ef` 4/4 `Prevented`; `9549c96d` agent Wazuh dừng → `Inconclusive`) và hai lượt cũ đánh giá lại cho cùng kết quả | mục 3.1 | Có bằng chứng, chờ chủ dự án duyệt |
+| Alert SIEM thành một assertion được duyệt | A04 trong scenario, có bằng chứng của bước SIEM trong report | scenario `0.2.0` có A04; hai lượt **live** ngày 8-10 (`b51324ef` 4/4 `Prevented`; `9549c96d` agent Wazuh dừng → `Inconclusive`) và hai lượt cũ đánh giá lại cho cùng kết quả | mục 3.1 | Đạt |
 
 **16/16 lượt nghiệm thu đúng kết quả kỳ vọng.** Một lượt trước đó bị loại vì lỗi quy
 trình (chạy thu bằng chứng trước khi gửi probe), được ghi lại là không hợp lệ và không
@@ -139,9 +139,9 @@ việc tách bạch; đợt này chứng minh được cả hai chiều.
 
 ### 3.1 A04 — alert SIEM thành assertion (scenario 0.2.0)
 
-Người phụ trách Lab C quyết định bổ sung assertion ngày **2026-10-08**; **chủ dự án
-chưa duyệt** và xác nhận của người chạy lab không thay thế bước đó, nên A04 còn chờ
-duyệt dù đã có bằng chứng. Vì thêm assertion là đổi ground
+Người phụ trách Lab C đề xuất bổ sung assertion ngày **2026-10-08**; **chủ dự án đã
+duyệt** A04 cùng scenario và profile 0.2.0 trong cùng ngày, sau khi audit gói bàn giao
+(checklist của chủ dự án ngày 08-10-2026). Vì thêm assertion là đổi ground
 truth nên scenario lên `0.2.0` (fingerprint `8de00c64cfe8…`, trước là `778619bc836f…`)
 và profile lên `0.2.0` (fingerprint `b529215d02ea…`). A04 có vai trò `detection`, nguồn
 `wazuh`, khớp `rule_id` `130110` của Wazuh cùng `signature_id` `1000010` của Snort, neo
@@ -190,6 +190,30 @@ ngừng thu.
 
 Cặp live này lặp lại đúng kết quả của cặp đánh giá lại ở trên, nên kết luận không phụ
 thuộc vào việc dùng bằng chứng cũ.
+
+**Ba lượt live sau khi A04 được duyệt (2026-10-08, 17:16–17:34Z).** Chạy theo chuỗi
+khuyến nghị của chủ dự án — bình thường → dừng agent Wazuh trên sensor → khôi phục — với
+rule Snort `rev:1`, commit `49570ff1931e3d6952cf10e633166bcc5f1a3ba5`:
+
+| Lượt | Gửi (UTC) | Cổng nguồn | Tình huống | A01 | A02 | A03 | A04 | Kết quả | So với kỳ vọng |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `7b409794` | 17:16:45.312 | 55732 | bình thường | satisfied | satisfied | satisfied | **satisfied** | `Prevented`, exit 0 | đúng |
+| `445b3ab2` | 17:24:25.296 | 64280 | agent Wazuh trên sensor dừng | satisfied | satisfied | satisfied | **inconclusive** (`collection_not_confirmed`) | `Inconclusive`, exit 3 | đúng |
+| `1b0c1a3f` | 17:30:34.954 | 60157 | khôi phục | satisfied | satisfied | satisfied | **satisfied** | `Prevented`, exit 0 | đúng |
+
+Lượt khôi phục chứng minh thêm một điều: alert SIEM của nó là alert **mới**, sinh sau
++0,687 s cho đúng gói vừa gửi, chứ không phải agent đọc bù alert cũ sau khi chạy lại.
+Trạng thái dịch vụ lúc thu khớp tình huống ở cả ba lượt; biên nhận ghi người chạy và
+commit. Lượt `7b409794` được đóng gói hai lần, lần đầu chuyển thành
+`raw-superseded-20261008T172202Z` và dòng cũ trong `campaign.csv` bị gỡ — ghi trong
+`attempts.log` của lượt.
+
+**Điều kiện độc lập chưa đạt.** Người chạy ba lượt này cũng là người chạy đợt 16 lượt
+trước đó, nên chúng là lượt live hợp lệ dưới 0.2.0 nhưng **không** thay thế yêu cầu "một
+người vận hành khác chạy lại". Gate đó vẫn mở.
+
+Ảnh chụp toàn phiên (12 ảnh, kèm bảng chú thích từng ảnh) nằm trong gói bàn giao bổ
+sung, ngoài Git.
 
 Trong repo, bundle `block-siem` (đã sanitize, dẫn xuất từ `be283230`, bốn nguồn) replay
 lại kết quả `Prevented` 4/4 và kiểm rằng hai bản ghi Wazuh không lẫn nhau: bản ghi
@@ -310,6 +334,6 @@ như bước giải nén ở mục 6.2.
 
 | Việc | Trạng thái |
 | --- | --- |
-| Chủ dự án duyệt assertion A04 và review scenario, profile | của chủ dự án; hồ sơ đề nghị duyệt đã kèm trong gói bàn giao |
-| Một người khác chạy lại theo runbook, gồm ít nhất một lượt live | chưa làm |
+| Chủ dự án review scenario và profile trước đợt cuối | của chủ dự án; A04 đã được duyệt ngày 08-10-2026 |
+| Một người khác chạy lại theo runbook, gồm ít nhất một lượt live | chưa làm; năm lượt live dưới 0.2.0 đều do người đã chạy đợt cũ thực hiện |
 | Merge chuỗi PR theo thứ tự phụ thuộc và replay trên commit main cuối | chưa làm |

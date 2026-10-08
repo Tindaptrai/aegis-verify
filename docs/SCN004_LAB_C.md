@@ -23,8 +23,8 @@ này. Sửa SCN-002 thì đổi ground truth của lab A, nên Lab C có manifes
 Từ **0.2.0**, SCN-004 có A04 tương ứng A04 của SCN-002: Wazuh ghi alert của chính nó
 (rule `130110`) cho alert Snort của cùng luồng, đọc bằng `wazuh-snort-alert-v1`
 ([tài liệu](WAZUH_SNORT_ALERT.md)). Thêm assertion là đổi ground truth nên phải được
-duyệt trước. Người phụ trách Lab C quyết định bổ sung ngày 2026-10-08 và **chủ dự án
-chưa duyệt**; xác nhận của người chạy lab không thay thế bước này. Bản ghi alert đã được thu cùng mỗi lượt
+duyệt trước. Người phụ trách Lab C đề xuất ngày 2026-10-08 và **chủ dự án đã duyệt**
+cùng ngày sau khi audit gói bàn giao (checklist của chủ dự án ngày 08-10-2026). Bản ghi alert đã được thu cùng mỗi lượt
 từ trước khi có assertion, nên bằng chứng cũ đánh giá lại được mà không phải dựng lại
 lab.
 
@@ -311,12 +311,14 @@ trạng thái unknown.
 
 ### Hai lượt live dưới scenario 0.2.0 (2026-10-08)
 
-Sau khi thêm A04, lab chạy thêm hai lượt live với cùng cấu hình (rule Snort được
-trả về `rev:1` trước khi chạy): một lượt bình thường cho `Prevented` với cả bốn
-assertion `satisfied`, và một lượt dừng agent Wazuh trên sensor cho `Inconclusive` vì
-A04 `collection_not_confirmed` trong khi A01–A03 vẫn `satisfied`. Hai lượt này không
-nằm trong bảng 16 lượt ở trên vì chúng chạy dưới một ground truth khác; chi tiết và
-bằng chứng ở [SCN004_LAB_C_ACCEPTANCE.md](SCN004_LAB_C_ACCEPTANCE.md) mục 3.1.
+Sau khi thêm A04, lab chạy thêm **năm** lượt live với cùng cấu hình (rule Snort được
+trả về `rev:1` trước khi chạy): hai lượt lúc A04 vừa có, và ba lượt nữa sau khi chủ dự án
+duyệt, theo chuỗi bình thường → dừng agent Wazuh trên sensor → khôi phục. Lượt bình
+thường và lượt khôi phục cho `Prevented` với cả bốn assertion `satisfied`; lượt dừng
+agent cho `Inconclusive` vì A04 `collection_not_confirmed` trong khi A01–A03 vẫn
+`satisfied`. Năm lượt này không nằm trong bảng 16 lượt ở trên vì chúng chạy dưới một
+ground truth khác; chi tiết và bằng chứng ở
+[SCN004_LAB_C_ACCEPTANCE.md](SCN004_LAB_C_ACCEPTANCE.md) mục 3.1.
 
 ## 12. Kiểm thử đã chạy
 
