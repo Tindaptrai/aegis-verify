@@ -156,7 +156,7 @@ khác profile, khác binding hoặc khác độ dài cửa sổ.
 | Agent Wazuh `Disconnected`, ping và SSH tới máy SIEM vẫn được | mạng Docker hỏng sau suspend/resume | khởi động lại dịch vụ Docker |
 | Giờ firewall lệch hàng nghìn giây | đồng hồ máy ảo sau suspend/resume | Restart Guest, firewall trước; chờ NTP đồng bộ rồi mới chạy lượt |
 | Máy gửi lệch khoảng 0,5 s và không tự hết | w32time chỉ kéo từ từ khi lệch dưới 1 s | chỉnh một bước rồi bật lại w32time |
-| Sysmon ghi sự kiện mạng lệch gần 1 s dù đồng hồ máy đúng | Sysmon giữ độ lệch từ lúc khởi động | cài lại Sysmon, khởi động lại agent, đo lại |
+| Sysmon ghi sự kiện mạng lệch gần 1 s dù đồng hồ máy đúng — sau khi máy ảo suspend/resume thì lệch tới hàng giờ (đo được −51 963 s) | Sysmon đóng dấu sự kiện theo mốc lúc nó khởi động; đồng hồ máy chỉnh sau đó thì sự kiện mạng không theo | đồng bộ đồng hồ máy trước, rồi cài lại Sysmon đúng bản và đúng file cấu hình, khởi động lại agent Wazuh, đo lại cho tới khi lệch < 0,5 s |
 | Mất log firewall khoảng một phút sau khi máy thu log khởi động lại | bên gửi syslog thử lại sau 60 s rồi gửi bù các bản tin còn hàng đợi với mốc giờ gốc | đợi ≥ 70 s sau khi máy thu log khởi động lại rồi mới gửi probe |
 | Đo lệch đồng hồ ra số vô lý (hàng tỉ giây) | hỏi NTP quá dày, bị giới hạn tần suất, gói Kiss-o'-Death bị lấy nhầm | hỏi thưa, bỏ gói có stratum 0 |
 | `collect` báo cửa sổ của lượt chứa gói của lượt khác | hai lượt cách nhau dưới 150 s | ghi lượt đó là không hợp lệ, chạy lượt mới |
