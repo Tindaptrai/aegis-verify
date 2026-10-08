@@ -180,10 +180,17 @@ profile mới, tài liệu và hash của bằng chứng.
    - đăng ký parser key trong `backend/app/intake/registry.py`.
 3. **Fixture** trong `tests/fixtures/<nguồn>/`, kèm README ghi nguồn gốc mẫu và cách
    sanitize. Test phủ cả trường hợp đúng và các trường hợp từ chối.
-4. **Profile** cho lab mới là một file mới cạnh profile cũ, ví dụ
-   `scenarios/profiles/scn-002/lab-c-snort.json`, kèm README. Không sửa
+4. **Profile** cho lab mới là một file mới cạnh profile cũ, kèm README. Không sửa
    `profile.json` của lab A, không sửa scenario YAML. Profile phải được review trước
    khi dùng cho verdict.
+
+   Lưu ý quan trọng: profile **không** đổi được nguồn của một assertion. Mỗi assertion
+   trong manifest ghi nguồn của nó và engine chỉ cho rule của profile gắn với đúng
+   nguồn đó, nên không thể viết một profile cho SCN-002 trỏ A02 sang `snort` hay A03
+   sang `opnsense`. Lab có bộ nguồn khác thì cần **manifest kịch bản riêng** cộng
+   profile riêng, như [SCN-004](SCN004_LAB_C.md) đã làm cho Lab C; sửa SCN-002 là đổi
+   ground truth của lab A. Dùng profile mới cạnh profile cũ khi cùng một bộ nguồn
+   nhưng khác chi tiết (ID rule, nhãn rule firewall, cửa sổ tương quan).
 5. Tài liệu: một trang `docs/<NGUỒN>_PARSER.md` nói parser nhận gì và từ chối gì.
 
 ## 6. Đồng hồ và những bẫy đã gặp ở lab A

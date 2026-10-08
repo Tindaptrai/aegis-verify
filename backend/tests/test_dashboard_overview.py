@@ -224,9 +224,13 @@ def test_system_status_degraded_by_unreadable_report_and_unregistered_scenario(l
 def test_connectors_and_engine_are_never_claimed_healthy_without_live_data(lab):
     registry, store = lab
     status = build_system_status(registry, store, None, now=NOW)
-    for source in ("wazuh", "suricata", "pfsense", "cowrie"):
+    for source in ("wazuh", "suricata", "snort", "pfsense", "opnsense", "cowrie"):
         component = _component(status, f"connector_{source}")
         assert component["status"] == "not_configured"
+    # Nguồn của Lab C có thẻ riêng; không có bản ghi nào trong report của lab này thì để trống,
+    # không biến thành "healthy" hay bị bỏ khỏi danh sách.
+    for source in ("snort", "opnsense"):
+        assert _component(status, f"connector_{source}")["details"]["seen_in_reports"] is None
     seen = _component(status, "connector_cowrie")["details"]["seen_in_reports"]
     assert seen == {"report": "scn003.json", "parsed": 2,
                     "window_end": json.loads((store.root / "scn003.json").read_text())["comparison_inputs"]["context"]["end"]}

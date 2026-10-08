@@ -27,7 +27,9 @@ export const COMPONENT_TEXT: Record<string, { title: string; description: string
   evidence_collection: { title: 'Evidence collection', description: 'Thu bằng chứng giới hạn từ Wazuh Indexer (Operations).' },
   connector_wazuh: { title: 'Wazuh connector', description: 'Parser Wazuh; thu live chỉ qua Operations.' },
   connector_suricata: { title: 'Suricata connector', description: 'Parser EVE JSON; không có thu live.' },
+  connector_snort: { title: 'Snort connector', description: 'Parser alert_json của Snort 3; không có thu live.' },
   connector_pfsense: { title: 'pfSense connector', description: 'Parser filterlog; không có thu live.' },
+  connector_opnsense: { title: 'OPNsense connector', description: 'Parser filterlog qua syslog BSD; không có thu live.' },
   connector_cowrie: { title: 'Cowrie connector', description: 'Parser Cowrie JSON; không có thu live.' },
 };
 

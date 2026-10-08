@@ -126,7 +126,7 @@ toàn của môi trường được giám sát. Giá trị: `healthy`, `degraded
 | Report storage | `error` nếu không đọc được thư mục; `degraded` nếu có report không đọc được; `no_data` nếu chưa có report; `last_activity` là thời gian sửa file mới nhất |
 | Validation engine | luôn `unknown`, vì dashboard không chạy engine; kèm version engine thấy trong report |
 | Evidence collection | `not_configured` nếu không bật Operations hoặc chưa cấu hình Indexer; `error` nếu job store bị chặn; theo job mới nhất: `healthy` khi đã hoàn tất, `degraded` khi thất bại hoặc gián đoạn, `unknown` khi chưa có job hoặc đang chạy |
-| Connector Wazuh, Suricata, pfSense, Cowrie | `not_configured` vì không có connector live. Riêng Wazuh, khi Operations có Indexer, đi theo trạng thái thu ở trên. `seen_in_reports` chỉ ghi report gần nhất có bản ghi của nguồn đó; đây **không** phải sức khoẻ connector. |
+| Connector Wazuh, Suricata, Snort, pfSense, OPNsense, Cowrie | `not_configured` vì không có connector live. Riêng Wazuh, khi Operations có Indexer, đi theo trạng thái thu ở trên. `seen_in_reports` chỉ ghi report gần nhất có bản ghi của nguồn đó; đây **không** phải sức khoẻ connector. |
 
 Trạng thái tổng là mức xấu nhất của registry, report storage và evidence collection
 (chỉ tính collection khi nó `healthy`, `degraded` hoặc `error`), theo thứ tự `error` >
