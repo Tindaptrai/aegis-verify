@@ -24,6 +24,7 @@ gốc đối chiếu được từng dòng.
 | `aegis compare` cho `Regression Passed` | trước `false_negative`, sau `satisfied`, không có assertion unknown | đúng: A02 `improvement`, A01 và A03 `unchanged_pass`, bốn trạng thái unknown đều 0 | report so sánh của cặp `f12e4fa7` → `9099c31e` | Đạt |
 | Mỗi lượt độc lập, không dùng lại log | mỗi lượt có `run_id`, cửa sổ, binding, report, exit code riêng | 16/16 lượt; công cụ tự từ chối lượt có cửa sổ chứa gói của lượt khác | bảng 1 (cổng nguồn khác nhau từng lượt), bảng 2 (evidence ID khác nhau từng lượt) | Đạt |
 | Chạy lặp qua khởi động lại máy ảo | lượt sau khi khởi động lại vẫn đạt | 11 lượt phiên 1, khởi động lại sensor và máy Wazuh, 2 lượt phiên 2 đều `Prevented` | [SCN004_LAB_C.md](SCN004_LAB_C.md) mục 11 | Đạt |
+| Capture filterlog đọc hết; dòng hỏng phải báo ra | đọc toàn bộ từng dòng; có dòng hỏng thì báo capture không đầy đủ, giữ nguyên bản gốc | capture của đợt: 22.401/22.401 dòng đọc được, 0 skipped; capture trước đó bị từ chối tại dòng 1707, hồ sơ ghi đủ 2 dòng hỏng | mục 6 | Đạt |
 | Alert SIEM thành một assertion được duyệt | — | **Chưa làm**: parser `wazuh-snort-alert-v1` đã có, chưa assertion nào dùng, chờ chủ dự án duyệt | [WAZUH_SNORT_ALERT.md](WAZUH_SNORT_ALERT.md) | Hoãn |
 
 **16/16 lượt nghiệm thu đúng kết quả kỳ vọng.** Một lượt trước đó bị loại vì lỗi quy
@@ -101,6 +102,28 @@ trên máy lab tại thời điểm thu, kèm số dòng đã giữ hoặc số 
 | `dd82ca67` | `00aacc85f7dd` · dòng 49185 | `5be1de3e4232` · `c445a36ca850` · 1 dòng | `a382a18f9543` · `ab5e879dcb35` + `64af63238119` · 208 dòng |
 | `9099c31e` | `d4fd07dab232` · dòng 50277 | `d8441072710f` · `0eff3c5c2711` · 1 dòng | `35e8690bc6be` · `ab5e879dcb35` + `c93c77182fa9` · 275 dòng |
 
+### Đối chứng chỉ kiểm bằng dữ liệu tổng hợp (không tính là lượt live)
+
+Năm điều kiện bảo vệ của công cụ không dựng được bằng cách chạy lab bình thường — phải
+cố tình làm sai thời điểm thu, đồng hồ hoặc vị trí chuỗi đánh dấu — nên chúng được kiểm
+bằng bundle đã sanitize, mỗi lần sửa đúng một trường rồi chạy qua cùng assembler.
+**Không đối chứng nào dưới đây được tính vào 16 lượt live.**
+
+| Đối chứng (dữ liệu tổng hợp) | Trường bị sửa | Kết quả |
+| --- | --- | --- |
+| Snort `inactive` lúc thu | `ActiveState` | không khai báo thu đủ → A02 `collection_not_confirmed`, `Inconclusive` |
+| Thu bằng chứng trước khi cửa sổ đóng | `collected_at` | như trên |
+| Chuỗi đánh dấu nằm ở đầu gói | `marker_offset = 0` | như trên — gói đó rule rev 1 bắt được nên không phải ca rule hụt |
+| Snort khởi động giữa cửa sổ | `ExecMainStartTimestamp` | như trên |
+| Đồng hồ sensor lệch 2 s | `Offset` của `timedatectl` | như trên |
+| `compare` theo chiều ngược (`satisfied` → `false_negative`) | thứ tự hai lượt | `Regression`, đúng như mong đợi, không phải `Regression Passed` |
+
+Trong bảng trên chỉ tình huống "Snort ngừng thu" có bản live tương ứng (lượt `4d5afd81`
+và `bf0f7220`); năm dòng còn lại chỉ tồn tại ở dạng tổng hợp và chỉ chứng minh hành vi
+của công cụ, không chứng minh hành vi của lab. Hai ca dương tính (rule hụt đủ điều kiện
+→ `False negative`, rule đã sửa → `Prevented`) cũng được chạy thử bằng dữ liệu tổng hợp
+trước khi chạy live; bằng chứng được tính là bản live ở bảng 1.
+
 ## 3. Phân biệt alert IDS tại nguồn và alert SIEM
 
 Hai lượt `ab842ef4` và `52f59d23` chạy khi agent Wazuh trên sensor đã dừng. Snort vẫn
@@ -159,7 +182,70 @@ và evidence ID trong `report.json` với bảng 2. Dòng gốc của mỗi bả
 số dòng trong bảng 3 cộng SHA-256 của file nguồn tại thời điểm thu. Không sửa bản gốc
 để khớp; sai lệch phải được ghi lại chứ không được chữa.
 
-## 6. Việc còn lại
+## 6. Toàn vẹn capture filterlog
+
+Log của OPNsense do rsyslog ghi trên sensor thành `filterlog-raw.log`, xoay vòng hằng
+ngày. Bước nghiệm thu đóng gói ba file capture đang có trên sensor rồi đọc **toàn bộ
+từng dòng vật lý** bằng đúng parser mà intake dùng (`iter_opnsense_filterlog_file` của
+`opnsense-filterlog-bsd-v1`) — không lấy mẫu, không lọc trước, không bỏ dòng nào.
+
+| File | Byte | Dòng | SHA-256 | Kết quả đọc |
+| --- | --- | --- | --- | --- |
+| `filterlog-raw.log` (đang ghi, vừa xoay vòng) | 0 | 0 | `e3b0c44298fc` | file rỗng; báo đúng là rỗng, không báo thành lỗi |
+| `filterlog-raw.log.1` (capture của đợt nghiệm thu) | 5.039.801 | 22.401 | `237c6a8a21e7` | **22.401 parsed / 0 skipped / 0 dòng bị từ chối**; bản ghi đầu `2026-10-07T13:28:11Z`, cuối `2026-10-07T18:00:08Z` |
+| `filterlog-raw.log.2` (capture của ngày trước) | 7.221.172 | 33.506 | `ab5e879dcb35` | parser **từ chối tại dòng 1707** (`invalid_field`, trường `label`) → capture không đầy đủ kể từ dòng đó |
+
+Số dòng đếm bằng byte `0a` khớp số bản ghi parser trả về ở hai file đọc được, nên không
+dòng nào bị bỏ qua âm thầm; cả ba file đều kết thúc bằng `0a`. Chạy lại:
+`run.cmd 47` rồi `check-capture.cmd`; log kết quả nằm ngoài Git cùng bộ bằng chứng gốc.
+
+### 6.1 Dừng máy thu và xoay vòng log
+
+Dừng rsyslog có kiểm soát để lại dòng cuối trọn vẹn, kết thúc bằng `0a`. `logrotate -f`
+để lại file cũ kết thúc bằng `0a` và mở file mới bắt đầu từ bản ghi `13:28:11Z`. Lần đọc
+toàn bộ ở trên xác nhận hệ quả trên dữ liệu thật: capture của đợt nghiệm thu không có
+dòng nào bị cắt hay bị nối.
+
+### 6.2 Bản gốc và bản dẫn xuất
+
+Bản nén `filterlog-raw.log.2.gz` (SHA-256 `e96ad658d2b8`) giữ nguyên cả trong gói bằng
+chứng lẫn trên sensor. Bản `.2` là bản dẫn xuất duy nhất của gói, tạo bằng
+`gunzip -c filterlog-raw.log.2.gz > filterlog-raw.log.2`; bước này ghi trong
+`derivation.txt` kèm hash nguồn và hash kết quả. Hash bản giải nén `ab5e879dcb35` trùng
+đúng hash mà provenance của **cả 16 lượt** ghi cho `sources[0]`, tức
+`/var/log/opnsense/filterlog-raw.log.1` tại thời điểm thu (bảng 3). Nói cách khác: file
+mà mọi lượt đã đọc, sau lần xoay vòng kế tiếp thành `.2.gz`, và bản giải nén hôm nay
+dựng lại đúng từng byte của nó.
+
+### 6.3 Dòng hỏng trong capture ngày trước
+
+Lần đọc chặt dừng ngay tại dòng lỗi đầu tiên — đúng hợp đồng của intake: một lỗi ở giữa
+làm **cả lần nạp** là không đầy đủ, không phải chỉ dòng đó. Vì cách dừng này che các
+dòng lỗi phía sau, công cụ kiểm chạy thêm một lượt rà soát từng dòng riêng lẻ chỉ để
+**đếm hết** số dòng hỏng: 33.504/33.506 dòng tự đọc được, 2 dòng bị từ chối.
+
+| Dòng | Mã lỗi | Trường | Khung dòng (số đo, không trích nội dung) | Diễn giải |
+| --- | --- | --- | --- | --- |
+| 1707 (`Oct 6 04:28:11`) | `invalid_field` | `label` | 305 byte, 2 header syslog, 31 dấu phẩy, 0 byte NUL | hai thông điệp syslog bị nối thành một dòng (mất ký tự xuống dòng giữa hai thông điệp) |
+| 31748 (`Oct 7 13:15:40`) | `invalid_field` | — | 661 byte, 1 header syslog, 22 dấu phẩy, 478 byte NUL | một khoảng 478 byte NUL rồi mới tới một thông điệp hoàn chỉnh: dấu hiệu phần ghi bị mất khi máy dừng không sạch |
+
+Cột khung dòng là số đo trực tiếp trên file. Cột diễn giải là **suy luận** từ khung
+dòng; chưa đối chiếu được với log hệ thống của thời điểm đó nên không ghi thành kết
+luận. Lượt rà soát từng dòng **không** chứng minh file đọc được: đọc từng dòng rời
+không thay cho một lần đọc liên tục, và kết luận của hồ sơ vẫn là capture `.2` không
+đầy đủ.
+
+Hai dòng hỏng nằm **ngoài cửa sổ của mọi lượt** trong đợt: `04:28:11Z` ngày 6-10 và
+`13:15:40Z` ngày 7-10, trong khi cửa sổ sớm nhất của đợt mở lúc `14:04:00Z` ngày 7-10
+và lượt nghiệm thu đầu tiên mở cửa sổ lúc `16:02:00Z`. Không bundle
+nào của đợt chứa hai dòng này, và ledger của mọi lần thu đều ghi `unparsed: 0` cho cửa
+sổ filterlog, nên 16 kết quả ở mục 1 và mục 2 không bị ảnh hưởng.
+
+Không dòng nào bị xóa và không tạo bản "đã làm sạch". Nếu sau này cần dùng phần đọc
+được của capture này, phải tạo một bản dẫn xuất mới và ghi lại bước cắt cùng lý do,
+như bước giải nén ở mục 6.2.
+
+## 7. Việc còn lại
 
 | Việc | Trạng thái |
 | --- | --- |

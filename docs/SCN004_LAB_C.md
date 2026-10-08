@@ -302,6 +302,7 @@ trạng thái unknown.
 | Windows (máy chạy lab, venv của repo) | 3614 passed | 3: `test_intake_io` (FIFO không có trên nền tảng này), `test_operations_config` và `test_private_fs` (kiểm quyền kiểu POSIX) |
 | Linux (container của người phát triển) | 3526 passed, 1 failed | 90: 47 `test_scn001_runner` (cần Windows PowerShell 5.1), 37 `test_dashboard_launcher` (launcher Windows), 6 kiểm ACL Windows |
 | Frontend (`npm test`) | 6 file, 108 passed | — |
+| Frontend (`npm run build`) | `tsc --noEmit` rồi `vite build`, 42 module, exit 0 | — |
 
 Lượt Linux có một test thất bại: `test_cli_validate.py::test_console_and_module_entry_points_are_equivalent`
 cần console script của bản cài editable, container đó không có. Trên Windows test này
