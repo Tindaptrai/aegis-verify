@@ -43,22 +43,23 @@ def test_yaml_reader_preserves_authored_contract():
     assert ScenarioManifest.model_validate_json(result.model_dump_json()) == result
 
 
-@pytest.mark.parametrize("filename,scenario_id,outcome,sources,assertion_sources", [
-    ("SCN-001-powershell-execution.yaml", "SCN-001", "detected",
+@pytest.mark.parametrize("filename,scenario_id,version,outcome,sources,assertion_sources", [
+    ("SCN-001-powershell-execution.yaml", "SCN-001", "0.1.0", "detected",
      ["sysmon", "powershell", "wazuh"], ["sysmon", "powershell", "wazuh"]),
-    ("SCN-002-attempted-exfiltration.yaml", "SCN-002", "prevented",
+    ("SCN-002-attempted-exfiltration.yaml", "SCN-002", "0.1.0", "prevented",
      ["wazuh", "suricata", "pfsense"], ["wazuh", "suricata", "pfsense", "wazuh"]),
-    ("SCN-003-internal-deception.yaml", "SCN-003", "detected",
+    ("SCN-003-internal-deception.yaml", "SCN-003", "0.1.0", "detected",
      ["suricata", "pfsense", "cowrie", "wazuh"], ["suricata", "pfsense", "cowrie", "wazuh"]),
-    ("SCN-004-attempted-exfiltration-lab-c.yaml", "SCN-004", "prevented",
-     ["wazuh", "snort", "opnsense"], ["wazuh", "snort", "opnsense"]),
+    # SCN-004 went to 0.2.0 when the SIEM alert became assertion A04 (a second wazuh source).
+    ("SCN-004-attempted-exfiltration-lab-c.yaml", "SCN-004", "0.2.0", "prevented",
+     ["wazuh", "snort", "opnsense"], ["wazuh", "snort", "opnsense", "wazuh"]),
 ])
-def test_committed_manifests_load_without_writes(filename, scenario_id, outcome, sources, assertion_sources):
+def test_committed_manifests_load_without_writes(filename, scenario_id, version, outcome, sources, assertion_sources):
     path = REPO / "scenarios" / filename
     before = path.read_bytes()
     manifest = load_scenario(path)
     assert manifest.id == scenario_id
-    assert manifest.version == "0.1.0"
+    assert manifest.version == version
     assert manifest.status == "draft"
     assert manifest.expected_outcome == outcome
     assert list(manifest.expected_sources) == sources

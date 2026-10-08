@@ -1,0 +1,53 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "lab-c-sanitized",
+  "files": [
+    {
+      "path": "sysmon3-archive.json",
+      "source_ref": "labc-sysmon3-be283230-l44489",
+      "display_label": "Lab C sender (Sysmon 3)",
+      "parser": "wazuh-sysmon3-archive-v1",
+      "sha256": "efdfc698fe6426db360432f6686ca4e76db5c2e3ea246fd1ce7229518d7e61df",
+      "context": {
+        "ingested_at": "2026-10-07T17:13:19Z",
+        "collection_mode": "direct"
+      }
+    },
+    {
+      "path": "wazuh-snort-alert.json",
+      "source_ref": "labc-wazuh-snort-be283230-l2078",
+      "display_label": "Lab C Wazuh alert 130110 (tu alert Snort)",
+      "parser": "wazuh-snort-alert-v1",
+      "sha256": "5902b349b432ee70f3794d3cf769bdd9950ad22986b43c53a77101c545b78315",
+      "context": {
+        "ingested_at": "2026-10-07T17:13:19Z",
+        "collection_mode": "direct"
+      }
+    },
+    {
+      "path": "snort-alert.jsonl",
+      "source_ref": "labc-snort-be283230",
+      "display_label": "Lab C Snort 3 (user segment)",
+      "parser": "snort3-alert-json-v1",
+      "sha256": "43cc09d57338194335cc20c47917f5db49cd5062388a99416add8f3aa4c66fc8",
+      "context": {
+        "ingested_at": "2026-10-07T17:13:10Z",
+        "sensor_id": "labc-snort-user",
+        "deployment_mode": "ids"
+      }
+    },
+    {
+      "path": "filterlog.log",
+      "source_ref": "labc-opnsense-be283230",
+      "display_label": "Lab C OPNsense filterlog",
+      "parser": "opnsense-filterlog-bsd-v1",
+      "sha256": "52ad0824c1c4447aca7dcd6edf409a49c5296207af5953312ef699705cbe79d3",
+      "context": {
+        "ingested_at": "2026-10-07T17:13:10Z",
+        "sensor_id": "labc-opnsense",
+        "source_year": 2026,
+        "source_utc_offset": "+00:00"
+      }
+    }
+  ]
+}

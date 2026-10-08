@@ -43,7 +43,16 @@ def parse(text):
     return datetime.fromisoformat(head + "." + frac[:6].ljust(6, "0"))
 
 
-@pytest.mark.parametrize("round_name", ["block", "sensor-down"])
+PARSERS = {
+    # The three sensor sources; `block-siem` adds the manager's own alert for the Snort line.
+    "block": ["opnsense-filterlog-bsd-v1", "snort3-alert-json-v1", "wazuh-sysmon3-archive-v1"],
+    "sensor-down": ["opnsense-filterlog-bsd-v1", "wazuh-sysmon3-archive-v1"],
+    "block-siem": ["opnsense-filterlog-bsd-v1", "snort3-alert-json-v1", "wazuh-snort-alert-v1",
+                   "wazuh-sysmon3-archive-v1"],
+}
+
+
+@pytest.mark.parametrize("round_name", sorted(PARSERS))
 def test_inputs_hashes_match_bytes_and_no_lab_identifier_survives(round_name):
     bundle = FIXTURE / round_name
     inputs = json.loads((bundle / "inputs.json").read_bytes())
@@ -51,21 +60,23 @@ def test_inputs_hashes_match_bytes_and_no_lab_identifier_survives(round_name):
         assert sha256((bundle / entry["path"]).read_bytes()).hexdigest() == entry["sha256"], entry["path"]
     for path in bundle.iterdir():
         assert LAB_IDENTIFIERS.search(path.read_bytes()) is None, path.name
-    parsers = sorted(entry["parser"] for entry in inputs["files"])
-    expected = ["opnsense-filterlog-bsd-v1", "snort3-alert-json-v1", "wazuh-sysmon3-archive-v1"]
-    assert parsers == (expected if round_name == "block" else [p for p in expected if not p.startswith("snort")])
+    assert sorted(entry["parser"] for entry in inputs["files"]) == PARSERS[round_name]
 
 
-def test_block_round_derivative_is_prevented_with_witnesses_on_the_sysmon_record():
+def test_block_round_keeps_its_three_sensor_witnesses_but_cannot_confirm_the_siem_alert():
+    # This round was collected before the manager's alert was packaged, so under scenario 0.2.0
+    # A04 has nothing to read. The three sensor assertions are unchanged; the verdict is not.
     result, report = validate(FIXTURE / "block")
-    assert result.returncode == 0, result.stderr
-    assert report["evaluation"]["final_status"] == "Prevented"
+    assert report is not None and result.returncode == 3, result.stderr
+    got = outcomes(report)
+    assert [got[key][0] for key in ("SCN-004-A01", "SCN-004-A02", "SCN-004-A03")] == ["satisfied"] * 3
+    assert got["SCN-004-A04"] == ("inconclusive", "collection_not_confirmed")
+    assert report["evaluation"]["final_status"] == "Inconclusive"
     assert report["counts"] == {"parsed": 3, "referenced": 3, "skipped": 0}
-    assert all(outcome == "satisfied" for outcome, _ in outcomes(report).values())
     by_ref = {e["raw_event_ref"]: e["event_id"] for e in report["evaluation"]["evidence_index"]}
     anchor = next(event_id for ref, event_id in by_ref.items() if ref.startswith("labc-sysmon3"))
     for assertion in report["evaluation"]["assertions"]:
-        if assertion["role"] != "telemetry":
+        if assertion["role"] != "telemetry" and assertion["witness_pairs"]:
             assert [p["anchor_event_id"] for p in assertion["witness_pairs"]] == [anchor]
     events = {e["source_type"]: e for e in report["timeline"]["events"]}
     assert events["opnsense"]["event_action"] == "blocked" and events["opnsense"]["rule_id"] == LABEL
@@ -73,11 +84,31 @@ def test_block_round_derivative_is_prevented_with_witnesses_on_the_sysmon_record
     assert events["wazuh"]["event_provider"] == "Microsoft-Windows-Sysmon"
 
 
+def test_siem_round_derivative_is_prevented_with_all_four_witnesses():
+    result, report = validate(FIXTURE / "block-siem")
+    assert result.returncode == 0, result.stderr
+    assert report["evaluation"]["final_status"] == "Prevented"
+    assert report["counts"] == {"parsed": 4, "referenced": 4, "skipped": 0}
+    assert all(outcome == "satisfied" for outcome, _ in outcomes(report).values())
+    events = report["timeline"]["events"]
+    by_provider = {(e["source_type"], e["event_provider"]): e for e in events}
+    assert len(by_provider) == len(events) == 4
+    endpoint = by_provider[("wazuh", "Microsoft-Windows-Sysmon")]
+    sensor_alert, siem_alert = by_provider[("snort", "snort")], by_provider[("wazuh", "snort")]
+    # Two records of the same detection, kept apart: different evidence, different parser,
+    # and the SIEM copy carries the sensor's own time, not the manager's receive time.
+    assert sensor_alert["event_id"] != siem_alert["event_id"] != endpoint["event_id"]
+    assert siem_alert["timestamp"] == sensor_alert["timestamp"]
+    assert siem_alert["rule_id"] == "130110" and siem_alert["signature_id"] == "1000010"
+    assert sensor_alert["rule_id"] is None and sensor_alert["signature_id"] == "1000010"
+
+
 def test_round_without_the_ids_alert_is_inconclusive_not_prevented():
     result, report = validate(FIXTURE / "sensor-down")
     assert report is not None and result.returncode == 3, result.stderr
     got = outcomes(report)
-    assert got["SCN-004-A02"] == ("inconclusive", "collection_not_confirmed")
+    # No Snort alert means no Wazuh alert for it either, so both detection assertions stay open.
+    assert got["SCN-004-A02"] == got["SCN-004-A04"] == ("inconclusive", "collection_not_confirmed")
     assert got["SCN-004-A01"][0] == got["SCN-004-A03"][0] == "satisfied"
     assert report["evaluation"]["final_status"] == "Inconclusive"
 

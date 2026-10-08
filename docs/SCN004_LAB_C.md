@@ -20,11 +20,12 @@ assertion đã ghi, nên một profile Lab C không thể trỏ A02 sang `snort`
 `opnsense`. Test `test_scn002_profile_cannot_be_rebound_to_lab_c_sources` ghi lại điều
 này. Sửa SCN-002 thì đổi ground truth của lab A, nên Lab C có manifest riêng.
 
-SCN-004 chưa có assertion tương ứng A04 của SCN-002 (Wazuh ghi alert sinh từ alert
-IDS). Parser cho alert Wazuh 130110 sinh từ Snort đã có
-(`wazuh-snort-alert-v1`, [tài liệu](WAZUH_SNORT_ALERT.md)) nhưng **chưa assertion nào
-dùng**: thêm assertion là đổi ground truth, phải được chủ dự án duyệt trước. Bản ghi
-alert đó vẫn được thu cùng mỗi lượt chạy để bổ sung sau.
+Từ **0.2.0**, SCN-004 có A04 tương ứng A04 của SCN-002: Wazuh ghi alert của chính nó
+(rule `130110`) cho alert Snort của cùng luồng, đọc bằng `wazuh-snort-alert-v1`
+([tài liệu](WAZUH_SNORT_ALERT.md)). Thêm assertion là đổi ground truth nên phải được
+duyệt trước; chủ dự án duyệt ngày 2026-10-08. Bản ghi alert đã được thu cùng mỗi lượt
+từ trước khi có assertion, nên bằng chứng cũ đánh giá lại được mà không phải dựng lại
+lab.
 
 ## 2. Assertion, nguồn và parser
 
@@ -33,6 +34,7 @@ alert đó vẫn được thu cùng mỗi lượt chạy để bổ sung sau.
 | A01 | telemetry | Sysmon Event 3 trong `archives.json` của Wazuh manager | `wazuh-sysmon3-archive-v1` |
 | A02 | detection | `alert_json` của Snort 3 trên sensor | `snort3-alert-json-v1` |
 | A03 | prevention | `filterlog` của OPNsense qua syslog BSD | `opnsense-filterlog-bsd-v1` |
+| A04 | detection | alert `130110` trong `alerts.json` của Wazuh manager, sinh từ alert Snort | `wazuh-snort-alert-v1` |
 
 ## 3. Bindings
 
@@ -105,8 +107,8 @@ Cấu hình Sysmon tối thiểu:
    - dòng `alert_json` sid 1000010 trên sensor;
    - dòng `filterlog` có đúng tuple;
    - bản ghi Sysmon 3 trong `archives.json`;
-   - alert Wazuh 130110 của cùng luồng (để dành cho A04 sau này).
-4. Đóng gói ngoài Git: `inputs.json` gồm ba file và parser key, `context.json` gồm
+   - alert Wazuh 130110 của cùng luồng (A04 từ scenario 0.2.0).
+4. Đóng gói ngoài Git: `inputs.json` gồm các file và parser key, `context.json` gồm
    `run_id`, cửa sổ từ 1 phút trước tới 2 phút sau phút gửi, và bốn binding.
 5. Chạy:
 
@@ -139,9 +141,9 @@ Phạm vi đã kiểm, không suy rộng ra ngoài:
   OPNsense đọc được IPv6 nhưng chưa có lượt live IPv6), chế độ IPS/inline của Snort
   (sensor chạy thụ động nên `event_action` của Snort luôn là `allow`), nhiều máy gửi,
   nhiều sensor.
-- **Đường SIEM chưa hỗ trợ**: alert Wazuh sinh từ Snort có parser nhưng chưa assertion
-  nào dùng; alert Wazuh sinh từ log OPNsense thì chưa có parser. Bằng chứng chặn lấy từ
-  log OPNsense trực tiếp.
+- **Đường SIEM**: alert Wazuh sinh từ Snort đã có parser và assertion A04 (scenario
+  0.2.0). Alert Wazuh sinh từ log OPNsense thì **chưa có parser**, nên bằng chứng chặn
+  vẫn lấy từ log OPNsense trực tiếp, không qua SIEM.
 - **Giờ**: OPNsense chỉ ghi tới giây, nên độ lệch so với giờ gửi quan sát được trong
   khoảng −0,6…+0,7 s; cửa sổ tương quan ±2 s là số đo, không nới để ép khớp.
 - Đích là địa chỉ tài liệu (RFC 5737) nên lượt Block không gửi gì ra ngoài lab; kịch
@@ -162,8 +164,9 @@ Lượt `8541573e`: cả ba assertion `satisfied`, witness của A02 và A03 cù
 ghi Sysmon. So với giờ gửi theo đồng hồ máy gửi: Sysmon +0,404 s, Snort −0,563 s,
 OPNsense −0,427 s (giờ chặn tới giây). Trước khi gửi, đồng hồ máy gửi lệch −0,59 s so
 với firewall (w32tm); sensor lệch dưới 1 ms. Mọi nguồn nằm trong ±2 s quanh neo. Cùng
-lượt, Wazuh sinh alert 130110 từ alert Snort; bản ghi được giữ cho assertion SIEM sau
-này, chưa nằm trong bundle.
+lượt, Wazuh sinh alert 130110 từ alert Snort; bản ghi này nằm ngoài bundle của lượt vì
+lượt chạy dưới scenario 0.1.0, nhưng đã được thu và sau đó dùng cho A04 khi đánh giá
+lại dưới 0.2.0.
 
 Lượt `509edcce`: Snort đã ngừng bắt gói từ trước đó, nên không có alert. A01 và A03
 `satisfied`, A02 `inconclusive` với `collection_not_confirmed`. Engine không kết luận
@@ -224,25 +227,32 @@ Windows (máy gửi)            sensor (Linux)                         Wazuh (Do
                   │
                   └─ mirror vùng người dùng ──▶ Snort ──▶ alert_json.txt ──────────▶ bundle: A02
                                                     │
-                                                    └─ agent ──▶ alerts.json (rule 130110)
-                                                                  (thu nhưng chưa vào bundle)
+                                                    └─ agent ──▶ alerts.json (rule 130110) ──▶ bundle: A04
 ```
 
 Kịch bản, profile và fingerprint dùng cho cả đợt:
 
 | Hạng mục | Giá trị |
 | --- | --- |
-| Scenario | `SCN-004`, version `0.1.0`, fingerprint `778619bc836fc26938ff75749f0ec01aeabd0735276c5f9dadd9c07758932d47` |
-| Profile | `scn004-udp-marker-prevention`, version `0.1.0`, fingerprint `f2e83d10…` (đầy đủ trong mỗi report) |
+| Scenario của đợt 16 lượt | `SCN-004` `0.1.0`, fingerprint `778619bc836fc26938ff75749f0ec01aeabd0735276c5f9dadd9c07758932d47` |
+| Scenario hiện tại (thêm A04) | `SCN-004` `0.2.0`, fingerprint `8de00c64cfe8b7b7aff54e81a01cd937b4f9e09dab3083b5ec123a95a72e2185` |
+| Profile của đợt 16 lượt | `scn004-udp-marker-prevention` `0.1.0`, fingerprint `f2e83d10…` (đầy đủ trong mỗi report) |
+| Profile hiện tại | `scn004-udp-marker-prevention` `0.2.0`, fingerprint `b529215d02eaba678729a849dc37e5647cedbcb0147727c022e782e2ead8ee3e` |
 | Engine semantics | `0.1.0` |
 | Bundle schema | `0.1.0` |
-| Assertion | A01 telemetry, A02 detection, A03 prevention; **không** có A04 |
+| Assertion | `0.1.0`: A01 telemetry, A02 detection, A03 prevention. `0.2.0` thêm A04 detection (alert SIEM) |
 | Cửa sổ tương quan | ±2 s, join theo bộ 4 trường (IP và cổng nguồn/đích) |
 | Cửa sổ bundle | từ 1 phút trước tới 2 phút sau phút gửi |
 
 `scope_fingerprint` và `context_fingerprint` khác nhau giữa các lượt (mỗi lượt có cửa
-sổ và binding riêng); ba fingerprint ở trên giống nhau ở mọi lượt, nên mọi kết quả
-trong mục 11 so sánh được với nhau.
+sổ và binding riêng); fingerprint scenario, profile và engine giống nhau ở mọi lượt của
+đợt, nên mọi kết quả trong mục 11 so sánh được với nhau.
+
+Mỗi report ghi fingerprint của scenario và profile đã dùng, và `aegis compare` đòi hai
+lượt phải trùng cả hai. Vì vậy report của đợt 16 lượt (0.1.0) **không** so sánh được
+với report sinh dưới 0.2.0: đó là hai ground truth khác nhau, không phải hai lần đo
+cùng một thứ. Kết quả đánh giá lại bằng chứng cũ dưới 0.2.0 nằm ở
+[SCN004_LAB_C_ACCEPTANCE.md](SCN004_LAB_C_ACCEPTANCE.md).
 
 ## 11. Đợt nghiệm thu: 16 lượt live (2026-10-07, 16:03–17:58 UTC)
 

@@ -3,9 +3,13 @@
 Two bundles derived from the **real** SCN-004 rounds on Lab C of 2026-10-07, whose
 verdicts are recorded in `docs/SCN004_LAB_C.md` (section 9):
 
-- `block/` — run `8541573e`, three sources, `Prevented`;
+- `block/` — run `8541573e`, three sources. It was `Prevented` under scenario 0.1.0;
+  under 0.2.0 the same bytes are `Inconclusive`, because that round predates the
+  collection of the manager's own alert and A04 therefore has nothing to read;
 - `sensor-down/` — run `509edcce`, sent while Snort had stopped capturing, two
-  sources, `Inconclusive` (A02 `collection_not_confirmed`).
+  sources, `Inconclusive` (A02 and A04 `collection_not_confirmed`);
+- `block-siem/` — run `be283230`, **four** sources including the Wazuh alert 130110
+  raised from the Snort line, `Prevented` under scenario 0.2.0.
 
 The originals stay outside Git; their SHA-256 below let anyone holding the private
 evidence verify the lineage. These bundles replay the real source shapes through the
@@ -17,6 +21,8 @@ derivatives still produce the recorded verdicts; it is not itself proof about th
 | Original | Replacement | Why |
 | --- | --- | --- |
 | Wazuh agent name of the sender | `lab-sender` | alias |
+| Wazuh agent name of the sensor (`block-siem`) | `lab-sensor` | alias, as in the parser fixture |
+| sensor address (`block-siem`) | `192.0.2.30` | RFC 5737, as in the parser fixture |
 | sender computer name (upper case, then mixed case) | `LAB-SENDER`, `Lab-Sender` | alias |
 | Windows account | `operator` | identity omitted |
 | manager name | `lab-manager` | alias |
@@ -38,6 +44,18 @@ with the derivative hashes, `environment_id: lab-c-sanitized` and the aliased se
 | block | `filterlog.log` | `743a8ee646c4a919b26315fb109a41cdac78c8f5c7fd30ea164245fb112ba77e` | `b2e31b408850d919ae73831b314268f2fe1551525e9d171ac204f527d98f7683` | 191 → 183 |
 | sensor-down | `sysmon3-archive.json` | `e4aa27ce10b5ae0db800202f39361a1ef808559314a897abcbd258ca26d10e7a` | `1261dfbef8cc68873e4c0f9606e7a551dfeeaf00337a7a428d176cd780d6a0a0` | 3377 → 3432 |
 | sensor-down | `filterlog.log` | `79386375dbae682f5d9cf55b903ea283ec6529357e00af37f1aa4a47777d3e88` | `961d89cf6c3845ed663017bc7b21e404b84855d7821c99746c2c1e922bb9a0b6` | 191 → 183 |
+| block-siem | `sysmon3-archive.json` | `295220de20d86183…` | `efdfc698fe6426db…` | 3378 → 3433 |
+| block-siem | `wazuh-snort-alert.json` | `a950cee2c5ef2182…` | `5902b349b432ee70…` | 1177 → 1169 |
+| block-siem | `snort-alert.jsonl` | `05055a23696a9e4d…` | `43cc09d573381943…` | 387 → 386 |
+| block-siem | `filterlog.log` | `881a1d1164624ea5…` | `52ad0824c1c4447a…` | 48811 → 184 |
+
+For `block-siem` the originals are the four files of that round's bundle, whose first
+bytes also appear in the lineage table of
+[`docs/SCN004_LAB_C_ACCEPTANCE.md`](../../../../docs/SCN004_LAB_C_ACCEPTANCE.md); the
+full hashes are with the private evidence. Its `filterlog.log` keeps **1 of the 212
+lines** in that round's window — the one carrying the probe's own four-tuple — as the
+other two rounds do; everything kept is byte for byte the original apart from the
+substitutions above.
 
 Each original is one exact line taken from a source file, recorded with its line
 number and the file's SHA-256 at collection:

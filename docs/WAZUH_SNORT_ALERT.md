@@ -14,9 +14,11 @@ chứng khác nhau của cùng một alert — alert tại nguồn, và alert SI
 nó — nên có hai evidence ID khác nhau. Không đếm cả hai như hai sensor độc lập
 cho cùng một assertion.
 
-Hiện **chưa có scenario nào dùng** parser này: assertion cảnh báo SIEM của
-SCN-004 (A04) để lại cho giai đoạn sau, xem `docs/SCN004_LAB_C.md`. Profile hiện
-tại của SCN-004 không đổi.
+Từ scenario `SCN-004` **0.2.0**, parser này phục vụ assertion **A04** (vai trò
+detection, nguồn `wazuh`, rule Wazuh `130110`, SID Snort `1000010`), xem
+[SCN004_LAB_C.md](SCN004_LAB_C.md). A02 và A04 là hai assertion riêng trên hai bản
+ghi riêng: thiếu A04 trong khi A02 đạt nghĩa là **sensor phát hiện nhưng SIEM không
+nhận được**, chứ không phải không phát hiện.
 
 Offline, không thu thập, không đổi cấu hình, không kết luận prevention.
 
