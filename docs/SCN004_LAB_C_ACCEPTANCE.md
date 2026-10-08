@@ -4,6 +4,14 @@ Hồ sơ của một đợt nghiệm thu: mục tiêu, kết quả kỳ vọng, 
 tới bằng chứng của từng lượt. Kịch bản, cấu hình đã chốt, giới hạn và danh sách phiên
 bản nằm ở [SCN004_LAB_C.md](SCN004_LAB_C.md); quy trình chạy lại ở
 [LABC_RUNBOOK.md](LABC_RUNBOOK.md).
+Bản ghi duyệt A04 sau audit handoff và pins của snapshot được review nằm ở
+[SCN004_A04_APPROVAL_AND_PINS.md](SCN004_A04_APPROVAL_AND_PINS.md).
+
+Bảng mục tiêu chính ở mục 1 và bảng 1–3 ở mục 2 ghi **16 lượt dưới scenario/profile
+`0.1.0`** (A01–A03).
+Mục 3.1 ghi riêng hai lần đánh giá lại bằng chứng cũ và **năm lượt live dưới
+`0.2.0`** ngày 2026-10-08: hai lượt đầu, ba lượt bổ sung sau phê duyệt.
+Lần đánh giá lại không tăng số lượt live.
 
 Bản gốc của bằng chứng (log thô, bundle, report có địa chỉ và tên máy thật) **giữ ngoài
 Git**. Trong repo chỉ có hồ sơ này, ba bundle đã sanitize và các fixture parser. Mọi
@@ -25,7 +33,12 @@ gốc đối chiếu được từng dòng.
 | Mỗi lượt độc lập, không dùng lại log | mỗi lượt có `run_id`, cửa sổ, binding, report, exit code riêng | 16/16 lượt; công cụ tự từ chối lượt có cửa sổ chứa gói của lượt khác | bảng 1 (cổng nguồn khác nhau từng lượt), bảng 2 (evidence ID khác nhau từng lượt) | Đạt |
 | Chạy lặp qua khởi động lại máy ảo | lượt sau khi khởi động lại vẫn đạt | 11 lượt phiên 1, khởi động lại sensor và máy Wazuh, 2 lượt phiên 2 đều `Prevented` | [SCN004_LAB_C.md](SCN004_LAB_C.md) mục 11 | Đạt |
 | Capture filterlog đọc hết; dòng hỏng phải báo ra | đọc toàn bộ từng dòng; có dòng hỏng thì báo capture không đầy đủ, giữ nguyên bản gốc | capture của đợt: 22.401/22.401 dòng đọc được, 0 skipped; capture trước đó bị từ chối tại dòng 1707, hồ sơ ghi đủ 2 dòng hỏng | mục 6 | Đạt |
-| Alert SIEM thành một assertion được duyệt | A04 trong scenario, có bằng chứng của bước SIEM trong report | scenario `0.2.0` có A04; hai lượt **live** ngày 8-10 (`b51324ef` 4/4 `Prevented`; `9549c96d` agent Wazuh dừng → `Inconclusive`) và hai lượt cũ đánh giá lại cho cùng kết quả | mục 3.1 | Đạt |
+
+Mục tiêu bổ sung dưới `0.2.0` được ghi riêng:
+
+| Mục tiêu | Kết quả kỳ vọng | Kết quả thực tế | Bằng chứng | Trạng thái |
+| --- | --- | --- | --- | --- |
+| Alert SIEM thành một assertion được duyệt | A04 trong scenario, có bằng chứng của bước SIEM trong report | scenario `0.2.0` có A04; hai lượt **live** ngày 8-10 (`b51324ef` 4/4 `Prevented`; `9549c96d` agent Wazuh dừng → `Inconclusive`) và hai lượt cũ đánh giá lại cho cùng kết quả; chủ dự án duyệt snapshot sau audit handoff | mục 3.1; [bản ghi duyệt và pins](SCN004_A04_APPROVAL_AND_PINS.md) | Đạt trong phạm vi đã đo; gate còn lại ở mục 7 |
 
 **16/16 lượt nghiệm thu đúng kết quả kỳ vọng.** Một lượt trước đó bị loại vì lỗi quy
 trình (chạy thu bằng chứng trước khi gửi probe), được ghi lại là không hợp lệ và không
@@ -139,11 +152,13 @@ việc tách bạch; đợt này chứng minh được cả hai chiều.
 
 ### 3.1 A04 — alert SIEM thành assertion (scenario 0.2.0)
 
-Người phụ trách Lab C đề xuất bổ sung assertion ngày **2026-10-08**; **chủ dự án đã
-duyệt** A04 cùng scenario và profile 0.2.0 trong cùng ngày, sau khi audit gói bàn giao
-(checklist của chủ dự án ngày 08-10-2026). Vì thêm assertion là đổi ground
-truth nên scenario lên `0.2.0` (fingerprint `8de00c64cfe8…`, trước là `778619bc836f…`)
-và profile lên `0.2.0` (fingerprint `b529215d02ea…`). A04 có vai trò `detection`, nguồn
+Thêm assertion là đổi ground truth: scenario lên `0.2.0` (fingerprint
+`8de00c64cfe8…`, trước là `778619bc836f…`) và profile lên `0.2.0` (fingerprint
+`b529215d02ea…`). Chủ dự án duyệt snapshot này ngày **2026-10-08**, sau audit bộ
+handoff và sau hai lượt live dưới đây; không hồi tố thành phê duyệt trước những lần
+đo. Quyết định và pins đầy đủ ở
+[SCN004_A04_APPROVAL_AND_PINS.md](SCN004_A04_APPROVAL_AND_PINS.md).
+A04 có vai trò `detection`, nguồn
 `wazuh`, khớp `rule_id` `130110` của Wazuh cùng `signature_id` `1000010` của Snort, neo
 vào A01 với cùng cửa sổ ±2 s và cùng bộ 4 trường như A02.
 
@@ -153,7 +168,7 @@ trạng bằng chứng, báo cáo lưu riêng ở `runs/<run_id>/reeval-0.2.0/` 
 
 | Lượt | Hoàn cảnh | A01 | A02 | A03 | A04 | Kết quả 0.2.0 | Kết quả cũ 0.1.0 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `be283230` | đường SIEM bình thường | satisfied | satisfied | satisfied | **satisfied** | `Prevented`, exit 0, 4 parsed / 4 referenced / 0 skipped | `Prevented` |
+| `be283230` | đường SIEM bình thường | satisfied | satisfied | satisfied | **satisfied** | `Prevented`, exit 0, 215 parsed / 4 referenced / 0 skipped | `Prevented` |
 | `ab842ef4` | agent Wazuh trên sensor đã dừng | satisfied | satisfied | satisfied | **inconclusive** (`collection_not_confirmed`) | `Inconclusive`, exit 3 | `Prevented` |
 
 Cặp này là lý do A04 tồn tại: cùng một luồng, Snort vẫn phát hiện và firewall vẫn chặn,
@@ -203,14 +218,17 @@ rule Snort `rev:1`, commit `49570ff1931e3d6952cf10e633166bcc5f1a3ba5`:
 
 Lượt khôi phục chứng minh thêm một điều: alert SIEM của nó là alert **mới**, sinh sau
 +0,687 s cho đúng gói vừa gửi, chứ không phải agent đọc bù alert cũ sau khi chạy lại.
-Trạng thái dịch vụ lúc thu khớp tình huống ở cả ba lượt; biên nhận ghi người chạy và
+Trạng thái dịch vụ lúc thu khớp tình huống ở cả ba lượt; biên nhận ghi người chạy; provenance và campaign ghi
 commit. Lượt `7b409794` được đóng gói hai lần, lần đầu chuyển thành
 `raw-superseded-20261008T172202Z` và dòng cũ trong `campaign.csv` bị gỡ — ghi trong
 `attempts.log` của lượt.
 
-**Điều kiện độc lập chưa đạt.** Người chạy ba lượt này cũng là người chạy đợt 16 lượt
-trước đó, nên chúng là lượt live hợp lệ dưới 0.2.0 nhưng **không** thay thế yêu cầu "một
-người vận hành khác chạy lại". Gate đó vẫn mở.
+**Người chạy và quyết định nghiệm thu.** Ba lượt này do `vhuy811` chạy, cùng
+người chạy đợt cũ; chúng không tự chứng minh có người vận hành khác. Ngày
+2026-10-09, chủ dự án xác nhận lượt người khác đã chạy và chốt nghiệm thu kỹ
+thuật. Lượt đó được ghi nhận theo xác nhận của chủ dự án, chưa có raw/report
+để kiểm tra trực tiếp; không gắn nhãn `lab_verified` cho các report ở trên.
+Quyết định ở [SCN004_A04_APPROVAL_AND_PINS.md](SCN004_A04_APPROVAL_AND_PINS.md).
 
 Ảnh chụp toàn phiên (12 ảnh, kèm bảng chú thích từng ảnh) nằm trong gói bàn giao bổ
 sung, ngoài Git.
@@ -221,10 +239,11 @@ endpoint có provider `Microsoft-Windows-Sysmon`, bản ghi SIEM có provider `s
 evidence ID khác nhau, và bản SIEM giữ đúng giờ của dòng alert trên sensor
 (`17:11:29.519832Z`) chứ không phải giờ manager nhận.
 
-## 4. Kiểm dashboard với dữ liệu thật của đợt
+## 4. Kiểm dashboard với dữ liệu thật của đợt 0.1.0
 
 Chạy dashboard chỉ đọc với sáu report của đợt (năm lượt và một bản so sánh) cùng thư
-mục manifest. Quan sát:
+mục manifest `0.1.0` (ba assertion). Đây là kiểm dashboard lịch sử, không phải report
+đánh giá lại `0.2.0` ở mục 3.1. Quan sát:
 
 - trang Tổng quan: SCN-004 nằm trong bảng kịch bản với kết quả gần nhất `Prevented`,
   3/3 assertion đạt, 3 evidence và cột collection assurance ghi `caller-attested ×1,
@@ -248,6 +267,24 @@ mục manifest. Quan sát:
 Dashboard không tự ý nâng trạng thái: mọi lượt đều hiện "Run binding: chưa có dữ liệu"
 vì report không khai run binding, và trạng thái tổng chỉ nói về việc có đủ dữ liệu để
 trình bày, không nói về mức an toàn của môi trường.
+
+### 4.1 Ảnh/dashboard của ba lượt bổ sung dưới 0.2.0
+
+Gói `LAB-C-ANH-VA-DASHBOARD-20261008.zip` bổ sung chín ảnh (12–20), đọc lại
+report đã lưu, không chạy probe mới. Nội dung ảnh khớp report nguồn: normal
+`7b409794` là `Prevented` 4/4 (162 parsed / 4 referenced / 0 skipped); outage
+`445b3ab2` là `Inconclusive` 3/4 (176 / 3 / 0), A04
+`collection_not_confirmed`; recovery `1b0c1a3f` là `Prevented` 4/4 (244 / 4 / 0).
+EIDs rút gọn của A04 đạt ở normal/recovery là `4a58a8983c02…` và `8c04e74f25b6…`;
+outage giữ A01 `31c132bee948…` làm mốc, không có witness SIEM cho A04. Full EIDs
+và raw hashes nằm trong report gốc ngoài Git.
+
+KPI lấy kết quả gần nhất của mỗi scenario, nên `Prevented 1 / Inconclusive 0`
+khớp recovery là report SCN-004 mới nhất; sidebar vẫn giữ nhãn outage. Các
+connector `not_configured`, engine `Unknown`, collection assurance `unknown`
+và run binding chưa có dữ liệu được ghi đúng phạm vi dashboard chỉ đọc. Ảnh
+CLI rút gọn EIDs/hashes; ảnh không thay cho report nguồn trong việc đối chiếu.
+Phần ảnh/dashboard đã được chủ dự án chốt sau audit gói này ngày 2026-10-09.
 
 ## 5. Bản gốc, bản trong repo và cách đối chiếu
 
@@ -334,6 +371,11 @@ như bước giải nén ở mục 6.2.
 
 | Việc | Trạng thái |
 | --- | --- |
-| Chủ dự án review scenario và profile trước đợt cuối | của chủ dự án; A04 đã được duyệt ngày 08-10-2026 |
-| Một người khác chạy lại theo runbook, gồm ít nhất một lượt live | chưa làm; năm lượt live dưới 0.2.0 đều do người đã chạy đợt cũ thực hiện |
+| Chủ dự án review A04, scenario và profile `0.2.0` tại snapshot handoff | **Đã duyệt ngày 2026-10-08**, sau audit handoff; [quyết định và pins](SCN004_A04_APPROVAL_AND_PINS.md), không hồi tố thời điểm trước các lượt đã đo |
+| Một người khác chạy lại theo runbook, gồm ít nhất một lượt live | chủ dự án xác nhận đã chạy và chốt ngày 2026-10-09; chưa có raw/report của lượt độc lập để xác minh trực tiếp |
 | Merge chuỗi PR theo thứ tự phụ thuộc và replay trên commit main cuối | chưa làm |
+
+Nghiệm thu kỹ thuật và ảnh/dashboard đã được chủ dự án chốt ngày 2026-10-09.
+Phần chạy độc lập được ghi nhận theo xác nhận của chủ dự án, không hồi tố thành
+bằng chứng đã được audit. Phần tích hợp cần checks/replay trên main cuối và bàn
+giao kết quả theo [LABC_RUNBOOK.md](LABC_RUNBOOK.md) mục 10.
