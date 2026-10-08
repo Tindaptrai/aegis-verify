@@ -81,7 +81,7 @@ and required context.
 | Source | Keys | Guide |
 | --- | --- | --- |
 | Wazuh, Windows | `wazuh-win4688-v2`, `wazuh-sysmon1-v1`, `wazuh-powershell4104-v1` | [4688](docs/WAZUH_FIXTURE_PARSER.md), [Sysmon 1 and PowerShell 4104](docs/WINDOWS_TELEMETRY_PARSERS.md) |
-| Wazuh, network | `wazuh-sysmon3-archive-v1` (manager archive, UDP), `wazuh-suricata-alert-v1` (Wazuh alert raised from a Suricata alert) | [Wazuh from Suricata](docs/WAZUH_SURICATA_ALERT.md) |
+| Wazuh, network | `wazuh-sysmon3-archive-v1` (manager archive, UDP), `wazuh-suricata-alert-v1` (Wazuh alert raised from a Suricata alert), `wazuh-snort-alert-v1` (Wazuh alert raised from a Snort 3 alert) | [Wazuh from Suricata](docs/WAZUH_SURICATA_ALERT.md), [Wazuh from Snort](docs/WAZUH_SNORT_ALERT.md) |
 | Suricata | `suricata-wazuh-alert-v1` (search hit), `suricata-eve-jsonl-v1` (direct EVE) | [A](docs/SURICATA_WAZUH_ALERT.md), [B](docs/SURICATA_EVE_JSONL.md) |
 | pfSense | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | [filterlog](docs/PFSENSE_FIXTURE_PARSER.md) |
 | OPNsense | `opnsense-filterlog-bsd-v1` (BSD syslog as received; IPv4 TCP/UDP/ICMP, IPv6 UDP/ICMPv6) | [filterlog](docs/OPNSENSE_FILTERLOG_PARSER.md) |

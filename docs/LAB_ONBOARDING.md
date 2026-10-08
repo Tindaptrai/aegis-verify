@@ -113,6 +113,7 @@ Bundle mẫu: `tests/fixtures/cli/scn002-lab-sanitized/` và
 | `wazuh-suricata-alert-v1` | dòng alert 86601 (Suricata) trong `alerts.json` | SCN-002 A04 |
 | `suricata-wazuh-alert-v1` | tài liệu alert Suricata trong Wazuh Indexer | dữ liệu Indexer |
 | `snort3-alert-json-v1` | file `alert_json` của Snort 3, danh sách trường đã pin | SCN-004 A02 (Lab C) |
+| `wazuh-snort-alert-v1` | dòng alert 130110 (Snort 3) trong `alerts.json` | chưa scenario nào dùng; A04 của SCN-004 để giai đoạn sau |
 | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | dòng `filterlog` của pfSense dạng syslog BSD, IPv4 TCP/UDP | SCN-002 A03, SCN-003 A02 |
 | `opnsense-filterlog-bsd-v1` | dòng `filterlog` của OPNsense dạng syslog BSD, IPv4 và IPv6 | SCN-004 A03 (Lab C) |
 | `cowrie-jsonl-v1` | file JSON của Cowrie | SCN-003 A03 |
@@ -149,7 +150,8 @@ Bảng ánh xạ trường mà kế hoạch Lab B yêu cầu nên theo tên trư
 | Windows qua Wazuh agent | **Có**: các parser `wazuh-*` như lab A | Bật `logall_json` trên manager nếu cần Sysmon 3 từ `archives.json`. Bộ SCN-001 (kit, rule mẫu `detections/wazuh/scn-001/`) dùng lại được; đổi rule ID để không trùng rule đang có. |
 | OPNsense filterlog | **Có**: `opnsense-filterlog-bsd-v1` (không dùng parser pfSense) | Gửi log từ xa dạng BSD, bộ thu ghi nguyên bản tin (`%rawmsg%`). Context như pfSense: `sensor_id`, `source_year`, `source_utc_offset`. Interface và chiều nằm trong provenance; NAT không được suy ra, xem [OPNSENSE_FILTERLOG_PARSER.md](OPNSENSE_FILTERLOG_PARSER.md). Dùng trong [SCN-004](SCN004_LAB_C.md). |
 | Snort 3 `alert_json` | **Có**: `snort3-alert-json-v1` đọc file gốc | Cấu hình logger đúng bản pin trong [SNORT3_ALERT_JSON_PARSER.md](SNORT3_ALERT_JSON_PARSER.md) và ghi vào bundle. Context: `sensor_id`, `deployment_mode` là `ids`. Thu file trên sensor, không thu bản đã qua Wazuh. Dùng trong [SCN-004](SCN004_LAB_C.md). |
-| Alert Wazuh sinh từ Snort hoặc OPNsense | **Chưa có parser** | Chỉ viết parser sau khi decoder và rule Wazuh đã được kiểm bằng mẫu thật. Thu được log thô và tạo alert đúng là hai cổng nghiệm thu khác nhau. |
+| Alert Wazuh sinh từ Snort | **Có**: `wazuh-snort-alert-v1` (chưa scenario nào dùng) | Rule Wazuh đọc `alert_json` bằng decoder `json`; parser map dòng gốc trong `full_log` và đòi `data` khớp đúng dòng đó, xem [WAZUH_SNORT_ALERT.md](WAZUH_SNORT_ALERT.md). Thu được log thô và tạo alert đúng là hai cổng nghiệm thu khác nhau: đây là cổng thứ hai, không thay cho `snort3-alert-json-v1`. |
+| Alert Wazuh sinh từ OPNsense | **Chưa có parser** | Chỉ viết parser sau khi decoder và rule Wazuh đã được kiểm bằng mẫu thật. Log OPNsense trực tiếp đã phục vụ assertion chặn của SCN-004. |
 
 Không chạy Snort cùng lúc với IDS (Suricata) tích hợp của OPNsense rồi cộng alert như
 hai bằng chứng độc lập. Snort SID và Suricata SID không tự động tương đương.
