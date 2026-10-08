@@ -373,7 +373,7 @@ như bước giải nén ở mục 6.2.
 | --- | --- |
 | Chủ dự án review A04, scenario và profile `0.2.0` tại snapshot handoff | **Đã duyệt ngày 2026-10-08**, sau audit handoff; [quyết định và pins](SCN004_A04_APPROVAL_AND_PINS.md), không hồi tố thời điểm trước các lượt đã đo |
 | Một người khác chạy lại theo runbook, gồm ít nhất một lượt live | chủ dự án xác nhận đã chạy và chốt ngày 2026-10-09; chưa có raw/report của lượt độc lập để xác minh trực tiếp |
-| Merge chuỗi PR theo thứ tự phụ thuộc và replay trên commit main cuối | chưa làm |
+| Merge chuỗi PR theo thứ tự phụ thuộc và replay trên commit main cuối | chủ dự án đã giao tích hợp ngày 2026-10-09; log checks/replay và SHA main cuối được bàn giao theo runbook mục 10 |
 
 Nghiệm thu kỹ thuật và ảnh/dashboard đã được chủ dự án chốt ngày 2026-10-09.
 Phần chạy độc lập được ghi nhận theo xác nhận của chủ dự án, không hồi tố thành
