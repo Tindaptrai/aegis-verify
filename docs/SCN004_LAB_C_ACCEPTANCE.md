@@ -6,7 +6,7 @@ bản nằm ở [SCN004_LAB_C.md](SCN004_LAB_C.md); quy trình chạy lại ở
 [LABC_RUNBOOK.md](LABC_RUNBOOK.md).
 
 Bản gốc của bằng chứng (log thô, bundle, report có địa chỉ và tên máy thật) **giữ ngoài
-Git**. Trong repo chỉ có hồ sơ này, hai bundle đã sanitize và các fixture parser. Mọi
+Git**. Trong repo chỉ có hồ sơ này, ba bundle đã sanitize và các fixture parser. Mọi
 hash dưới đây là của bản gốc hoặc của file trong bundle gốc, nên người review giữ bản
 gốc đối chiếu được từng dòng.
 
@@ -25,7 +25,7 @@ gốc đối chiếu được từng dòng.
 | Mỗi lượt độc lập, không dùng lại log | mỗi lượt có `run_id`, cửa sổ, binding, report, exit code riêng | 16/16 lượt; công cụ tự từ chối lượt có cửa sổ chứa gói của lượt khác | bảng 1 (cổng nguồn khác nhau từng lượt), bảng 2 (evidence ID khác nhau từng lượt) | Đạt |
 | Chạy lặp qua khởi động lại máy ảo | lượt sau khi khởi động lại vẫn đạt | 11 lượt phiên 1, khởi động lại sensor và máy Wazuh, 2 lượt phiên 2 đều `Prevented` | [SCN004_LAB_C.md](SCN004_LAB_C.md) mục 11 | Đạt |
 | Capture filterlog đọc hết; dòng hỏng phải báo ra | đọc toàn bộ từng dòng; có dòng hỏng thì báo capture không đầy đủ, giữ nguyên bản gốc | capture của đợt: 22.401/22.401 dòng đọc được, 0 skipped; capture trước đó bị từ chối tại dòng 1707, hồ sơ ghi đủ 2 dòng hỏng | mục 6 | Đạt |
-| Alert SIEM thành một assertion được duyệt | A04 trong scenario, có bằng chứng của bước SIEM trong report | scenario `0.2.0` có A04; hai lượt **live** ngày 8-10 (`b51324ef` 4/4 `Prevented`; `9549c96d` agent Wazuh dừng → `Inconclusive`) và hai lượt cũ đánh giá lại cho cùng kết quả | mục 3.1 | Đạt |
+| Alert SIEM thành một assertion được duyệt | A04 trong scenario, có bằng chứng của bước SIEM trong report | scenario `0.2.0` có A04; hai lượt **live** ngày 8-10 (`b51324ef` 4/4 `Prevented`; `9549c96d` agent Wazuh dừng → `Inconclusive`) và hai lượt cũ đánh giá lại cho cùng kết quả | mục 3.1 | Có bằng chứng, chờ chủ dự án duyệt |
 
 **16/16 lượt nghiệm thu đúng kết quả kỳ vọng.** Một lượt trước đó bị loại vì lỗi quy
 trình (chạy thu bằng chứng trước khi gửi probe), được ghi lại là không hợp lệ và không
@@ -139,7 +139,9 @@ việc tách bạch; đợt này chứng minh được cả hai chiều.
 
 ### 3.1 A04 — alert SIEM thành assertion (scenario 0.2.0)
 
-Chủ dự án duyệt bổ sung assertion ngày **2026-10-08**. Vì thêm assertion là đổi ground
+Người phụ trách Lab C quyết định bổ sung assertion ngày **2026-10-08**; **chủ dự án
+chưa duyệt** và xác nhận của người chạy lab không thay thế bước đó, nên A04 còn chờ
+duyệt dù đã có bằng chứng. Vì thêm assertion là đổi ground
 truth nên scenario lên `0.2.0` (fingerprint `8de00c64cfe8…`, trước là `778619bc836f…`)
 và profile lên `0.2.0` (fingerprint `b529215d02ea…`). A04 có vai trò `detection`, nguồn
 `wazuh`, khớp `rule_id` `130110` của Wazuh cùng `signature_id` `1000010` của Snort, neo
@@ -308,6 +310,6 @@ như bước giải nén ở mục 6.2.
 
 | Việc | Trạng thái |
 | --- | --- |
-| Chủ dự án review scenario và profile trước đợt cuối | của chủ dự án |
+| Chủ dự án duyệt assertion A04 và review scenario, profile | của chủ dự án; hồ sơ đề nghị duyệt đã kèm trong gói bàn giao |
 | Một người khác chạy lại theo runbook, gồm ít nhất một lượt live | chưa làm |
 | Merge chuỗi PR theo thứ tự phụ thuộc và replay trên commit main cuối | chưa làm |
