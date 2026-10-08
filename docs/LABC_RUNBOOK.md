@@ -160,3 +160,4 @@ khác profile, khác binding hoặc khác độ dài cửa sổ.
 | Mất log firewall khoảng một phút sau khi máy thu log khởi động lại | bên gửi syslog thử lại sau 60 s rồi gửi bù các bản tin còn hàng đợi với mốc giờ gốc | đợi ≥ 70 s sau khi máy thu log khởi động lại rồi mới gửi probe |
 | Đo lệch đồng hồ ra số vô lý (hàng tỉ giây) | hỏi NTP quá dày, bị giới hạn tần suất, gói Kiss-o'-Death bị lấy nhầm | hỏi thưa, bỏ gói có stratum 0 |
 | `collect` báo cửa sổ của lượt chứa gói của lượt khác | hai lượt cách nhau dưới 150 s | ghi lượt đó là không hợp lệ, chạy lượt mới |
+| Parser từ chối một dòng của capture filterlog | dòng bị nối hoặc bị cắt ở bản ghi gốc (syslog UDP mất ký tự xuống dòng, hoặc file có khoảng byte NUL do máy dừng không sạch) | **không** xóa dòng; báo capture không đầy đủ kể từ dòng đó, giữ nguyên bản gốc, ghi lại mọi bản dẫn xuất kèm hash nguồn và hash kết quả; xem [SCN004_LAB_C_ACCEPTANCE.md](SCN004_LAB_C_ACCEPTANCE.md) mục 6 |
