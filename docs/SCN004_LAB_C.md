@@ -23,7 +23,8 @@ này. Sửa SCN-002 thì đổi ground truth của lab A, nên Lab C có manifes
 Từ **0.2.0**, SCN-004 có A04 tương ứng A04 của SCN-002: Wazuh ghi alert của chính nó
 (rule `130110`) cho alert Snort của cùng luồng, đọc bằng `wazuh-snort-alert-v1`
 ([tài liệu](WAZUH_SNORT_ALERT.md)). Thêm assertion là đổi ground truth nên phải được
-duyệt trước; chủ dự án duyệt ngày 2026-10-08. Bản ghi alert đã được thu cùng mỗi lượt
+duyệt trước. Người phụ trách Lab C quyết định bổ sung ngày 2026-10-08 và **chủ dự án
+chưa duyệt**; xác nhận của người chạy lab không thay thế bước này. Bản ghi alert đã được thu cùng mỗi lượt
 từ trước khi có assertion, nên bằng chứng cũ đánh giá lại được mà không phải dựng lại
 lab.
 
@@ -120,10 +121,13 @@ Cấu hình Sysmon tối thiểu:
 
 | Bằng chứng | Kết quả |
 | --- | --- |
-| Đủ ba nguồn, cùng tuple, trong cửa sổ, firewall `block` đúng nhãn | `Prevented`, exit 0 |
+| Đủ nguồn của phiên bản đang chạy, cùng tuple, trong cửa sổ, firewall `block` đúng nhãn | `Prevented`, exit 0 |
 | Firewall cho qua | `Inconclusive`, A03 `prevention_not_demonstrated` |
 | Thiếu alert Snort, chưa khai `complete_for_scope` | `Inconclusive`, A02 `collection_not_confirmed` |
+| Thiếu alert Wazuh 130110 (chỉ từ 0.2.0) | `Inconclusive`, A04 `collection_not_confirmed` |
 | Bị chặn bởi rule khác nhãn | `Inconclusive`, A03 `prevention_not_demonstrated` |
+
+Số nguồn tuỳ phiên bản: 0.1.0 cần ba (A01–A03), 0.2.0 cần bốn (thêm A04).
 
 ## 8. Giới hạn
 
@@ -307,7 +311,7 @@ trạng thái unknown.
 
 ### Hai lượt live dưới scenario 0.2.0 (2026-10-08)
 
-Sau khi A04 được duyệt, lab chạy thêm hai lượt live với cùng cấu hình (rule Snort được
+Sau khi thêm A04, lab chạy thêm hai lượt live với cùng cấu hình (rule Snort được
 trả về `rev:1` trước khi chạy): một lượt bình thường cho `Prevented` với cả bốn
 assertion `satisfied`, và một lượt dừng agent Wazuh trên sensor cho `Inconclusive` vì
 A04 `collection_not_confirmed` trong khi A01–A03 vẫn `satisfied`. Hai lượt này không

@@ -89,7 +89,13 @@ Ghi ba con số này vào biên nhận của mỗi lượt.
      của sensor.
    Mỗi tệp kèm số dòng và SHA-256 tại thời điểm thu.
 6. **Đóng gói bundle**: cắt theo cửa sổ của lượt, giữ nguyên byte của từng dòng.
-   `inputs.json` khai ba file và parser key, `context.json` khai `run_id`, cửa sổ và bốn
+   Từ scenario 0.2.0, `inputs.json` khai **bốn** nguồn kèm parser key: bản ghi Sysmon 3
+   (`wazuh-sysmon3-archive-v1`), dòng `alert_json` của Snort (`snort3-alert-json-v1`),
+   bản ghi alert Wazuh 130110 (`wazuh-snort-alert-v1`, phục vụ A04) và dòng `filterlog`
+   (`opnsense-filterlog-bsd-v1`). Alert Wazuh lọc theo **giờ của dòng alert Snort** trong
+   `full_log`, không theo giờ manager nhận. Nếu lượt đó không có alert Wazuh thì **không
+   thêm file thay thế**: bundle chỉ ba nguồn và A04 sẽ là `collection_not_confirmed`.
+   `context.json` khai `run_id`, cửa sổ và bốn
    binding (`sender_ip`, `receiver_ip`, `receiver_port`, `block_rule_label`).
    Giá trị `block_rule_label` lấy từ cấu hình firewall đã biết **trước** lượt chạy,
    không lấy từ dòng log của chính probe.
@@ -110,7 +116,7 @@ Ghi ba con số này vào biên nhận của mỗi lượt.
 | Đủ nguồn, firewall chặn | không | `Prevented`, exit 0 |
 | Firewall cho qua | bật tiến trình nhận trên máy nhận; rule cho qua đã có | `Inconclusive`, exit 3 |
 | Snort ngừng thu | dừng dịch vụ Snort bằng `systemctl stop` (dừng có kiểm soát nên chính sách tự chạy lại không kích hoạt) | `Inconclusive`, exit 3, A02 `collection_not_confirmed` |
-| Đường log sang Wazuh gián đoạn | dừng agent Wazuh **trên sensor**, Snort vẫn chạy | `Prevented`, exit 0; có alert Snort tại nguồn, không có alert Wazuh |
+| Đường log sang Wazuh gián đoạn | dừng agent Wazuh **trên sensor**, Snort vẫn chạy | `Inconclusive`, exit 3, A04 `collection_not_confirmed`: có alert Snort tại nguồn, không có alert Wazuh. Dưới scenario 0.1.0 (không có A04) ca này từng là `Prevented`, exit 0 |
 | Khôi phục | chạy lại dịch vụ vừa dừng, kiểm nó thật sự hoạt động trở lại | lượt mới đạt lại kết quả kỳ vọng |
 
 ## 6. Kiểm chứng rule hụt và `compare`
@@ -134,6 +140,14 @@ Ghi ba con số này vào biên nhận của mỗi lượt.
 Kỳ vọng `Regression Passed`: A02 `improvement`, các assertion khác `unchanged_pass`,
 không assertion nào ở trạng thái unknown. `compare` từ chối hai lượt khác scenario,
 khác profile, khác binding hoặc khác độ dài cửa sổ.
+
+**Phép thử hồi quy của đợt này được chốt ở scenario 0.1.0 và profile 0.1.0** (cặp
+`f12e4fa7` → `9099c31e`), với manifest và profile đã pin. Lý do: dưới 0.2.0 còn A04, và
+khai báo `complete_for_scope` hiện chỉ lập cho A02; A04 chưa có hồ sơ chứng minh thu
+thập đầy đủ nên sẽ ở trạng thái chưa kết luận, mà chỉ attestation của A02 thì **không
+đủ** để tuyên `Regression Passed` dưới 0.2.0. Muốn chạy phép thử hồi quy dưới 0.2.0 thì
+phải chứng minh và duyệt riêng điều kiện thu thập cho A04 (đường Snort → agent →
+manager → `alerts.json`) trước, chứ không đổi ground truth để kết quả đẹp hơn.
 
 ## 7. Dashboard
 
