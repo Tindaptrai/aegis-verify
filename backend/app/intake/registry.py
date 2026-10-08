@@ -7,6 +7,7 @@ from ..connectors.cowrie import (
     parse_cowrie_jsonl,
     parse_cowrie_wazuh_document,
 )
+from ..connectors.opnsense import OpnSenseParseError, parse_opnsense_filterlog
 from ..connectors.pfsense import PfSenseParseError, parse_pfsense_filterlog
 from ..connectors.snort import SnortParseError, parse_snort_alert_json
 from ..connectors.suricata import (
@@ -51,6 +52,7 @@ _SOURCE_TYPES = {
     "suricata-eve-jsonl-v1": "suricata",
     "snort3-alert-json-v1": "snort",
     "pfsense-filterlog-bsd-ipv4-tcp-udp-v1": "pfsense",
+    "opnsense-filterlog-bsd-v1": "opnsense",
     "cowrie-wazuh-v1": "cowrie",
     "cowrie-jsonl-v1": "cowrie",
 }
@@ -104,6 +106,8 @@ def _parse(raw: bytes, entry: BundleFile, environment_id: str):
         return parse_snort_alert_json(raw, **common, **context)
     if entry.parser == "pfsense-filterlog-bsd-ipv4-tcp-udp-v1":
         return parse_pfsense_filterlog(raw, **common, **context)
+    if entry.parser == "opnsense-filterlog-bsd-v1":
+        return parse_opnsense_filterlog(raw, **common, **context)
     if entry.parser == "cowrie-wazuh-v1":
         return parse_cowrie_wazuh_document(raw, **common, **context)
     if entry.parser == "cowrie-jsonl-v1":
@@ -121,7 +125,7 @@ def parse_entry(
     try:
         parsed = _parse(raw, entry, environment_id)
     except (WazuhParseError, SuricataParseError, PfSenseParseError, CowrieParseError,
-            SnortParseError) as error:
+            SnortParseError, OpnSenseParseError) as error:
         diagnostic = error.diagnostic
         raise IntakeError(
             "parser_error", stage="evidence", line=diagnostic.line

@@ -19,7 +19,7 @@ TARGET_FIELDS = frozenset({"asset_id", "hostname", "username", "src_ip", "dst_ip
 JOIN_FIELDS = FILTER_FIELDS - {"rule_id", "signature_id", "technique_ids"}
 IP_FIELDS = frozenset({"src_ip", "dst_ip"})
 INTEGER_FIELDS = frozenset({"src_port", "dst_port", "process_id", "severity"})
-SOURCE_VALUES = frozenset({"wazuh", "suricata", "pfsense", "cowrie", "snort"})
+SOURCE_VALUES = frozenset({"wazuh", "suricata", "pfsense", "cowrie", "snort", "opnsense"})
 ACTION_VALUES = frozenset({"observed", "allowed", "blocked", "redirected", "login", "command", "other"})
 
 
@@ -141,7 +141,7 @@ class AssertionRule(FrozenContract):
     role: Role
     capability: Literal["supported", "unsupported"]
     reason_code: NonBlank | None = None
-    source_type: Literal["wazuh", "suricata", "pfsense", "cowrie", "snort"] | None = None
+    source_type: Literal["wazuh", "suricata", "pfsense", "cowrie", "snort", "opnsense"] | None = None
     scope: Conditions = ()
     match: Conditions = ()
     correlation: Correlation | None = None

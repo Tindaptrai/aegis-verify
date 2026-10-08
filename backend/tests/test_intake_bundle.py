@@ -106,6 +106,19 @@ def test_empty_bundle_does_not_fabricate_events(tmp_path):
             1,
         ),
         (
+            "opnsense/lab-c-20261006.sanitized.log",
+            "opnsense-filterlog-bsd-v1",
+            "opnsense-log",
+            {
+                "sensor_id": "firewall-1",
+                "source_year": 2026,
+                "source_utc_offset": "+00:00",
+            },
+            "opnsense",
+            16,
+            16,
+        ),
+        (
             "cowrie/login-failed.sanitized.json",
             "cowrie-wazuh-v1",
             "cowrie-wrapper",

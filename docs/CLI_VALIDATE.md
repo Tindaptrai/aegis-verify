@@ -77,6 +77,7 @@ lấy giờ hiện tại, không cho context khai báo lại environment/source_
 | `suricata-eve-jsonl-v1` | EVE JSONL alert/flow; `sensor_id`, `deployment_mode` |
 | `snort3-alert-json-v1` | Snort 3 `alert_json` thô với danh sách trường đã pin, giờ UTC có năm; `sensor_id`, `deployment_mode`. Xem [SNORT3_ALERT_JSON_PARSER.md](SNORT3_ALERT_JSON_PARSER.md) |
 | `pfsense-filterlog-bsd-ipv4-tcp-udp-v1` | BSD filterlog IPv4 TCP/UDP; `sensor_id`, `source_year`, `source_utc_offset` |
+| `opnsense-filterlog-bsd-v1` | `filterlog` của OPNsense qua syslog BSD, ghi nguyên bản tin (có hoặc không có PRI); IPv4 TCP/UDP/ICMP, IPv6 UDP/ICMPv6; cùng context như pfSense. Xem [OPNSENSE_FILTERLOG_PARSER.md](OPNSENSE_FILTERLOG_PARSER.md) |
 | `cowrie-wazuh-v1` | Một Wazuh-exported Cowrie document; `sensor_id` |
 | `cowrie-jsonl-v1` | Native Cowrie JSONL; `sensor_id` |
 

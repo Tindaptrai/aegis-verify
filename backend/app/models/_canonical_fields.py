@@ -21,6 +21,7 @@ class SourceType(StrEnum):
     PFSENSE = "pfsense"
     COWRIE = "cowrie"
     SNORT = "snort"
+    OPNSENSE = "opnsense"
 
 
 class EventAction(StrEnum):

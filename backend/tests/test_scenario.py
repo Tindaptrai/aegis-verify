@@ -123,7 +123,7 @@ def test_every_declared_source_needs_an_assertion(scenario_data):
     assert ("expected_sources", 1) in [issue["loc"] for issue in error.value.errors()]
 
 
-@pytest.mark.parametrize("source", ["sysmon", "powershell", "wazuh", "suricata", "pfsense", "cowrie", "snort"])
+@pytest.mark.parametrize("source", ["sysmon", "powershell", "wazuh", "suricata", "pfsense", "cowrie", "snort", "opnsense"])
 @pytest.mark.parametrize("outcome", ["detected", "prevented"])
 def test_logical_sources_and_outcomes_preserve_the_authored_values(scenario_data, source, outcome):
     scenario_data["expected_sources"] = [source]

@@ -1,0 +1,343 @@
+{
+  "manifest_version": 1,
+  "source_sha256": "a4218341e967728444f001cff05e87437ac5fcc7a2aef61c0b3706bc3d0ddddd",
+  "source_size_bytes": 2743317,
+  "source_physical_lines": 12811,
+  "source_description": "filterlog-raw.log written by rsyslog with template %rawmsg% on the Lab C collector: OPNsense 26.7 filterlog over BSD syslog/UDP, 2026-10-06 03:21:28 to 13:26:20 UTC. The original stays outside Git.",
+  "parser": "opnsense-filterlog-bsd-v1",
+  "parser_context": {
+    "environment_id": "fixture-lab-c",
+    "sensor_id": "fixture-opnsense",
+    "ingested_at": "2026-10-06T13:26:20Z",
+    "source_year": 2026,
+    "source_utc_offset": "+00:00"
+  },
+  "context_basis": "OPNsense runs with time zone UTC. The ICMP blocks of probe run probe-20261006T111102Z are logged at 11:11:08, 11:11:12, 11:11:17 and 11:11:52, inside the UTC windows the endpoint recorded for those pings. ingested_at is the collection time of the original file.",
+  "transformations": [
+    "Replace the syslog hostname with fixture-fw (twice in the concatenated line).",
+    "Replace each address cell listed in substitutions with its alias, consistently.",
+    "Keep every other byte: PRI, timestamp, PID, rule number, label, interface, TTL, IP ID, ports, sequence, TCP options, datalength, 0.0.0.0, 255.255.255.255 and well-known IPv6 multicast groups."
+  ],
+  "substitutions": [
+    {
+      "role": "firewall interface in the user segment (same alias as the Snort fixture)",
+      "replacement": "192.0.2.1"
+    },
+    {
+      "role": "Windows endpoint in the user segment (same alias as the Snort fixture)",
+      "replacement": "192.0.2.10"
+    },
+    {
+      "role": "second host in the user segment",
+      "replacement": "192.0.2.50"
+    },
+    {
+      "role": "host in the DMZ segment",
+      "replacement": "192.0.2.130"
+    },
+    {
+      "role": "firewall interface in the management segment",
+      "replacement": "192.0.2.201"
+    },
+    {
+      "role": "Wazuh manager in the management segment",
+      "replacement": "192.0.2.220"
+    },
+    {
+      "role": "syslog collector in the management segment",
+      "replacement": "192.0.2.230"
+    },
+    {
+      "role": "host in the WAN segment",
+      "replacement": "198.51.100.1"
+    },
+    {
+      "role": "firewall WAN interface",
+      "replacement": "198.51.100.152"
+    },
+    {
+      "role": "second host in the WAN segment",
+      "replacement": "198.51.100.254"
+    },
+    {
+      "role": "WAN segment broadcast address",
+      "replacement": "198.51.100.255"
+    },
+    {
+      "role": "Internet host (HTTPS)",
+      "replacement": "203.0.113.54"
+    },
+    {
+      "role": "Internet host (HTTPS)",
+      "replacement": "203.0.113.104"
+    },
+    {
+      "role": "Internet host (HTTPS)",
+      "replacement": "203.0.113.220"
+    },
+    {
+      "role": "Internet DNS server",
+      "replacement": "203.0.113.229"
+    },
+    {
+      "role": "firewall WAN link-local address (MAC-derived interface ID removed)",
+      "replacement": "fe80::1"
+    },
+    {
+      "role": "link-local address of another WAN host",
+      "replacement": "fe80::2"
+    }
+  ],
+  "fixtures": [
+    {
+      "file": "lab-c-20261006.sanitized.log",
+      "derivative_sha256": "c1f33013412c2fef29ecb25364b125b5b7c563cb92fde1dfd31cc51bf624d1c6",
+      "source_ref": "opnsense-lab-c-sha256-c1f33013412c2fef29ecb25364b125b5b7c563cb92fde1dfd31cc51bf624d1c6",
+      "expected_status": "parsed",
+      "expected_code": null,
+      "expected_field": null,
+      "lines": [
+        {
+          "line": 1,
+          "source_line": 2,
+          "source_line_sha256": "2d38b58f776ec8cf4af882bb7e756b2c9bdaa4aefdd88e61445e7699ad0e0b43",
+          "derivative_line_sha256": "12d1c69d97a225fd39e977a11c7048a97b03e8f266045f9da18ce901bb4e7db8",
+          "expect": {
+            "interface": "em1",
+            "event_action": "allowed",
+            "direction": "out",
+            "ip_version": "4",
+            "protocol": "udp",
+            "rule_id": "fae559338f65e11c53669fc3642c93c2"
+          }
+        },
+        {
+          "line": 2,
+          "source_line": 4,
+          "source_line_sha256": "6dafd9133537ee94b1cfdcfcaa7a74962b5280b1ada754ec1e2481c15a85131e",
+          "derivative_line_sha256": "9193c3a2d0bcb5ed6c10a833a261ee807affc1cb1bff780107b4feeeef979dee",
+          "expect": {
+            "interface": "em3",
+            "event_action": "blocked",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "tcp",
+            "rule_id": "15ea5b31-cbf1-409e-bcde-c61970e1d7a3"
+          }
+        },
+        {
+          "line": 3,
+          "source_line": 43,
+          "source_line_sha256": "69e0f4e2371edad8063dc0f0d04bd666ed36ce42bc6a56fa5bf0a40aedd95b03",
+          "derivative_line_sha256": "1f1ece92509a527a1aa0445f77343fe72a94947b69716498d1b9f4046f9484c0",
+          "expect": {
+            "interface": "em2",
+            "event_action": "allowed",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "tcp",
+            "rule_id": "0f4b7139-3a03-476c-a790-02c1c8f9ae8b"
+          }
+        },
+        {
+          "line": 4,
+          "source_line": 44,
+          "source_line_sha256": "3c3039bd83062085b8a8a05586952bd6050edb0fc95f98236b1d43816d3626f9",
+          "derivative_line_sha256": "953195e7db84bca540dc83385b946bf9e5f2aa32aace6d161e4c2716313cdfe7",
+          "expect": {
+            "interface": "em3",
+            "event_action": "allowed",
+            "direction": "out",
+            "ip_version": "4",
+            "protocol": "tcp",
+            "rule_id": "fae559338f65e11c53669fc3642c93c2"
+          }
+        },
+        {
+          "line": 5,
+          "source_line": 72,
+          "source_line_sha256": "852c715daf268dd8f13ded4df4fc985dd003a992a2544776e498a68a8e8f7832",
+          "derivative_line_sha256": "9d7907b4f51681d281fc1d5dc233a71fa17330b6ec829042c5a535ed0c36524c",
+          "expect": {
+            "interface": "em0",
+            "event_action": "allowed",
+            "direction": "out",
+            "ip_version": "6",
+            "protocol": "udp",
+            "rule_id": "2f2c37025cd02b5cd29fd330f8e48954"
+          }
+        },
+        {
+          "line": 6,
+          "source_line": 418,
+          "source_line_sha256": "f0f2e24b03296d047bddad8d884410af3c62b82a758b8dbe88747922e4ac7d64",
+          "derivative_line_sha256": "bae516af4455c223b1c1872488520d4d766b68087b060342b2ad66eb2c6fb9ad",
+          "expect": {
+            "interface": "em0",
+            "event_action": "blocked",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "icmp",
+            "rule_id": "3d399f8f89b68d684701badb48eab085"
+          }
+        },
+        {
+          "line": 7,
+          "source_line": 986,
+          "source_line_sha256": "e7e297bbab575c6721087338e136d7c2bf93b57c9cbf72bd1bb029511c77f40d",
+          "derivative_line_sha256": "0cdd2aa342fff5b1af1596bc4290420c5ad3863494bafdb5f4294d3b6595e18d",
+          "expect": {
+            "interface": "em0",
+            "event_action": "blocked",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "udp",
+            "rule_id": "3d399f8f89b68d684701badb48eab085"
+          }
+        },
+        {
+          "line": 8,
+          "source_line": 988,
+          "source_line_sha256": "c12d245ce65b3252c22f2250f868bf69396a8cd751559d5a24a89e8ecfdb1af3",
+          "derivative_line_sha256": "d2fe317a682b45f473c0dc002a4bae697c1aa6776bcf2bd4aa3fb5d69337e4ad",
+          "expect": {
+            "interface": "em0",
+            "event_action": "allowed",
+            "direction": "out",
+            "ip_version": "6",
+            "protocol": "ipv6-icmp",
+            "rule_id": "80f90f0d4c5aba0c28d1c539e1e35766"
+          }
+        },
+        {
+          "line": 9,
+          "source_line": 2055,
+          "source_line_sha256": "5ea1fb1629bcad9d8944b232bd0f8f8070ed0f677cddc7fc171c479e9c2211b6",
+          "derivative_line_sha256": "b990d77b2bd4d41e7b969a9c1612b2e134f2922b0f530ad06f64aa76996fd4f9",
+          "expect": {
+            "interface": "em0",
+            "event_action": "allowed",
+            "direction": "in",
+            "ip_version": "6",
+            "protocol": "ipv6-icmp",
+            "rule_id": "7355b5da99f40893221b6c4140de1006"
+          }
+        },
+        {
+          "line": 10,
+          "source_line": 2069,
+          "source_line_sha256": "debbe1e8eba71bb41224326ad02592b0efa44200cbf3e07800e523bfb043fd87",
+          "derivative_line_sha256": "f9c953b3c857f7c9b3d4d6e7c87af87cbe19668a8469aaae6d9d8e575425920e",
+          "expect": {
+            "interface": "em0",
+            "event_action": "blocked",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "udp",
+            "rule_id": "b7cd97a164650b538506fb551a0369e7"
+          }
+        },
+        {
+          "line": 11,
+          "source_line": 11390,
+          "source_line_sha256": "172ccf5ef6b43e6d22f9e6b81d5cd96ec3e090d6701371afd0d73e03b6e1f3ae",
+          "derivative_line_sha256": "a911d449ca153cb3a3198ddae57c005dc7123c1a5a9804000309fef63bbff572",
+          "expect": {
+            "interface": "em0",
+            "event_action": "allowed",
+            "direction": "out",
+            "ip_version": "4",
+            "protocol": "udp",
+            "rule_id": "49484b4b90e87d327015604798f010e9"
+          }
+        },
+        {
+          "line": 12,
+          "source_line": 11396,
+          "source_line_sha256": "f926d7254cf3721548a0a064fe4522c0be6596149285b82ac57aeb3d54527859",
+          "derivative_line_sha256": "8da589960f93b8792e7605ad696b39fb18ab5083f28ecbd562f44f906b86ed56",
+          "expect": {
+            "interface": "em2",
+            "event_action": "blocked",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "tcp",
+            "rule_id": "f18da9d8-ba44-4a26-8909-effe55135cb6"
+          }
+        },
+        {
+          "line": 13,
+          "source_line": 11498,
+          "source_line_sha256": "5b9859784f26c1a82408a17e424cdf132a8a25331729e04840ea469c3f12e4fc",
+          "derivative_line_sha256": "77949f0184cda27b9403432e20e0df3b322f748e8f79580d4c2df101958190c9",
+          "expect": {
+            "interface": "em2",
+            "event_action": "blocked",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "icmp",
+            "rule_id": "f18da9d8-ba44-4a26-8909-effe55135cb6"
+          }
+        },
+        {
+          "line": 14,
+          "source_line": 11499,
+          "source_line_sha256": "bfc7185ededa14cbda9fecd1d2fd45509e419719312f0b92136ee7ab369fa49f",
+          "derivative_line_sha256": "0b018dc895c3ce07109ab77de79562fa950096d5e146fbd6e0b9f69c2ab269bc",
+          "expect": {
+            "interface": "em2",
+            "event_action": "allowed",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "tcp",
+            "rule_id": "d1819b64-84ca-4f1d-ab68-d3b28b196d0d"
+          }
+        },
+        {
+          "line": 15,
+          "source_line": 11500,
+          "source_line_sha256": "036256f80aa22225ad572c054d4b4f93585dada9233f829bd3ac4b048c84a436",
+          "derivative_line_sha256": "b3d95d5bc245f3d0bbd87d1be7047290ad6db5186de3ccfa323726f77dd843a1",
+          "expect": {
+            "interface": "em1",
+            "event_action": "allowed",
+            "direction": "out",
+            "ip_version": "4",
+            "protocol": "tcp",
+            "rule_id": "fae559338f65e11c53669fc3642c93c2"
+          }
+        },
+        {
+          "line": 16,
+          "source_line": 11557,
+          "source_line_sha256": "8f20a438b9bedff4cb7da1a2d51361a7150bd1585b7e3658bff159753de1f3d3",
+          "derivative_line_sha256": "47c77bee1444d67efda7b3c3ed0e13695730081e867520d7de4f0267cd4ffbbe",
+          "expect": {
+            "interface": "em2",
+            "event_action": "blocked",
+            "direction": "in",
+            "ip_version": "4",
+            "protocol": "icmp",
+            "rule_id": "f18da9d8-ba44-4a26-8909-effe55135cb6"
+          }
+        }
+      ]
+    },
+    {
+      "file": "concatenated-l1707.sanitized.log",
+      "derivative_sha256": "51010b1e60faa45acf72f56f3ff653f19e4b17e8077c2e5679a3af7a2898c7e4",
+      "source_ref": "opnsense-l1707-sha256-51010b1e60faa45acf72f56f3ff653f19e4b17e8077c2e5679a3af7a2898c7e4",
+      "expected_status": "error",
+      "expected_code": "invalid_field",
+      "expected_field": "label",
+      "lines": [
+        {
+          "line": 1,
+          "source_line": 1707,
+          "source_line_sha256": "dce28512c26635be900b580512712d1981c71fc2d10959443a54f4a9cc7390ab",
+          "derivative_line_sha256": "51010b1e60faa45acf72f56f3ff653f19e4b17e8077c2e5679a3af7a2898c7e4"
+        }
+      ]
+    }
+  ]
+}

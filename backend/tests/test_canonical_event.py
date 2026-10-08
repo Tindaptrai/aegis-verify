@@ -125,7 +125,7 @@ def test_time_normalization_preserves_the_instant(minimal_event, timestamp, expe
     assert event.timestamp.utcoffset() == timedelta(0)
 
 
-@pytest.mark.parametrize("source", ["wazuh", "suricata", "pfsense", "cowrie", "snort"])
+@pytest.mark.parametrize("source", ["wazuh", "suricata", "pfsense", "cowrie", "snort", "opnsense"])
 def test_supported_sources_survive_json_serialization(minimal_event, source):
     event = CanonicalEvent.model_validate(minimal_event | {"source_type": source})
     assert json.loads(event.model_dump_json())["source_type"] == source

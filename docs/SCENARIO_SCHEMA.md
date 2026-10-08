@@ -56,7 +56,7 @@ Assertion bắt buộc có `id`, `description`, `source`:
 - Source phải nằm trong expected_sources; mọi expected_source phải được ít nhất
   một assertion tham chiếu.
 
-Nguồn hợp lệ: sysmon, powershell, wazuh, suricata, pfsense, cowrie. ScenarioSource
+Nguồn hợp lệ: sysmon, powershell, wazuh, suricata, pfsense, cowrie, snort, opnsense. ScenarioSource
 là enum riêng. Sysmon/PowerShell là nguồn telemetry logic có thể đi qua Wazuh;
 không sửa SourceType của CanonicalEvent và không tự map tên provider khi đọc YAML.
 
