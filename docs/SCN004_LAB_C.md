@@ -305,12 +305,21 @@ cùng binding, cùng độ dài cửa sổ — cho **`Regression Passed`**: A02 
 (`false_negative` → `satisfied`), A01 và A03 `unchanged_pass`, không có assertion nào ở
 trạng thái unknown.
 
+### Hai lượt live dưới scenario 0.2.0 (2026-10-08)
+
+Sau khi A04 được duyệt, lab chạy thêm hai lượt live với cùng cấu hình (rule Snort được
+trả về `rev:1` trước khi chạy): một lượt bình thường cho `Prevented` với cả bốn
+assertion `satisfied`, và một lượt dừng agent Wazuh trên sensor cho `Inconclusive` vì
+A04 `collection_not_confirmed` trong khi A01–A03 vẫn `satisfied`. Hai lượt này không
+nằm trong bảng 16 lượt ở trên vì chúng chạy dưới một ground truth khác; chi tiết và
+bằng chứng ở [SCN004_LAB_C_ACCEPTANCE.md](SCN004_LAB_C_ACCEPTANCE.md) mục 3.1.
+
 ## 12. Kiểm thử đã chạy
 
 | Môi trường | Kết quả | Bỏ qua |
 | --- | --- | --- |
-| Windows (máy chạy lab, venv của repo) | 3614 passed | 3: `test_intake_io` (FIFO không có trên nền tảng này), `test_operations_config` và `test_private_fs` (kiểm quyền kiểu POSIX) |
-| Linux (container của người phát triển) | 3526 passed, 1 failed | 90: 47 `test_scn001_runner` (cần Windows PowerShell 5.1), 37 `test_dashboard_launcher` (launcher Windows), 6 kiểm ACL Windows |
+| Windows (máy chạy lab, venv của repo) | 3618 passed | 3: `test_intake_io` (FIFO không có trên nền tảng này), `test_operations_config` và `test_private_fs` (kiểm quyền kiểu POSIX) |
+| Linux (container của người phát triển) | 3530 passed, 1 failed | 90: 47 `test_scn001_runner` (cần Windows PowerShell 5.1), 37 `test_dashboard_launcher` (launcher Windows), 6 kiểm ACL Windows |
 | Frontend (`npm test`) | 6 file, 108 passed | — |
 | Frontend (`npm run build`) | `tsc --noEmit` rồi `vite build`, 42 module, exit 0 | — |
 
