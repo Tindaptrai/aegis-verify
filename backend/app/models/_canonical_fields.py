@@ -20,6 +20,7 @@ class SourceType(StrEnum):
     SURICATA = "suricata"
     PFSENSE = "pfsense"
     COWRIE = "cowrie"
+    SNORT = "snort"
 
 
 class EventAction(StrEnum):

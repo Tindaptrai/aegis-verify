@@ -113,6 +113,21 @@ def test_logical_sources_require_explicit_provider_without_guessing(c):
         c.EvaluationProfile(**profile_data(rules=[rule_data(), rule_data()]))
 
 
+def test_snort_is_a_closed_set_source_for_rules_and_predicates(c):
+    from aegis_verify.validation.errors import ValidationEngineError
+    snort = c.AssertionRule(**rule_data(source_type="snort"))
+    c.validate_rule_source(snort, "snort")
+    for source in ("suricata", "wazuh"):
+        with pytest.raises(ValidationEngineError) as caught:
+            c.validate_rule_source(snort, source)
+        assert caught.value.code == "assertion_binding"
+    scoped = rule_data(scope=rule_data()["scope"] + [dict(field="source_type", op="eq", value="snort")])
+    assert c.AssertionRule(**scoped).scope[-1].value == "snort"
+    for unknown in ("snort3", "Snort"):
+        with pytest.raises(ValidationError):
+            c.AssertionRule(**rule_data(source_type=unknown))
+
+
 def test_binding_and_declaration_lists_accept_limit_reject_next(c):
     declarations = [dict(assertion_id=f"synthetic-{i}") for i in range(100)]
     assert len(c.EvaluationContext(**context_data(declarations=declarations)).declarations) == 100

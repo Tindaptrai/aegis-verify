@@ -117,7 +117,8 @@ Bundle mẫu: `tests/fixtures/cli/scn002-lab-sanitized/` và
 | `wazuh-cowrie-alert-v1` | dòng alert Cowrie trong `alerts.json` | SCN-003 A04 |
 | `cowrie-wazuh-v1` | tài liệu Cowrie trong Wazuh Indexer | dữ liệu Indexer |
 
-`source_type` hiện là tập đóng: `wazuh`, `suricata`, `pfsense`, `cowrie`.
+`source_type` hiện là tập đóng: `wazuh`, `suricata`, `pfsense`, `cowrie`, `snort`
+(`snort` thêm cho Lab C; connector đọc Snort là việc riêng).
 
 ### Lab B: Elastic Security
 
