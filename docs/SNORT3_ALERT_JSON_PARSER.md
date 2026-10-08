@@ -89,5 +89,7 @@ Git) và trên nguyên file gốc 18 dòng: đọc được hết, không lỗi.
 
 ## 7. Chưa làm
 
-- Parser cho alert Wazuh sinh từ Snort.
+Alert Wazuh sinh từ Snort được hỗ trợ bởi `wazuh-snort-alert-v1`; xem
+[WAZUH_SNORT_ALERT.md](WAZUH_SNORT_ALERT.md).
+
 - Mẫu thật cho IPv6, cho `would_*`/`drop` (IPS) và cho alert không có IP header.

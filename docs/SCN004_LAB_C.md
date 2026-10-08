@@ -7,6 +7,8 @@ Test offline: `backend/tests/test_scn004_profile.py`.
 
 Chạy lại một đợt: [LABC_RUNBOOK.md](LABC_RUNBOOK.md). Kết quả đợt nghiệm thu và hồ sơ
 truy xuất bằng chứng: [SCN004_LAB_C_ACCEPTANCE.md](SCN004_LAB_C_ACCEPTANCE.md).
+Bản ghi duyệt A04 và pins của snapshot đã review:
+[SCN004_A04_APPROVAL_AND_PINS.md](SCN004_A04_APPROVAL_AND_PINS.md).
 
 ## 1. Vì sao cần kịch bản riêng
 
@@ -23,10 +25,12 @@ này. Sửa SCN-002 thì đổi ground truth của lab A, nên Lab C có manifes
 Từ **0.2.0**, SCN-004 có A04 tương ứng A04 của SCN-002: Wazuh ghi alert của chính nó
 (rule `130110`) cho alert Snort của cùng luồng, đọc bằng `wazuh-snort-alert-v1`
 ([tài liệu](WAZUH_SNORT_ALERT.md)). Thêm assertion là đổi ground truth nên phải được
-duyệt trước. Người phụ trách Lab C đề xuất ngày 2026-10-08 và **chủ dự án đã duyệt**
-cùng ngày sau khi audit gói bàn giao (checklist của chủ dự án ngày 08-10-2026). Bản ghi alert đã được thu cùng mỗi lượt
-từ trước khi có assertion, nên bằng chứng cũ đánh giá lại được mà không phải dựng lại
-lab.
+chủ dự án review. Chủ dự án duyệt snapshot `0.2.0` ngày 2026-10-08 sau audit bộ
+handoff, khi hai lượt live `0.2.0` đã được đo; đây là phê duyệt hiện tại, không phải
+phê duyệt trước những lần đo đó. Quyết định và pins nằm trong
+[SCN004_A04_APPROVAL_AND_PINS.md](SCN004_A04_APPROVAL_AND_PINS.md). Bản ghi alert đã
+được thu cùng mỗi lượt từ trước khi có assertion, nên bằng chứng cũ đánh giá lại được
+mà không phải dựng lại lab.
 
 ## 2. Assertion, nguồn và parser
 
@@ -50,13 +54,16 @@ lab.
 nguồn để chứng minh cùng một datagram. Giá trị thật của từng lượt nằm trong
 `context.json` ngoài Git.
 
-## 4. Ba rule
+## 4. Bốn rule của scenario/profile 0.2.0
 
 | Assertion | Literal cố định | Tương quan |
 | --- | --- | --- |
 | A01 | `event_provider = Microsoft-Windows-Sysmon`, `protocol = udp`, `event_action = observed`, `src_port` tồn tại | neo |
 | A02 | `event_provider = snort`, `protocol = UDP`, `signature_id = 1000010` | join 4 trường với A01 |
 | A03 | `event_provider = OPNsense-filterlog`, `protocol = udp`, `event_action = blocked`, `rule_id = block_rule_label` | join 4 trường với A01 |
+| A04 | `event_provider = snort`, `protocol = UDP`, `rule_id = 130110`, `signature_id = 1000010`, nguồn `wazuh` | join 4 trường với A01 |
+
+Scenario/profile `0.1.0` của đợt 16 lượt chỉ có A01–A03.
 
 Join bốn trường `src_ip`, `dst_ip`, `src_port`, `dst_port`, cửa sổ **±2 s** quanh neo,
 giống SCN-002. Engine so khớp chuỗi chính xác: Snort in `UDP` chữ hoa, OPNsense và
@@ -98,8 +105,10 @@ Cấu hình Sysmon tối thiểu:
 
 ## 6. Một lượt Block
 
-1. Kiểm trước khi gửi: đồng hồ máy gửi lệch dưới 1 s so với nguồn NTP của lab, Sysmon
-   có rule `AEGIS-UDP-probe`, agent Wazuh đang chạy.
+1. Kiểm trước khi gửi: đồng hồ máy gửi và thời gian sự kiện Sysmon đều lệch
+   dưới 0,5 s so với nguồn NTP của lab; Sysmon có rule `AEGIS-UDP-probe`, agent
+   Wazuh đang chạy và kết nối manager. Theo [LABC_RUNBOOK.md](LABC_RUNBOOK.md)
+   mục 2–3 để kiểm clock và sức khỏe thu thập.
 2. Gửi **đúng một** datagram UDP từ máy gửi tới `receiver_ip:receiver_port`, payload
    `AEGIS-SCN004-TEST run=<32 hex> label=block`. Ghi biên nhận: run, cổng nguồn, giờ
    UTC trước và sau khi gửi.
@@ -114,20 +123,18 @@ Cấu hình Sysmon tối thiểu:
 5. Chạy:
 
 ```powershell
-.\.venv\Scripts\python.exe -m aegis_verify validate --scenario scenarios\SCN-004-attempted-exfiltration-lab-c.yaml --fixture <bundle> --profile scenarios\profiles\scn-004\profile.json --format json
+.\.venv\Scripts\python.exe -m aegis_verify validate --scenario scenarios\SCN-004-attempted-exfiltration-lab-c.yaml --fixture "<bundle>" --profile scenarios\profiles\scn-004\profile.json --format json
 ```
 
 ## 7. Kết quả kỳ vọng
 
 | Bằng chứng | Kết quả |
 | --- | --- |
-| Đủ nguồn của phiên bản đang chạy, cùng tuple, trong cửa sổ, firewall `block` đúng nhãn | `Prevented`, exit 0 |
+| Đủ bằng chứng A01–A04, cùng tuple, trong cửa sổ, firewall `block` đúng nhãn | `Prevented`, exit 0 |
 | Firewall cho qua | `Inconclusive`, A03 `prevention_not_demonstrated` |
 | Thiếu alert Snort, chưa khai `complete_for_scope` | `Inconclusive`, A02 `collection_not_confirmed` |
-| Thiếu alert Wazuh 130110 (chỉ từ 0.2.0) | `Inconclusive`, A04 `collection_not_confirmed` |
+| Thiếu alert SIEM Wazuh 130110, chưa khai `complete_for_scope` cho A04 | `Inconclusive`, A04 `collection_not_confirmed` |
 | Bị chặn bởi rule khác nhãn | `Inconclusive`, A03 `prevention_not_demonstrated` |
-
-Số nguồn tuỳ phiên bản: 0.1.0 cần ba (A01–A03), 0.2.0 cần bốn (thêm A04).
 
 ## 8. Giới hạn
 
@@ -156,8 +163,8 @@ Phạm vi đã kiểm, không suy rộng ra ngoài:
 
 ## 9. Hai lượt thật đầu tiên (2026-10-07 sáng)
 
-Hai lượt này là nguồn của bundle đã sanitize trong repo. Cả đợt nghiệm thu 16 lượt ở
-mục 11.
+Hai lượt này chạy dưới scenario/profile `0.1.0` (ba assertion) và là nguồn của hai
+bundle đầu tiên đã sanitize trong repo. Cả đợt nghiệm thu 16 lượt ở mục 11.
 
 | Run | Gửi lúc (UTC) | Cổng nguồn | Sysmon 3 | Snort sid 1000010 | OPNsense | `final_status` |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -234,7 +241,7 @@ Windows (máy gửi)            sensor (Linux)                         Wazuh (Do
                                                     └─ agent ──▶ alerts.json (rule 130110) ──▶ bundle: A04
 ```
 
-Kịch bản, profile và fingerprint dùng cho cả đợt:
+Kịch bản, profile và fingerprint của đợt 16 lượt và bản `0.2.0`:
 
 | Hạng mục | Giá trị |
 | --- | --- |
@@ -249,8 +256,10 @@ Kịch bản, profile và fingerprint dùng cho cả đợt:
 | Cửa sổ bundle | từ 1 phút trước tới 2 phút sau phút gửi |
 
 `scope_fingerprint` và `context_fingerprint` khác nhau giữa các lượt (mỗi lượt có cửa
-sổ và binding riêng); fingerprint scenario, profile và engine giống nhau ở mọi lượt của
-đợt, nên mọi kết quả trong mục 11 so sánh được với nhau.
+sổ và binding riêng). Có cùng fingerprint scenario/profile chưa đủ để mọi kết quả
+trong mục 11 so sánh được với nhau: `aegis compare` còn đòi cùng ID và phiên bản
+scenario/profile, cùng `environment_id`, cùng giá trị bindings và cùng độ dài cửa
+sổ. Cặp rule hụt → rule đã sửa ở dưới đáp ứng các điều kiện này.
 
 Mỗi report ghi fingerprint của scenario và profile đã dùng, và `aegis compare` đòi hai
 lượt phải trùng cả hai. Vì vậy report của đợt 16 lượt (0.1.0) **không** so sánh được
@@ -260,9 +269,14 @@ cùng một thứ. Kết quả đánh giá lại bằng chứng cũ dưới 0.2.
 
 ## 11. Đợt nghiệm thu: 16 lượt live (2026-10-07, 16:03–17:58 UTC)
 
-Số lượt và các tình huống được chốt **trước** khi đo. Mỗi lượt có `run_id` riêng, biên
-nhận của probe, bundle riêng, report và exit code; không lượt nào dùng lại log của lượt
-khác và không lượt nào nới cửa sổ tương quan.
+Kế hoạch được ghi ngày 2026-10-07 khoảng **16:20 UTC**, sau lượt đầu `e9c39177`
+(`16:03:54Z`). Kế hoạch gồm **13 lượt matrix + 2 lượt kiểm rule hụt/sửa rule**;
+lượt fixed có khai báo thu thập `9099c31e` được bổ sung sau đó để so sánh với lượt rule
+hụt có khai báo, nên tổng thực tế là **16 lượt**. Không coi toàn bộ 16 lượt là một
+đợt đã đăng ký trước khi bắt đầu đo. Mỗi lượt có `run_id` riêng, biên nhận của probe,
+bundle riêng, report và exit code; không lượt nào dùng lại log của lượt khác và không
+lượt nào nới cửa sổ tương quan. Mọi kết quả trong bảng này dùng scenario/profile
+`0.1.0` với ba assertion A01–A03.
 
 | Tình huống | Lượt | Kết quả kỳ vọng | Thực tế |
 | --- | --- | --- | --- |
@@ -294,14 +308,19 @@ Snort +0,53…+1,86 s (9 lượt có alert).
 
 Ca kiểm thử an toàn: cùng một probe nhưng payload có 80 byte đệm trước chuỗi đánh dấu,
 nên chuỗi nằm ngoài 64 byte đầu mà rule sid 1000010 rev 1 tìm. Telemetry Sysmon vẫn có
-và OPNsense vẫn chặn, chỉ thiếu alert IDS — một phát hiện hụt thật, không phải dàn dựng.
+và OPNsense vẫn chặn; bundle không có alert IDS. Report phân loại A02 là
+`false_negative` theo khai báo thu đủ của người vận hành, với A01 evidence
+`00434420e1d4…` và A03 `dc247c41012c…` làm mốc. Đây không phải xác minh độc lập
+rằng mọi gói đều đã tới sensor hoặc toàn bộ đường thu không mất dữ liệu.
 
 Lượt trước khi sửa rule được validate hai lần: lần đầu không kèm khai báo thu thập, A02
-ra `inconclusive/collection_not_confirmed`; sau khi đối chiếu 11 điều kiện thu thập bằng
-số liệu của chính lượt đó (Snort chạy liên tục từ trước cửa sổ, không có dòng nào không
-đọc được, không drop gói, lúc thu bao trùm hết cửa sổ, các đồng hồ lệch dưới 0,5 s) mới
-kèm khai báo `complete_for_scope` cho A02, và A02 thành `false_negative`. Cả hai report
-được giữ.
+ra `inconclusive/collection_not_confirmed`; sau khi người vận hành đối chiếu
+11 điều kiện thu thập, Snort chạy từ trước cửa sổ, raw window đọc được và thời
+gian/đồng hồ khớp scope, họ kèm khai báo `complete_for_scope` cho A02. Report
+sau đó là `false_negative`; assurance là **caller-attested**. Bộ đếm analyzed
+cộng dồn không chứng minh chính probe đã qua sensor; dữ liệu cung cấp thiếu
+bộ đếm drop đủ để chứng minh zero drop. Cả hai report được giữ, và engine
+không tự nâng assurance thành được lab xác minh.
 
 Sau khi sửa rule (bỏ `depth`, lên `rev:2`, lưu cấu hình trước và sau kèm SHA-256), lượt
 mới cho A02 `satisfied`. `aegis compare` giữa hai lượt — cùng scenario, cùng profile,
@@ -309,7 +328,7 @@ cùng binding, cùng độ dài cửa sổ — cho **`Regression Passed`**: A02 
 (`false_negative` → `satisfied`), A01 và A03 `unchanged_pass`, không có assertion nào ở
 trạng thái unknown.
 
-### Hai lượt live dưới scenario 0.2.0 (2026-10-08)
+### Năm lượt live dưới scenario 0.2.0 (2026-10-08)
 
 Sau khi thêm A04, lab chạy thêm **năm** lượt live với cùng cấu hình (rule Snort được
 trả về `rev:1` trước khi chạy): hai lượt lúc A04 vừa có, và ba lượt nữa sau khi chủ dự án
@@ -332,3 +351,16 @@ ground truth khác; chi tiết và bằng chứng ở
 Lượt Linux có một test thất bại: `test_cli_validate.py::test_console_and_module_entry_points_are_equivalent`
 cần console script của bản cài editable, container đó không có. Trên Windows test này
 pass. Không liên quan tới thay đổi của Lab C.
+
+## 13. Quyết định nghiệm thu và bàn giao cuối (2026-10-09)
+
+Chủ dự án đã chốt nghiệm thu kỹ thuật và phần ảnh/dashboard sau audit ba gói
+bàn giao; ghi nhận lượt người khác chạy theo xác nhận của chủ dự án trong chat.
+Các ảnh bổ sung là ảnh đọc lại ba report đã lưu của `vhuy811`, không phải bằng
+chứng của một lượt live độc lập mới. Quyết định và giới hạn xác minh được ghi
+ở [SCN004_A04_APPROVAL_AND_PINS.md](SCN004_A04_APPROVAL_AND_PINS.md).
+
+Chủ dự án cho phép áp dụng runbook và merge Lab C lên main. Bước tích hợp còn
+cần checks/replay trên commit main cuối và bàn giao kết quả theo
+[LABC_RUNBOOK.md](LABC_RUNBOOK.md) mục 10; không đổi ground truth hoặc report
+để ghi nhận quyết định này. Export VM và giữ bằng chứng gốc trước khi dọn lab.
