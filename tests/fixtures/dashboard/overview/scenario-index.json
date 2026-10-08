@@ -178,7 +178,7 @@
         "opnsense"
       ],
       "file": "SCN-004-attempted-exfiltration-lab-c.yaml",
-      "fingerprint": "778619bc836fc26938ff75749f0ec01aeabd0735276c5f9dadd9c07758932d47",
+      "fingerprint": "8de00c64cfe8b7b7aff54e81a01cd937b4f9e09dab3083b5ec123a95a72e2185",
       "id": "SCN-004",
       "latest_run": null,
       "name": "Attempted Exfiltration (Snort and OPNsense)",
@@ -190,7 +190,7 @@
         "lab-c",
         "prevention"
       ],
-      "version": "0.1.0"
+      "version": "0.2.0"
     }
   ],
   "unregistered": [

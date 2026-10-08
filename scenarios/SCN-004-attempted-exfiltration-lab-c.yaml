@@ -3,7 +3,7 @@
 # its source and a profile rule binds only to that exact source type.
 id: SCN-004
 name: Attempted Exfiltration (Snort and OPNsense)
-version: 0.1.0
+version: 0.2.0
 status: draft
 description: >-
   Attempt an approved outbound transfer to a controlled test endpoint and verify
@@ -30,6 +30,11 @@ assertions:
   - id: SCN-004-A03
     description: OPNsense records a block action for the correlated flow.
     source: opnsense
+  - id: SCN-004-A04
+    description: >-
+      The SIEM raises its own alert for the Snort detection of the same flow,
+      proving delivery from the sensor as well as detection at the sensor.
+    source: wazuh
 tags:
   - lab-c
   - prevention

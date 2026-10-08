@@ -25,7 +25,7 @@ gốc đối chiếu được từng dòng.
 | Mỗi lượt độc lập, không dùng lại log | mỗi lượt có `run_id`, cửa sổ, binding, report, exit code riêng | 16/16 lượt; công cụ tự từ chối lượt có cửa sổ chứa gói của lượt khác | bảng 1 (cổng nguồn khác nhau từng lượt), bảng 2 (evidence ID khác nhau từng lượt) | Đạt |
 | Chạy lặp qua khởi động lại máy ảo | lượt sau khi khởi động lại vẫn đạt | 11 lượt phiên 1, khởi động lại sensor và máy Wazuh, 2 lượt phiên 2 đều `Prevented` | [SCN004_LAB_C.md](SCN004_LAB_C.md) mục 11 | Đạt |
 | Capture filterlog đọc hết; dòng hỏng phải báo ra | đọc toàn bộ từng dòng; có dòng hỏng thì báo capture không đầy đủ, giữ nguyên bản gốc | capture của đợt: 22.401/22.401 dòng đọc được, 0 skipped; capture trước đó bị từ chối tại dòng 1707, hồ sơ ghi đủ 2 dòng hỏng | mục 6 | Đạt |
-| Alert SIEM thành một assertion được duyệt | — | **Chưa làm**: parser `wazuh-snort-alert-v1` đã có, chưa assertion nào dùng, chờ chủ dự án duyệt | [WAZUH_SNORT_ALERT.md](WAZUH_SNORT_ALERT.md) | Hoãn |
+| Alert SIEM thành một assertion được duyệt | A04 trong scenario, có bằng chứng của bước SIEM trong report | scenario `0.2.0` có A04; đánh giá lại hai lượt thật: một lượt 4/4 `Prevented`, một lượt agent Wazuh dừng ra `Inconclusive` vì A04 không xác nhận được | mục 3.1 | Đạt |
 
 **16/16 lượt nghiệm thu đúng kết quả kỳ vọng.** Một lượt trước đó bị loại vì lỗi quy
 trình (chạy thu bằng chứng trước khi gửi probe), được ghi lại là không hợp lệ và không
@@ -137,6 +137,41 @@ Hai bằng chứng này không trộn vào nhau: A02 lấy từ `alert_json` c�
 và parser khác (`wazuh-snort-alert-v1`). Thu được log thô và tạo được alert SIEM là hai
 việc tách bạch; đợt này chứng minh được cả hai chiều.
 
+### 3.1 A04 — alert SIEM thành assertion (scenario 0.2.0)
+
+Chủ dự án duyệt bổ sung assertion ngày **2026-10-08**. Vì thêm assertion là đổi ground
+truth nên scenario lên `0.2.0` (fingerprint `8de00c64cfe8…`, trước là `778619bc836f…`)
+và profile lên `0.2.0` (fingerprint `b529215d02ea…`). A04 có vai trò `detection`, nguồn
+`wazuh`, khớp `rule_id` `130110` của Wazuh cùng `signature_id` `1000010` của Snort, neo
+vào A01 với cùng cửa sổ ±2 s và cùng bộ 4 trường như A02.
+
+Bản ghi alert 130110 đã được thu cùng mỗi lượt từ trước khi có assertion, nên **đánh giá
+lại được bằng chứng cũ** mà không phải dựng lại lab. Hai lượt được đánh giá lại nguyên
+trạng bằng chứng, báo cáo lưu riêng ở `runs/<run_id>/reeval-0.2.0/` ngoài Git:
+
+| Lượt | Hoàn cảnh | A01 | A02 | A03 | A04 | Kết quả 0.2.0 | Kết quả cũ 0.1.0 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `be283230` | đường SIEM bình thường | satisfied | satisfied | satisfied | **satisfied** | `Prevented`, exit 0, 4 parsed / 4 referenced / 0 skipped | `Prevented` |
+| `ab842ef4` | agent Wazuh trên sensor đã dừng | satisfied | satisfied | satisfied | **inconclusive** (`collection_not_confirmed`) | `Inconclusive`, exit 3 | `Prevented` |
+
+Cặp này là lý do A04 tồn tại: cùng một luồng, Snort vẫn phát hiện và firewall vẫn chặn,
+nhưng SIEM **không** nhận được alert. Dưới 0.1.0 lượt đó kết luận `Prevented` và khoảng
+trống của đường SIEM không hiện ra ở đâu trong report; dưới 0.2.0 nó thành một assertion
+chưa kết luận được. Engine không tự suy ra "không phát hiện": thiếu A04 chỉ là
+`collection_not_confirmed`, trừ khi người chạy khai báo thu thập đầy đủ như mục 4 của
+checklist.
+
+Đây là **đánh giá lại bằng chứng đã ghi**, không phải lượt live mới: 16 lượt ở mục 1 và
+mục 2 vẫn là kết quả dưới scenario `0.1.0` và không được viết lại. Hai report dưới
+`0.2.0` không so sánh được với chúng bằng `aegis compare`, vì compare đòi trùng
+fingerprint của scenario và profile.
+
+Trong repo, bundle `block-siem` (đã sanitize, dẫn xuất từ `be283230`, bốn nguồn) replay
+lại kết quả `Prevented` 4/4 và kiểm rằng hai bản ghi Wazuh không lẫn nhau: bản ghi
+endpoint có provider `Microsoft-Windows-Sysmon`, bản ghi SIEM có provider `snort`,
+evidence ID khác nhau, và bản SIEM giữ đúng giờ của dòng alert trên sensor
+(`17:11:29.519832Z`) chứ không phải giờ manager nhận.
+
 ## 4. Kiểm dashboard với dữ liệu thật của đợt
 
 Chạy dashboard chỉ đọc với sáu report của đợt (năm lượt và một bản so sánh) cùng thư
@@ -172,8 +207,9 @@ trình bày, không nói về mức an toàn của môi trường.
 | Log thô, bundle, report, biên nhận probe của 16 lượt | ngoài Git, trên máy chạy lab | mỗi lượt một thư mục `runs/<run_id>/` gồm `bundle/`, `raw/`, `report.json`, `provenance.json`, `receipt.json`, `exit-code.txt` |
 | Bảng tổng hợp cả đợt | ngoài Git | `runs/campaign.csv`, một dòng mỗi lượt |
 | Lượt không hợp lệ | ngoài Git | `runs/invalid-runs.txt`, kèm lý do |
-| Hai bundle đã sanitize | trong repo | [`tests/fixtures/cli/scn004-lab-c-sanitized/`](../tests/fixtures/cli/scn004-lab-c-sanitized/README.md) |
+| Ba bundle đã sanitize (có một bundle bốn nguồn) | trong repo | [`tests/fixtures/cli/scn004-lab-c-sanitized/`](../tests/fixtures/cli/scn004-lab-c-sanitized/README.md) |
 | Fixture alert Wazuh 130110 đã sanitize | trong repo | [`tests/fixtures/wazuh/snort-alert/`](../tests/fixtures/wazuh/snort-alert/README.md) |
+| Báo cáo đánh giá lại dưới scenario 0.2.0 | ngoài Git | `runs/<run_id>/reeval-0.2.0/` |
 | Hồ sơ truy xuất | trong repo | bảng 2 và bảng 3 ở trên |
 
 Cách người review đối chiếu một lượt: lấy `run_id` ở bảng 1, mở `runs/<run_id>/` trong
@@ -249,7 +285,6 @@ như bước giải nén ở mục 6.2.
 
 | Việc | Trạng thái |
 | --- | --- |
-| Assertion cho alert SIEM (A04) của SCN-004 | hoãn, chờ chủ dự án duyệt; parser đã có |
 | Chủ dự án review scenario và profile trước đợt cuối | của chủ dự án |
 | Một người khác chạy lại theo runbook, gồm ít nhất một lượt live | chưa làm |
 | Merge chuỗi PR theo thứ tự phụ thuộc và replay trên commit main cuối | chưa làm |

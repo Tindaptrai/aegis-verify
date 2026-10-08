@@ -14,7 +14,8 @@ import time
 import pytest
 
 from aegis_verify.connectors import opnsense, snort
-from aegis_verify.connectors.wazuh import parse_wazuh_sysmon3_archive_record
+from aegis_verify.connectors.wazuh import (parse_wazuh_snort_alert_record,
+                                           parse_wazuh_sysmon3_archive_record)
 from aegis_verify.models import CanonicalEventV2
 from aegis_verify.scenario_loader import load_scenario
 from aegis_verify.validation import (EvaluationContext, EvaluationProfile, ValidationEngineError,
@@ -28,7 +29,7 @@ FIXTURES = ROOT / "tests" / "fixtures"
 SENDER, RECEIVER, SRC_PORT, DST_PORT = "192.0.2.10", "203.0.113.10", 51000, 40000
 LABEL = "00000000-0000-4000-8000-000000000001"
 ANCHOR = "2026-01-01T00:00:10.950000Z"
-TARGET_OF = {"snort-alert": "SCN-004-A02", "filterlog": "SCN-004-A03"}
+TARGET_OF = {"snort-alert": "SCN-004-A02", "filterlog": "SCN-004-A03", "siem-alert": "SCN-004-A04"}
 
 
 @pytest.fixture(scope="module")
@@ -72,6 +73,13 @@ def snort_alert(protocol="UDP", timestamp="2026-01-01T00:00:10.952000Z", **overr
                   signature_id="1000010", event_action="allowed", **_tuple(**overrides))
 
 
+def siem_alert(protocol="UDP", timestamp="2026-01-01T00:00:10.952000Z", **overrides):
+    # The manager's own alert for that Snort line: source wazuh, provider snort, Wazuh rule 130110.
+    # Time and tuple come from the Snort line, so they equal the sensor's own record.
+    return _event("siem-alert", "wazuh", timestamp, event_provider="snort", protocol=protocol,
+                  rule_id="130110", signature_id="1000010", event_action="allowed", **_tuple(**overrides))
+
+
 def filterlog(action="blocked", timestamp="2026-01-01T00:00:10Z", rule_id=LABEL, **overrides):
     # BSD syslog from OPNsense has whole seconds, so the firewall time can trail
     # the endpoint time by up to one second for the same packet.
@@ -88,7 +96,7 @@ def test_profile_is_bound_to_the_committed_lab_c_manifest(manifest, profile):
     assert profile.scenario_fingerprint == scenario_fingerprint(manifest)
     assert [rule.assertion_id for rule in profile.rules] == [a.id for a in manifest.assertions]
     assert [rule.source_type for rule in profile.rules] == [a.source for a in manifest.assertions]
-    assert [rule.role for rule in profile.rules] == ["telemetry", "detection", "prevention"]
+    assert [rule.role for rule in profile.rules] == ["telemetry", "detection", "prevention", "detection"]
     assert manifest.expected_outcome == "prevented"
 
 
@@ -99,8 +107,9 @@ def test_example_context_resolves_every_binding_without_lab_values(manifest, pro
     assert result.final_status == "Missing telemetry"
 
 
-def test_block_round_with_all_three_witnesses_is_prevented(manifest, profile, context):
-    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), filterlog()], profile=profile, context=context)
+def test_block_round_with_all_four_witnesses_is_prevented(manifest, profile, context):
+    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), siem_alert(), filterlog()],
+                               profile=profile, context=context)
     assert result.final_status == "Prevented"
     assert all(outcome == "satisfied" for outcome, _ in outcomes(result).values())
     for assertion in result.assertions:
@@ -110,7 +119,7 @@ def test_block_round_with_all_three_witnesses_is_prevented(manifest, profile, co
 
 
 def test_allowed_flow_is_inconclusive_never_prevented(manifest, profile, context):
-    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), filterlog(action="allowed")],
+    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), siem_alert(), filterlog(action="allowed")],
                                profile=profile, context=context)
     got = outcomes(result)
     assert got["SCN-004-A01"][0] == got["SCN-004-A02"][0] == "satisfied"
@@ -120,7 +129,7 @@ def test_allowed_flow_is_inconclusive_never_prevented(manifest, profile, context
 
 @pytest.mark.parametrize("missing", sorted(TARGET_OF))
 def test_a_missing_witness_without_declaration_is_not_prevented(manifest, profile, context, missing):
-    events = [e for e in (sysmon3(), snort_alert(), filterlog()) if e.event_id != missing]
+    events = [e for e in (sysmon3(), snort_alert(), siem_alert(), filterlog()) if e.event_id != missing]
     result = evaluate_scenario(manifest, events, profile=profile, context=context)
     outcome, reason = outcomes(result)[TARGET_OF[missing]]
     assert outcome == "inconclusive"
@@ -130,34 +139,56 @@ def test_a_missing_witness_without_declaration_is_not_prevented(manifest, profil
 
 def test_a_block_by_another_rule_is_not_this_run_prevention(manifest, profile, context):
     other = filterlog(rule_id="fae559338f65e11c53669fc3642c93c2")
-    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), other], profile=profile, context=context)
+    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), siem_alert(), other],
+                               profile=profile, context=context)
     assert outcomes(result)["SCN-004-A03"] == ("inconclusive", "prevention_not_demonstrated")
     assert result.final_status == "Inconclusive"
 
 
 def test_witnesses_on_another_source_port_do_not_correlate(manifest, profile, context):
-    events = [sysmon3(), snort_alert(src_port=SRC_PORT + 1), filterlog(src_port=SRC_PORT + 1)]
+    events = [sysmon3(), snort_alert(src_port=SRC_PORT + 1), siem_alert(src_port=SRC_PORT + 1),
+              filterlog(src_port=SRC_PORT + 1)]
     result = evaluate_scenario(manifest, events, profile=profile, context=context)
     got = outcomes(result)
     assert got["SCN-004-A03"] == ("inconclusive", "prevention_not_demonstrated")
-    assert got["SCN-004-A02"][0] != "satisfied"
+    assert got["SCN-004-A02"][0] != "satisfied" and got["SCN-004-A04"][0] != "satisfied"
     assert result.final_status != "Prevented"
 
 
 def test_protocol_literals_are_case_exact_per_source(manifest, profile, context):
-    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(protocol="udp"), filterlog()],
+    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(protocol="udp"), siem_alert(), filterlog()],
                                profile=profile, context=context)
     assert outcomes(result)["SCN-004-A02"][0] != "satisfied"
     assert result.final_status != "Prevented"
+    # The SIEM copy keeps Snort's own upper-case literal, so the same rule applies to A04.
+    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), siem_alert(protocol="udp"), filterlog()],
+                               profile=profile, context=context)
+    assert outcomes(result)["SCN-004-A04"][0] != "satisfied"
+    assert result.final_status != "Prevented"
+
+
+def test_the_two_wazuh_assertions_do_not_borrow_each_other_evidence(manifest, profile, context):
+    # A01 and A04 both read source wazuh; only the provider literal separates them, so the
+    # SIEM alert must never stand in for endpoint telemetry.
+    result = evaluate_scenario(manifest, [siem_alert(), filterlog()], profile=profile, context=context)
+    got = outcomes(result)
+    assert got["SCN-004-A01"][0] != "satisfied"
+    assert got["SCN-004-A04"][0] != "satisfied"
+    assert result.final_status == "Missing telemetry"
+    # And the endpoint record alone never satisfies the SIEM assertion.
+    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), filterlog()], profile=profile, context=context)
+    assert outcomes(result)["SCN-004-A04"] == ("inconclusive", "collection_not_confirmed")
 
 
 def test_whole_second_firewall_time_stays_inside_the_window(manifest, profile, context):
     # Sysmon at 10.950 s; the same packet logged by OPNsense as 10 s is 0.95 s earlier.
-    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), filterlog(timestamp="2026-01-01T00:00:10Z")],
+    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), siem_alert(),
+                                          filterlog(timestamp="2026-01-01T00:00:10Z")],
                                profile=profile, context=context)
     assert result.final_status == "Prevented"
     too_early = filterlog(timestamp="2026-01-01T00:00:08.949999999Z")
-    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), too_early], profile=profile, context=context)
+    result = evaluate_scenario(manifest, [sysmon3(), snort_alert(), siem_alert(), too_early],
+                               profile=profile, context=context)
     assert outcomes(result)["SCN-004-A03"] == ("inconclusive", "prevention_not_demonstrated")
 
 
@@ -198,6 +229,17 @@ def test_events_from_the_real_lab_c_parsers_satisfy_the_profile(manifest, profil
     snort_event = snort.parse_snort_alert_json(
         json.dumps(alert, separators=(", ", " : ")).encode() + b"\n", source_ref="unit-snort",
         sensor_id="unit-sensor", deployment_mode="ids", **common)[0].event
+    record = json.loads((FIXTURES / "wazuh/snort-alert/wazuh-snort-alert-labc.sanitized.json").read_bytes())
+    inner = json.loads(record["full_log"])
+    inner.update(seconds=_epoch("2026-10-06T12:00:00Z"), timestamp="26/10/06-12:00:00.600000",
+                 src_addr=SENDER, src_port=SRC_PORT, dst_addr=RECEIVER, dst_port=DST_PORT,
+                 rule="1:1000010:1", msg="AEGIS SCN-004 marker UDP")
+    record["full_log"] = json.dumps(inner, separators=(",", ":"))
+    record["data"] = {key: str(value) for key, value in inner.items() if key != "action"} | {"action": inner["action"]}
+    siem = parse_wazuh_snort_alert_record(
+        json.dumps(record, separators=(",", ":")).encode() + b"\n", source_ref="unit-wazuh-snort",
+        collection_mode="direct", **common).event
+    assert siem.source_type == "wazuh" and siem.rule_id == "130110"
     line = ("<134>Oct  6 12:00:00 unit-fw filterlog[1]: 86,,," + LABEL + ",em2,match,block,in,4,0x0,,128,1,0,"
             "none,17,udp,94," + SENDER + "," + RECEIVER + "," + str(SRC_PORT) + "," + str(DST_PORT) + ",66\n")
     firewall = opnsense.parse_opnsense_filterlog(
@@ -209,6 +251,6 @@ def test_events_from_the_real_lab_c_parsers_satisfy_the_profile(manifest, profil
         "bindings": [{"name": "sender_ip", "value": SENDER}, {"name": "receiver_ip", "value": RECEIVER},
                      {"name": "receiver_port", "value": DST_PORT}, {"name": "block_rule_label", "value": LABEL}],
         "declarations": []})
-    result = evaluate_scenario(manifest, [sysmon, snort_event, firewall], profile=profile, context=context)
+    result = evaluate_scenario(manifest, [sysmon, snort_event, siem, firewall], profile=profile, context=context)
     assert result.final_status == "Prevented"
     assert all(outcome == "satisfied" for outcome, _ in outcomes(result).values())
