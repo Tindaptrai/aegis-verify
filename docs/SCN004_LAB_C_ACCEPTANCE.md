@@ -102,6 +102,28 @@ trên máy lab tại thời điểm thu, kèm số dòng đã giữ hoặc số 
 | `dd82ca67` | `00aacc85f7dd` · dòng 49185 | `5be1de3e4232` · `c445a36ca850` · 1 dòng | `a382a18f9543` · `ab5e879dcb35` + `64af63238119` · 208 dòng |
 | `9099c31e` | `d4fd07dab232` · dòng 50277 | `d8441072710f` · `0eff3c5c2711` · 1 dòng | `35e8690bc6be` · `ab5e879dcb35` + `c93c77182fa9` · 275 dòng |
 
+### Đối chứng chỉ kiểm bằng dữ liệu tổng hợp (không tính là lượt live)
+
+Năm điều kiện bảo vệ của công cụ không dựng được bằng cách chạy lab bình thường — phải
+cố tình làm sai thời điểm thu, đồng hồ hoặc vị trí chuỗi đánh dấu — nên chúng được kiểm
+bằng bundle đã sanitize, mỗi lần sửa đúng một trường rồi chạy qua cùng assembler.
+**Không đối chứng nào dưới đây được tính vào 16 lượt live.**
+
+| Đối chứng (dữ liệu tổng hợp) | Trường bị sửa | Kết quả |
+| --- | --- | --- |
+| Snort `inactive` lúc thu | `ActiveState` | không khai báo thu đủ → A02 `collection_not_confirmed`, `Inconclusive` |
+| Thu bằng chứng trước khi cửa sổ đóng | `collected_at` | như trên |
+| Chuỗi đánh dấu nằm ở đầu gói | `marker_offset = 0` | như trên — gói đó rule rev 1 bắt được nên không phải ca rule hụt |
+| Snort khởi động giữa cửa sổ | `ExecMainStartTimestamp` | như trên |
+| Đồng hồ sensor lệch 2 s | `Offset` của `timedatectl` | như trên |
+| `compare` theo chiều ngược (`satisfied` → `false_negative`) | thứ tự hai lượt | `Regression`, đúng như mong đợi, không phải `Regression Passed` |
+
+Trong bảng trên chỉ tình huống "Snort ngừng thu" có bản live tương ứng (lượt `4d5afd81`
+và `bf0f7220`); năm dòng còn lại chỉ tồn tại ở dạng tổng hợp và chỉ chứng minh hành vi
+của công cụ, không chứng minh hành vi của lab. Hai ca dương tính (rule hụt đủ điều kiện
+→ `False negative`, rule đã sửa → `Prevented`) cũng được chạy thử bằng dữ liệu tổng hợp
+trước khi chạy live; bằng chứng được tính là bản live ở bảng 1.
+
 ## 3. Phân biệt alert IDS tại nguồn và alert SIEM
 
 Hai lượt `ab842ef4` và `52f59d23` chạy khi agent Wazuh trên sensor đã dừng. Snort vẫn
