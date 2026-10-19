@@ -1,0 +1,124 @@
+{
+  "profile_schema_version": "0.1.0",
+  "profile_id": "scn005-elastic-safe-powershell",
+  "profile_version": "0.1.0",
+  "scenario_id": "SCN-005",
+  "scenario_version": "0.1.0",
+  "scenario_fingerprint": "5f208c60a968bbcd8ac4961ab798f5a08d88e62bc687c3a4f2f2231a11d82de3",
+  "rules": [
+    {
+      "assertion_id": "SCN-005-A01",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "elastic",
+      "scope": [
+        {
+          "field": "hostname",
+          "op": "eq",
+          "binding": "target_host"
+        },
+        {
+          "field": "process_id",
+          "op": "eq",
+          "binding": "child_pid"
+        },
+        {
+          "field": "process_name",
+          "op": "eq",
+          "binding": "powershell_image"
+        },
+        {
+          "field": "event_provider",
+          "op": "eq",
+          "value": "Microsoft-Windows-Sysmon"
+        }
+      ],
+      "match": [
+        {
+          "field": "event_action",
+          "op": "eq",
+          "value": "observed"
+        },
+        {
+          "field": "command_line",
+          "op": "exists"
+        }
+      ]
+    },
+    {
+      "assertion_id": "SCN-005-A02",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "elastic",
+      "scope": [
+        {
+          "field": "hostname",
+          "op": "eq",
+          "binding": "target_host"
+        },
+        {
+          "field": "process_id",
+          "op": "eq",
+          "binding": "child_pid"
+        },
+        {
+          "field": "event_provider",
+          "op": "eq",
+          "value": "Microsoft-Windows-PowerShell"
+        }
+      ],
+      "match": [
+        {
+          "field": "event_action",
+          "op": "eq",
+          "value": "observed"
+        }
+      ]
+    },
+    {
+      "assertion_id": "SCN-005-A03",
+      "role": "detection",
+      "capability": "supported",
+      "source_type": "elastic",
+      "scope": [
+        {
+          "field": "hostname",
+          "op": "eq",
+          "binding": "target_host"
+        },
+        {
+          "field": "process_id",
+          "op": "eq",
+          "binding": "child_pid"
+        },
+        {
+          "field": "event_provider",
+          "op": "eq",
+          "value": "elastic-security"
+        }
+      ],
+      "match": [
+        {
+          "field": "rule_id",
+          "op": "eq",
+          "value": "aegis-labb-safe-powershell-v1"
+        }
+      ],
+      "correlation": {
+        "anchor_assertion_id": "SCN-005-A02",
+        "join_pairs": [
+          {
+            "target_field": "hostname",
+            "anchor_field": "hostname"
+          },
+          {
+            "target_field": "process_id",
+            "anchor_field": "process_id"
+          }
+        ],
+        "min_delta_ns": 0,
+        "max_delta_ns": 120000000000
+      }
+    }
+  ]
+}

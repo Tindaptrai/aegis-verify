@@ -14,6 +14,7 @@ class ScenarioSource(StrEnum):
     SYSMON = "sysmon"
     POWERSHELL = "powershell"
     WAZUH = "wazuh"
+    ELASTIC = "elastic"
     SURICATA = "suricata"
     PFSENSE = "pfsense"
     COWRIE = "cowrie"

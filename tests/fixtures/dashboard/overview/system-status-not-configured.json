@@ -150,6 +150,18 @@
       "source": "none",
       "status": "not_configured",
       "summary": "connector"
+    },
+    {
+      "details": {
+        "seen_in_reports": null
+      },
+      "id": "connector_elastic",
+      "last_activity": null,
+      "name": "elastic",
+      "reason": "no_live_connector",
+      "source": "none",
+      "status": "not_configured",
+      "summary": "connector"
     }
   ],
   "generated_at": "2026-10-01T06:00:00Z",

@@ -66,7 +66,7 @@ EnvironmentId = Annotated[StrictStr, AfterValidator(_environment)]
 Digest = Annotated[StrictStr, Field(pattern=r"^[0-9a-f]{64}$")]
 BundlePath = Annotated[StrictStr, Field(min_length=1, max_length=4096)]
 DisplayLabel = Annotated[StrictStr, AfterValidator(_display_label)]
-ExtractionRule = Literal["wazuh-archive-full-log-utf8-v1"]
+ExtractionRule = Literal["wazuh-archive-full-log-utf8-v1", "physical-line-bytes-v1"]
 
 
 class _Context(BaseModel):
@@ -79,6 +79,10 @@ class _Context(BaseModel):
 
 class WazuhWin4688Context(_Context):
     collection_mode: Literal["direct", "forwarded", "unknown"]
+
+
+class ElasticExportContext(_Context):
+    """Offline exported search hits; source identity is read from the bytes."""
 
 
 class SuricataWazuhContext(_Context):
@@ -122,6 +126,7 @@ class WazuhCowrieAlertContext(_Context):
 
 ParserContext = (
     WazuhWin4688Context
+    | ElasticExportContext
     | SuricataWazuhContext
     | SuricataEveContext
     | SnortAlertJsonContext
@@ -131,6 +136,10 @@ ParserContext = (
     | WazuhCowrieAlertContext
 )
 ParserKey = Literal[
+    "elastic-sysmon1-v1",
+    "elastic-sysmon3-v1",
+    "elastic-powershell4104-v1",
+    "elastic-security-alert-v1",
     "wazuh-win4688-v2",
     "wazuh-sysmon1-v1",
     "wazuh-powershell4104-v1",
@@ -148,6 +157,10 @@ ParserKey = Literal[
 ]
 
 _CONTEXT_TYPES = {
+    "elastic-sysmon1-v1": ElasticExportContext,
+    "elastic-sysmon3-v1": ElasticExportContext,
+    "elastic-powershell4104-v1": ElasticExportContext,
+    "elastic-security-alert-v1": ElasticExportContext,
     "wazuh-win4688-v2": WazuhWin4688Context,
     "wazuh-sysmon1-v1": WazuhWin4688Context,
     "wazuh-powershell4104-v1": WazuhWin4688Context,
@@ -180,6 +193,10 @@ class Derivation(BaseModel):
     so nothing here is verified against it; the hash records which record the
     caller says these bytes came from, and the rule records how. Declaring a
     derivation never relaxes an assertion and never changes an identity.
+    ``physical-line-bytes-v1`` declares exact, ordered physical line slices from
+    the named parent hash, without re-encoding or changing fields/newlines. The
+    assembler must retain byte offsets and verify the parent separately; this
+    declaration alone is not proof of those bytes or collection completeness.
     """
 
     model_config = ConfigDict(

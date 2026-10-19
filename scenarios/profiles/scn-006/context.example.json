@@ -1,0 +1,14 @@
+{
+  "run_id": "scn006-example-run",
+  "environment_id": "example-lab",
+  "start": "2026-01-01T00:00:00Z",
+  "end": "2026-01-01T00:03:00Z",
+  "bindings": [
+    {"name": "sender_ip", "value": "192.0.2.10"},
+    {"name": "sender_port", "value": 51000},
+    {"name": "receiver_ip", "value": "198.51.100.20"},
+    {"name": "receiver_port", "value": 8080},
+    {"name": "pass_rule_tracker", "value": "1700000001"}
+  ],
+  "declarations": []
+}

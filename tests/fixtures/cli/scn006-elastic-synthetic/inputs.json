@@ -1,0 +1,38 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "synthetic-env",
+  "files": [
+    {
+      "path": "sysmon3.json",
+      "source_ref": "sysmon3.json",
+      "parser": "elastic-sysmon3-v1",
+      "sha256": "19ef0f8483b0a8ec851f9096758f3a7ef21a9c16b40134901e59df1e39cd60c0",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z"
+      }
+    },
+    {
+      "path": "eve.jsonl",
+      "source_ref": "eve.jsonl",
+      "parser": "suricata-eve-jsonl-v1",
+      "sha256": "3990d9dc42515a79ce09acf20a6ce803935261963fbe7bdd9200144d11c445e8",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z",
+        "sensor_id": "synthetic-sensor",
+        "deployment_mode": "ids"
+      }
+    },
+    {
+      "path": "filterlog.log",
+      "source_ref": "filterlog.log",
+      "parser": "pfsense-filterlog-bsd-ipv4-tcp-udp-v1",
+      "sha256": "24145a674b25efca5ba9e35fd1dabd37ca61a34bdf3826df5d7a786a7845f13a",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z",
+        "sensor_id": "synthetic-fw",
+        "source_year": 2026,
+        "source_utc_offset": "+00:00"
+      }
+    }
+  ]
+}

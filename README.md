@@ -24,8 +24,9 @@ rule changes remain separate, operator-controlled steps.
 > SCN-002/SCN-003 lab rounds (`aegis collect`). This is a single-operator lab tool,
 > not production certification or live fleet monitoring. Collection assurance is
 > attested by the operator, and all four manifests still declare `status: draft`.
-> Elastic support for Lab B is pending; delivering Elastic logs is separate from
-> accepting an AEGIS connector or verdict.
+> This branch adds offline Elastic adapters and separate Lab B draft profiles
+> SCN-005/006. See [Lab B integration](docs/LABB_ELASTIC.md); historical results
+> above remain scoped to their original commits and labs.
 >
 > **New to the project or running it in another lab?** Start with the
 > [lab onboarding guide](docs/LAB_ONBOARDING.md), then the
@@ -137,7 +138,7 @@ evidence links: [MVP_ACCEPTANCE.md](docs/MVP_ACCEPTANCE.md).
 | Lab | Stack and current status | Start here |
 | --- | --- | --- |
 | Lab A | Wazuh, pfSense, Suricata, Cowrie and Windows; original SCN-001/002/003 lab evidence | [Onboarding](docs/LAB_ONBOARDING.md), scenario result links above |
-| Lab B | Elastic Security, pfSense, Suricata and Windows. Direct EVE/filterlog parsers exist; Elastic source-event and detection-alert parsers, `SourceType.elastic`, and EVTX ingestion are not implemented at the status date above | [Lab B onboarding](docs/LAB_ONBOARDING.md#lab-b-elastic-security) |
+| Lab B | Offline Elastic Sysmon1/3, PowerShell4104 and Security alert exports; distinct `elastic` source and SCN-005/006 draft profiles. Direct EVE/filterlog supported; EVTX retained as native comparison evidence. No live Elastic collector. | [Lab B integration](docs/LABB_ELASTIC.md) |
 | Lab C | OPNsense, Snort 3, Wazuh and Windows. The reviewed code, runbook and acceptance chain is merged into main | [Runbook](docs/LABC_RUNBOOK.md), [acceptance](docs/SCN004_LAB_C_ACCEPTANCE.md), [approval and pins](docs/SCN004_A04_APPROVAL_AND_PINS.md) |
 
 ### Lab C integration verification — 2026-10-09

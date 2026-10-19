@@ -17,6 +17,7 @@ from pydantic import (
 
 class SourceType(StrEnum):
     WAZUH = "wazuh"
+    ELASTIC = "elastic"
     SURICATA = "suricata"
     PFSENSE = "pfsense"
     COWRIE = "cowrie"
