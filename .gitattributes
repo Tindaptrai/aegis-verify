@@ -6,3 +6,5 @@ detections/suricata/scn-002/*.template text eol=lf
 tests/fixtures/demo/scn-001/**/*.json text eol=lf
 detections/suricata/scn-003/*.template text eol=lf
 detections/wazuh/scn-003/*.template text eol=lf
+tests/fixtures/cli/scn005-elastic-synthetic/* text eol=lf
+tests/fixtures/cli/scn006-elastic-synthetic/* text eol=lf

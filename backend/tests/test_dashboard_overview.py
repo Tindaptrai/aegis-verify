@@ -80,7 +80,11 @@ def test_index_lists_every_manifest_including_never_run(lab):
     assert index["kind"] == "scenario_index"
     assert index["registry"]["configured"] is True and index["registry"]["errors"] == []
     rows = {row["id"]: row for row in index["scenarios"]}
-    assert set(rows) == {"SCN-001", "SCN-002", "SCN-003", "SCN-004"}
+    assert set(rows) == {"SCN-001", "SCN-002", "SCN-003", "SCN-004", "SCN-005", "SCN-006"}
+    for new_id in ("SCN-005", "SCN-006"):
+        assert rows[new_id]["run_state"] == "not_run"
+        assert rows[new_id]["latest_run"] is None
+        assert rows[new_id]["expected_outcome"] == "detected"
     assert rows["SCN-001"]["run_state"] == "not_run"
     assert rows["SCN-001"]["latest_run"] is None and rows["SCN-001"]["run_count"] == 0
     assert rows["SCN-001"]["status"] == "draft" and rows["SCN-001"]["expected_outcome"] == "detected"
@@ -107,7 +111,7 @@ def test_latest_run_is_chosen_by_run_window_end_and_counts_come_from_the_report(
 def test_kpis_count_scenarios_by_their_latest_run(lab):
     registry, store = lab
     kpi = build_scenario_index(registry, store)["kpi"]
-    assert kpi == {"total": 4, "run": 2, "not_run": 2, "by_status": {
+    assert kpi == {"total": 6, "run": 2, "not_run": 4, "by_status": {
         "Detected": 1, "Prevented": 1, "False negative": 0, "Missing telemetry": 0, "Inconclusive": 0, "Other": 0}}
 
 
@@ -141,7 +145,7 @@ def test_report_of_a_changed_manifest_is_history_not_the_current_result(tmp_path
     assert [(run["name"], run["manifest_match"], run["mismatch"]) for run in detail["runs"]] == [
         ("scn003.json", False, "version")]
     kpi = build_scenario_index(registry, store)["kpi"]
-    assert kpi["run"] == 0 and kpi["not_run"] == 4
+    assert kpi["run"] == 0 and kpi["not_run"] == 6
 
 
 def test_edited_manifest_with_same_version_is_detected_by_fingerprint(tmp_path, lab_reports):
@@ -189,7 +193,7 @@ def test_invalid_and_duplicate_manifests_are_reported(tmp_path, lab_reports):
         ("SCN-001-copy.yaml", "duplicate_scenario_id"),
         ("SCN-001-powershell-execution.yaml", "duplicate_scenario_id"),
         ("SCN-900-broken.yaml", "invalid_scenario")]
-    assert {row["id"] for row in index["scenarios"]} == {"SCN-002", "SCN-003", "SCN-004"}
+    assert {row["id"] for row in index["scenarios"]} == {"SCN-002", "SCN-003", "SCN-004", "SCN-005", "SCN-006"}
 
 
 def test_without_registry_reports_are_grouped_but_nothing_is_claimed(tmp_path, lab_reports):
@@ -224,12 +228,12 @@ def test_system_status_degraded_by_unreadable_report_and_unregistered_scenario(l
 def test_connectors_and_engine_are_never_claimed_healthy_without_live_data(lab):
     registry, store = lab
     status = build_system_status(registry, store, None, now=NOW)
-    for source in ("wazuh", "suricata", "snort", "pfsense", "opnsense", "cowrie"):
+    for source in ("wazuh", "suricata", "snort", "pfsense", "opnsense", "cowrie", "elastic"):
         component = _component(status, f"connector_{source}")
         assert component["status"] == "not_configured"
     # Nguồn của Lab C có thẻ riêng; không có bản ghi nào trong report của lab này thì để trống,
     # không biến thành "healthy" hay bị bỏ khỏi danh sách.
-    for source in ("snort", "opnsense"):
+    for source in ("snort", "opnsense", "elastic"):
         assert _component(status, f"connector_{source}")["details"]["seen_in_reports"] is None
     seen = _component(status, "connector_cowrie")["details"]["seen_in_reports"]
     assert seen == {"report": "scn003.json", "parsed": 2,
@@ -324,7 +328,7 @@ def _get(url):
 
 def test_http_endpoints_serve_index_detail_and_status(served):
     status, index = _get(served + "/api/scenarios")
-    assert status == 200 and index["kind"] == "scenario_index" and index["kpi"]["total"] == 4
+    assert status == 200 and index["kind"] == "scenario_index" and index["kpi"]["total"] == 6
     status, detail = _get(served + "/api/scenarios/SCN-002")
     assert status == 200 and detail["scenario"]["id"] == "SCN-002"
     status, system = _get(served + "/api/system/status")

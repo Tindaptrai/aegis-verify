@@ -26,6 +26,7 @@ export const COMPONENT_TEXT: Record<string, { title: string; description: string
   validation_engine: { title: 'Validation engine', description: 'Dashboard chỉ đọc kết quả có sẵn, không chạy engine.' },
   evidence_collection: { title: 'Evidence collection', description: 'Thu bằng chứng giới hạn từ Wazuh Indexer (Operations).' },
   connector_wazuh: { title: 'Wazuh connector', description: 'Parser Wazuh; thu live chỉ qua Operations.' },
+  connector_elastic: { title: 'Elastic connector', description: 'Parser bản export Windows và Elastic Security; chưa có bộ thu live trong AEGIS.' },
   connector_suricata: { title: 'Suricata connector', description: 'Parser EVE JSON; không có thu live.' },
   connector_snort: { title: 'Snort connector', description: 'Parser alert_json của Snort 3; không có thu live.' },
   connector_pfsense: { title: 'pfSense connector', description: 'Parser filterlog; không có thu live.' },

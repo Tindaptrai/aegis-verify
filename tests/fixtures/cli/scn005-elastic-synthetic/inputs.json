@@ -1,0 +1,33 @@
+{
+  "bundle_schema_version": "0.1.0",
+  "environment_id": "synthetic-env",
+  "files": [
+    {
+      "path": "sysmon1.json",
+      "source_ref": "sysmon1.json",
+      "parser": "elastic-sysmon1-v1",
+      "sha256": "e1fd656333aed0361c74edffc84d892b890dc78188b3b4c4f3ca821e523285d0",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z"
+      }
+    },
+    {
+      "path": "powershell4104.json",
+      "source_ref": "powershell4104.json",
+      "parser": "elastic-powershell4104-v1",
+      "sha256": "d3e0823593af7b74017597836c1579dba2ef0435d7ab20b5e3c2cb58adf387f6",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z"
+      }
+    },
+    {
+      "path": "alert.json",
+      "source_ref": "alert.json",
+      "parser": "elastic-security-alert-v1",
+      "sha256": "a79236aa1f2bcea33c3b6923f900c668497b07554137cb12a0bc8475badc26e3",
+      "context": {
+        "ingested_at": "2026-01-01T00:02:00Z"
+      }
+    }
+  ]
+}

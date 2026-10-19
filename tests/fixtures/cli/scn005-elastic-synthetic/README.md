@@ -1,0 +1,1 @@
+Synthetic offline fixture only. All events, IDs, times and addresses are invented for tests; this is not live lab evidence. Source bytes are pinned by inputs.json. Run the CLI with the corresponding SCN-005 or SCN-006 public profile. No completeness attestation is supplied.

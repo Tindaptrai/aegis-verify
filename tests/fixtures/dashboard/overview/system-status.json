@@ -13,7 +13,7 @@
     {
       "details": {
         "invalid": 0,
-        "manifests": 4,
+        "manifests": 6,
         "unregistered_reports": 3
       },
       "id": "scenario_registry",
@@ -146,6 +146,18 @@
       "id": "connector_cowrie",
       "last_activity": null,
       "name": "cowrie",
+      "reason": "no_live_connector",
+      "source": "none",
+      "status": "not_configured",
+      "summary": "connector"
+    },
+    {
+      "details": {
+        "seen_in_reports": null
+      },
+      "id": "connector_elastic",
+      "last_activity": null,
+      "name": "elastic",
       "reason": "no_live_connector",
       "source": "none",
       "status": "not_configured",

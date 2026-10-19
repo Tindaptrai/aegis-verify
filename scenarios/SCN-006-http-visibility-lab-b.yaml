@@ -1,0 +1,36 @@
+# Safe allowed-flow observability; this is not SCN-002 prevention.
+id: SCN-006
+name: Safe HTTP Visibility (Elastic Lab B)
+version: 0.1.0
+status: draft
+description: >-
+  Send an approved benign HTTP request to a controlled lab endpoint and verify
+  Windows connection telemetry, Suricata IDS detection and a pfSense allowed
+  record for the bound TCP flow. HTTP success and bidirectional packet visibility
+  are independently checked against raw operational evidence.
+safety:
+  destructive: false
+  authorization_required: true
+  notes: >-
+    Send only a benign health request to an allowlisted lab destination.
+    Pin the approved tuple, tracker and profile before execution. An IDS alert
+    or allowed firewall record does not demonstrate prevention.
+expected_sources:
+  - elastic
+  - suricata
+  - pfsense
+expected_outcome: detected
+assertions:
+  - id: SCN-006-A01
+    description: Windows Sysmon connection telemetry records the approved TCP tuple through Elastic.
+    source: elastic
+  - id: SCN-006-A02
+    description: Suricata records the reviewed marker signature for the correlated TCP tuple.
+    source: suricata
+  - id: SCN-006-A03
+    description: pfSense records an allowed action by the approved tracker for the bound TCP tuple.
+    source: pfsense
+tags:
+  - lab-b
+  - http-visibility
+  - allowed-flow

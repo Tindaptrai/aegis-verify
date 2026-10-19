@@ -9,16 +9,16 @@
       "Other": 0,
       "Prevented": 1
     },
-    "not_run": 2,
+    "not_run": 4,
     "run": 2,
-    "total": 4
+    "total": 6
   },
   "last_report_modified": "2026-09-21T14:13:27Z",
   "registry": {
     "configured": true,
     "error": null,
     "errors": [],
-    "manifest_count": 4
+    "manifest_count": 6
   },
   "report_errors": [
     {
@@ -191,6 +191,54 @@
         "prevention"
       ],
       "version": "0.2.0"
+    },
+    {
+      "comparison_count": 0,
+      "description": "Execute an approved, non-destructive PowerShell marker and verify process creation, complete script telemetry and an Elastic Security detection for the same endpoint process. Exact source-document ancestry is audited separately.",
+      "expected_outcome": "detected",
+      "expected_sources": [
+        "elastic"
+      ],
+      "file": "SCN-005-powershell-elastic-lab-b.yaml",
+      "fingerprint": "5f208c60a968bbcd8ac4961ab798f5a08d88e62bc687c3a4f2f2231a11d82de3",
+      "id": "SCN-005",
+      "latest_run": null,
+      "name": "Safe PowerShell Execution (Elastic Lab B)",
+      "run_count": 0,
+      "run_state": "not_run",
+      "stale_run_count": 0,
+      "status": "draft",
+      "tags": [
+        "lab-b",
+        "safe-powershell",
+        "detection"
+      ],
+      "version": "0.1.0"
+    },
+    {
+      "comparison_count": 0,
+      "description": "Send an approved benign HTTP request to a controlled lab endpoint and verify Windows connection telemetry, Suricata IDS detection and a pfSense allowed record for the bound TCP flow. HTTP success and bidirectional packet visibility are independently checked against raw operational evidence.",
+      "expected_outcome": "detected",
+      "expected_sources": [
+        "elastic",
+        "suricata",
+        "pfsense"
+      ],
+      "file": "SCN-006-http-visibility-lab-b.yaml",
+      "fingerprint": "4ce6f0a933be35878dd389c043bd9b68e9b7ed3f80bf3bb9eb2ff4c863ecb1f1",
+      "id": "SCN-006",
+      "latest_run": null,
+      "name": "Safe HTTP Visibility (Elastic Lab B)",
+      "run_count": 0,
+      "run_state": "not_run",
+      "stale_run_count": 0,
+      "status": "draft",
+      "tags": [
+        "lab-b",
+        "http-visibility",
+        "allowed-flow"
+      ],
+      "version": "0.1.0"
     }
   ],
   "unregistered": [

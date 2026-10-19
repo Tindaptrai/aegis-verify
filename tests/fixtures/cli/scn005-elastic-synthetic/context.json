@@ -1,0 +1,21 @@
+{
+  "run_id": "scn005-elastic-synthetic",
+  "environment_id": "synthetic-env",
+  "start": "2026-01-01T00:00:00Z",
+  "end": "2026-01-01T00:03:00Z",
+  "bindings": [
+    {
+      "name": "target_host",
+      "value": "synthetic-endpoint"
+    },
+    {
+      "name": "child_pid",
+      "value": 4242
+    },
+    {
+      "name": "powershell_image",
+      "value": "C:\\Synthetic\\powershell.exe"
+    }
+  ],
+  "declarations": []
+}

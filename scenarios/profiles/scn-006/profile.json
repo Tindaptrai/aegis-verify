@@ -1,0 +1,173 @@
+{
+  "profile_schema_version": "0.1.0",
+  "profile_id": "scn006-lab-b-http-visibility",
+  "profile_version": "0.1.0",
+  "scenario_id": "SCN-006",
+  "scenario_version": "0.1.0",
+  "scenario_fingerprint": "4ce6f0a933be35878dd389c043bd9b68e9b7ed3f80bf3bb9eb2ff4c863ecb1f1",
+  "rules": [
+    {
+      "assertion_id": "SCN-006-A01",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "elastic",
+      "scope": [
+        {
+          "field": "src_ip",
+          "op": "eq",
+          "binding": "sender_ip"
+        },
+        {
+          "field": "src_port",
+          "op": "eq",
+          "binding": "sender_port"
+        },
+        {
+          "field": "dst_ip",
+          "op": "eq",
+          "binding": "receiver_ip"
+        },
+        {
+          "field": "dst_port",
+          "op": "eq",
+          "binding": "receiver_port"
+        },
+        {
+          "field": "event_provider",
+          "op": "eq",
+          "value": "Microsoft-Windows-Sysmon"
+        },
+        {
+          "field": "protocol",
+          "op": "eq",
+          "value": "tcp"
+        }
+      ],
+      "match": [
+        {
+          "field": "event_action",
+          "op": "eq",
+          "value": "observed"
+        }
+      ]
+    },
+    {
+      "assertion_id": "SCN-006-A02",
+      "role": "detection",
+      "capability": "supported",
+      "source_type": "suricata",
+      "scope": [
+        {
+          "field": "src_ip",
+          "op": "eq",
+          "binding": "sender_ip"
+        },
+        {
+          "field": "src_port",
+          "op": "eq",
+          "binding": "sender_port"
+        },
+        {
+          "field": "dst_ip",
+          "op": "eq",
+          "binding": "receiver_ip"
+        },
+        {
+          "field": "dst_port",
+          "op": "eq",
+          "binding": "receiver_port"
+        },
+        {
+          "field": "event_provider",
+          "op": "eq",
+          "value": "suricata"
+        },
+        {
+          "field": "protocol",
+          "op": "eq",
+          "value": "TCP"
+        }
+      ],
+      "match": [
+        {
+          "field": "signature_id",
+          "op": "eq",
+          "value": "9900201"
+        }
+      ],
+      "correlation": {
+        "anchor_assertion_id": "SCN-006-A01",
+        "join_pairs": [
+          {
+            "target_field": "src_ip",
+            "anchor_field": "src_ip"
+          },
+          {
+            "target_field": "src_port",
+            "anchor_field": "src_port"
+          },
+          {
+            "target_field": "dst_ip",
+            "anchor_field": "dst_ip"
+          },
+          {
+            "target_field": "dst_port",
+            "anchor_field": "dst_port"
+          }
+        ],
+        "min_delta_ns": -3000000000,
+        "max_delta_ns": 3000000000
+      }
+    },
+    {
+      "assertion_id": "SCN-006-A03",
+      "role": "telemetry",
+      "capability": "supported",
+      "source_type": "pfsense",
+      "scope": [
+        {
+          "field": "src_ip",
+          "op": "eq",
+          "binding": "sender_ip"
+        },
+        {
+          "field": "src_port",
+          "op": "eq",
+          "binding": "sender_port"
+        },
+        {
+          "field": "dst_ip",
+          "op": "eq",
+          "binding": "receiver_ip"
+        },
+        {
+          "field": "dst_port",
+          "op": "eq",
+          "binding": "receiver_port"
+        },
+        {
+          "field": "event_provider",
+          "op": "eq",
+          "value": "pfSense-filterlog"
+        },
+        {
+          "field": "protocol",
+          "op": "eq",
+          "value": "tcp"
+        }
+      ],
+      "match": [
+        {
+          "field": "event_action",
+          "op": "eq",
+          "value": "allowed"
+        },
+        {
+          "field": "rule_id",
+          "op": "eq",
+          "binding": "pass_rule_tracker"
+        }
+      ]
+    }
+  ]
+}

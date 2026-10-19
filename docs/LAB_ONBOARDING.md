@@ -121,27 +121,44 @@ Bundle mẫu: `tests/fixtures/cli/scn002-lab-sanitized/` và
 | `cowrie-wazuh-v1` | tài liệu Cowrie trong Wazuh Indexer | dữ liệu Indexer |
 
 `source_type` hiện là tập đóng: `wazuh`, `suricata`, `pfsense`, `cowrie`, `snort`,
-`opnsense` (`snort` và `opnsense` thêm cho Lab C).
+`opnsense`, `elastic` (`elastic` là nguồn export riêng của Lab B).
 
 ### Lab B: Elastic Security
 
-| Nguồn | Dùng ngay? | Việc cần làm |
-| --- | --- | --- |
-| Suricata `eve.json` trên sensor | **Có**: `suricata-eve-jsonl-v1` đọc file gốc | Thu file gốc, đừng thu bản đã qua Elastic Agent. Context: `sensor_id` là tên sensor của bạn, `deployment_mode` là `ids`. Kiểm `event_type` và timestamp thật; sensor nhận mirror nên thấy cả hai chiều. |
-| pfSense syslog thô qua rsyslog | **Có điều kiện**: parser pfSense | pfSense phải gửi log dạng BSD (RFC 3164). Template rsyslog phải giữ nguyên dòng `Mmm dd HH:MM:SS <host> filterlog[pid]: <csv>`. So vài dòng với `tests/fixtures/cli/scn002-lab-sanitized/block/filterlog.log` trước khi tin. Parser chỉ nhận IPv4 TCP/UDP và cần `source_year`, `source_utc_offset` trong context. |
-| Windows (Sysmon, PowerShell) qua Elastic | **Chưa có parser** | Viết connector `connectors/elastic/`: parser cho tài liệu Elastic của Sysmon 1, Sysmon 3 và PowerShell 4104 (ECS, `winlog.*`), giữ `winlog.record_id` để đối chiếu với EVTX gốc. |
-| Elastic Security detection alerts | **Chưa có parser** | Parser riêng cho alert (`kibana.alert.*`), tách khỏi source event, giữ document ID và rule reference. |
-| EVTX gốc | Không có parser EVTX | Chỉ là bằng chứng đối chiếu: số bản ghi và record ID phải khớp với bản Elastic. |
+The Lab B branch adds fixture-first offline Elastic support. See
+[Lab B integration](LABB_ELASTIC.md) and the [parser contract](ELASTIC_PARSER.md).
+These are separate SCN-005/006 draft manifests, not replacements for SCN-001/002.
 
-Thứ tự nên làm:
+| Nguồn | Parser / giới hạn |
+| --- | --- |
+| Sysmon1 export | `elastic-sysmon1-v1`, one complete search hit with native `event.original` XML. |
+| Sysmon3 export | `elastic-sysmon3-v1`, native tuple and process facts; original channel time retained losslessly. |
+| PowerShell4104 export | `elastic-powershell4104-v1`, complete single-part script; no automatic fragment assembly. |
+| Elastic Security alert | `elastic-security-alert-v1`, explicit flat dotted alert shape, separate identity/time/provider and ancestor provenance. |
+| Suricata EVE | Existing `suricata-eve-jsonl-v1`, passive `deployment_mode=ids`. |
+| pfSense BSD filterlog | Existing IPv4TCP/UDP parser; preserve original remote bytes and document any companion/extraction. |
+| EVTX gốc | Retained as independent native evidence; binary EVTX parsing is not implemented and is not needed to read the reviewed Elastic search-hit export. |
 
-1. PR chung thêm `SourceType` `elastic` (mục 5).
-2. Parser Elastic cho Sysmon 1 và PowerShell 4104, có fixture sanitize.
-3. Một profile SCN-001 riêng cho Lab B.
-4. Một lượt baseline và một lượt SCN-001 được duyệt, rồi mới mở kịch bản khác.
+Add one entry per exact source-hit byte slice to `inputs.json` with the selected
+parser, its SHA256 and closed `ingested_at` context. Do not use a Wazuh parser or
+rename Elastic documents as Wazuh. Native XML timestamp, Elastic normalized time,
+alert creation time and ingestion time have separate documented meanings.
 
-Bảng ánh xạ trường mà kế hoạch Lab B yêu cầu nên theo tên trường canonical trong
-[CANONICAL_EVENT_V2](CANONICAL_EVENT_V2.md). Trường nào không có thì ghi là thiếu.
+Run the public synthetic CLI fixtures under `tests/fixtures/cli/scn005-elastic-synthetic/`
+and `scn006-elastic-synthetic/` before private collection. A green synthetic result
+proves code compatibility, not lab detection. Bind actual lab values only outside
+Git. Pin code, scenario, profile, payload and rule before a new live run; label old
+exports evaluated with the new contract as retrospective replay.
+
+SCN-005 validates source process/script telemetry and a correlated reviewed Elastic
+rule alert. SCN-006 validates an allowed HTTP flow's endpoint, Suricata and pfSense
+visibility; it never claims prevention. Exact Elastic ancestor index/document ID
+is audited in private provenance separately from the engine's hostname/PID/time
+witness joins. Missing alerts remain Inconclusive without valid collection assurance.
+
+There is no AEGIS live Elastic collector. Human review/merge, independent operator
+acceptance and long-term stability remain separate from local implementation and
+private replay. Existing Lab A/C ground truth and profiles stay unchanged.
 
 ### Lab C: OPNsense, Snort 3 và Wazuh
 

@@ -2,6 +2,13 @@
 
 from dataclasses import dataclass
 
+from ..connectors.elastic import (
+    ElasticParseError,
+    parse_elastic_sysmon1_document,
+    parse_elastic_sysmon3_document,
+    parse_elastic_powershell4104_document,
+    parse_elastic_security_alert_document,
+)
 from ..connectors.cowrie import (
     CowrieParseError,
     parse_cowrie_jsonl,
@@ -42,6 +49,10 @@ class LedgerEntry:
 
 
 _SOURCE_TYPES = {
+    "elastic-sysmon1-v1": "elastic",
+    "elastic-sysmon3-v1": "elastic",
+    "elastic-powershell4104-v1": "elastic",
+    "elastic-security-alert-v1": "elastic",
     "wazuh-win4688-v2": "wazuh",
     "wazuh-sysmon1-v1": "wazuh",
     "wazuh-powershell4104-v1": "wazuh",
@@ -87,6 +98,14 @@ def _parse(raw: bytes, entry: BundleFile, environment_id: str):
         "source_ref": entry.source_ref,
         "environment_id": environment_id,
     }
+    if entry.parser == "elastic-sysmon1-v1":
+        return parse_elastic_sysmon1_document(raw, **common, **context)
+    if entry.parser == "elastic-sysmon3-v1":
+        return parse_elastic_sysmon3_document(raw, **common, **context)
+    if entry.parser == "elastic-powershell4104-v1":
+        return parse_elastic_powershell4104_document(raw, **common, **context)
+    if entry.parser == "elastic-security-alert-v1":
+        return parse_elastic_security_alert_document(raw, **common, **context)
     if entry.parser == "wazuh-win4688-v2":
         return parse_wazuh_document(raw, **common, **context)
     if entry.parser == "wazuh-sysmon1-v1":
@@ -127,7 +146,7 @@ def parse_entry(
         raise IntakeError("unknown_parser", stage="evidence", field="parser")
     try:
         parsed = _parse(raw, entry, environment_id)
-    except (WazuhParseError, SuricataParseError, PfSenseParseError, CowrieParseError,
+    except (ElasticParseError, WazuhParseError, SuricataParseError, PfSenseParseError, CowrieParseError,
             SnortParseError, OpnSenseParseError) as error:
         diagnostic = error.diagnostic
         raise IntakeError(
@@ -144,7 +163,9 @@ def parse_entry(
             line_end=_physical_lines(raw),
         )
         return (event,), (ledger,)
-    if entry.parser in {"suricata-wazuh-alert-v1", "cowrie-wazuh-v1",
+    if entry.parser in {"elastic-sysmon1-v1", "elastic-sysmon3-v1",
+                        "elastic-powershell4104-v1", "elastic-security-alert-v1",
+                        "suricata-wazuh-alert-v1", "cowrie-wazuh-v1",
                         "wazuh-sysmon1-v1", "wazuh-powershell4104-v1",
                         "wazuh-sysmon3-archive-v1", "wazuh-suricata-alert-v1",
                         "wazuh-snort-alert-v1", "wazuh-cowrie-alert-v1"}:

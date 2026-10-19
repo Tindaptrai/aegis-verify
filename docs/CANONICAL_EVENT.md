@@ -34,7 +34,7 @@ giúp Python tìm đúng package mà không chỉnh PYTHONPATH thủ công.
 | `schema_version` | Chuỗi `1.0`, có giá trị mặc định; từ chối phiên bản khác |
 | `event_id` | Chuỗi không rỗng, ID được future result `evidence_ids` tham chiếu |
 | `timestamp` | Thời điểm sự kiện, có múi giờ, chuẩn hóa UTC |
-| `source_type` | `wazuh`, `suricata`, `pfsense` hoặc `cowrie` |
+| `source_type` | `wazuh`, `suricata`, `pfsense`, `cowrie`, `snort`, `opnsense`, `elastic` |
 | `environment_id` | Chuỗi không rỗng, định danh môi trường do bên gọi cung cấp |
 | `raw_event_ref` | Chuỗi không rỗng, tham chiếu dòng/bản ghi đã làm sạch |
 | `raw_event_hash` | SHA-256 của đúng bytes bản ghi đã làm sạch, 64 ký tự hex thường |

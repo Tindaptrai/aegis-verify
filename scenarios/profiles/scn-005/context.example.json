@@ -1,0 +1,12 @@
+{
+  "run_id": "scn005-example-run",
+  "environment_id": "example-lab",
+  "start": "2026-01-01T00:00:00Z",
+  "end": "2026-01-01T00:03:00Z",
+  "bindings": [
+    {"name": "target_host", "value": "windows.example"},
+    {"name": "child_pid", "value": 4242},
+    {"name": "powershell_image", "value": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"}
+  ],
+  "declarations": []
+}

@@ -1,0 +1,33 @@
+# Separate Lab B contract; SCN-001 remains the Wazuh scenario.
+id: SCN-005
+name: Safe PowerShell Execution (Elastic Lab B)
+version: 0.1.0
+status: draft
+description: >-
+  Execute an approved, non-destructive PowerShell marker and verify process
+  creation, complete script telemetry and an Elastic Security detection for
+  the same endpoint process. Exact source-document ancestry is audited separately.
+safety:
+  destructive: false
+  authorization_required: true
+  notes: >-
+    Run only an approved benign marker in the authorized lab. Pin the payload,
+    profile and observation window before execution. Never infer an absent
+    detection from incomplete collection.
+expected_sources:
+  - elastic
+expected_outcome: detected
+assertions:
+  - id: SCN-005-A01
+    description: Sysmon process creation telemetry identifies the approved PowerShell child process.
+    source: elastic
+  - id: SCN-005-A02
+    description: Complete single-part PowerShell script telemetry identifies the same child process.
+    source: elastic
+  - id: SCN-005-A03
+    description: The reviewed Elastic Security rule alerts on that endpoint process within its observation budget.
+    source: elastic
+tags:
+  - lab-b
+  - safe-powershell
+  - detection
