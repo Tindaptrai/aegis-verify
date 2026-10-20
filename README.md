@@ -7,9 +7,9 @@ telemetry from security controls, and links each validation result to raw eviden
 Its core workflow is **Gap → Rule Fix → Re-test → Pass**. Scenario execution and
 rule changes remain separate, operator-controlled steps.
 
-> Status (2026-10-09, package version **0.3.0**, Apache-2.0): lab MVP with four
-> scenarios and the merged Lab C expansion. Results use real lab evidence evaluated
-> offline through the engine:
+> Status (2026-10-20, package version **0.3.0**, Apache-2.0): lab MVP with six
+> scenarios and the merged Lab B and Lab C integrations. Results use real lab
+> evidence evaluated offline through the engine:
 >
 > - SCN-001 `Regression Passed` ([v3 result](docs/SCN001_V3_RESULT_2026-09-27.md));
 > - SCN-002 `Prevented` ([result](docs/SCN002_RESULT_2026-09-22.md));
@@ -19,14 +19,19 @@ rule changes remain separate, operator-controlled steps.
 >   `Prevented` → `Inconclusive` → `Prevented`
 >   ([evidence and acceptance](docs/SCN004_LAB_C_ACCEPTANCE.md),
 >   [approval and pins](docs/SCN004_A04_APPROVAL_AND_PINS.md)).
+> - SCN-005/006 / Lab B: offline Elastic integration is merged in
+>   [PR #144](https://github.com/Tindaptrai/aegis-verify/pull/144). Technical
+>   evidence was **accepted with conditions on 2026-10-20**; human review,
+>   the independent operator decision, and backup or a scoped exception remain
+>   open ([acceptance and remaining conditions](#lab-b-conditional-technical-acceptance)).
 >
 > Read-only collectors exist for the Wazuh Indexer (Python 3.11–3.13) and for
 > SCN-002/SCN-003 lab rounds (`aegis collect`). This is a single-operator lab tool,
 > not production certification or live fleet monitoring. Collection assurance is
-> attested by the operator, and all four manifests still declare `status: draft`.
-> This branch adds offline Elastic adapters and separate Lab B draft profiles
-> SCN-005/006. See [Lab B integration](docs/LABB_ELASTIC.md); historical results
-> above remain scoped to their original commits and labs.
+> attested by the operator, and all six manifests still declare `status: draft`.
+> Lab B uses exported Elastic files and separate SCN-005/006 profiles; it has no
+> live Elastic collector. See [Lab B integration](docs/LABB_ELASTIC.md);
+> historical results remain scoped to their original commits and labs.
 >
 > **New to the project or running it in another lab?** Start with the
 > [lab onboarding guide](docs/LAB_ONBOARDING.md), then the
@@ -35,9 +40,9 @@ rule changes remain separate, operator-controlled steps.
 
 ## Implemented lab scope
 
-- 4 security scenario manifests: SCN-001 through SCN-004
-- 6 source families: Wazuh, Suricata, pfSense, Cowrie, Snort 3, and OPNsense
-- 14 registered bundle parser keys; fixture tests require no live lab
+- 6 security scenario manifests: SCN-001 through SCN-006
+- 7 source families: Wazuh, Elastic, Suricata, pfSense, Cowrie, Snort 3, and OPNsense
+- 18 registered bundle parser keys; fixture tests require no live lab
 - One canonical event model
 - Evidence-linked validation results
 - Detection/prevention/missing-telemetry classification
@@ -52,7 +57,7 @@ backend/app/   Canonical model, bundle intake, validation engine, CLI, compare,
                read-only dashboard server with optional Operations mode
 backend/tests/ Unit, integration and CLI subprocess tests
 frontend/      Read-only results dashboard (Vite + React), see docs/DASHBOARD.md
-connectors/    Parsers for six source families; bounded read-only Wazuh reader
+connectors/    Parsers for seven source families; bounded read-only Wazuh reader
 scenarios/     Reviewed ground-truth manifests and public evaluation profiles
 detections/    Detection content templates (Wazuh SCN-001, Suricata SCN-002 marker)
 tests/fixtures Sanitized or synthetic evidence used by tests and CI
@@ -87,11 +92,12 @@ Windows/3.13 when they touch Windows-specific code ([CI notes](docs/CI.md)).
 ## Current implementation: bundle parsers
 
 A bundle's `inputs.json` names one parser key per file. The registry currently
-accepts fourteen keys; the [CLI guide](docs/CLI_VALIDATE.md) lists each key's input
-and required context.
+accepts eighteen keys; inputs and required context are documented in the
+[CLI guide](docs/CLI_VALIDATE.md) and the [Elastic parser contract](docs/ELASTIC_PARSER.md).
 
 | Source | Keys | Guide |
 | --- | --- | --- |
+| Elastic, offline exports | `elastic-sysmon1-v1`, `elastic-sysmon3-v1`, `elastic-powershell4104-v1`, `elastic-security-alert-v1` | [Parser contract](docs/ELASTIC_PARSER.md), [Lab B integration](docs/LABB_ELASTIC.md) |
 | Wazuh, Windows | `wazuh-win4688-v2`, `wazuh-sysmon1-v1`, `wazuh-powershell4104-v1` | [4688](docs/WAZUH_FIXTURE_PARSER.md), [Sysmon 1 and PowerShell 4104](docs/WINDOWS_TELEMETRY_PARSERS.md) |
 | Wazuh, network | `wazuh-sysmon3-archive-v1` (manager archive, UDP), `wazuh-suricata-alert-v1` (Wazuh alert raised from a Suricata alert), `wazuh-snort-alert-v1` (Wazuh alert raised from a Snort 3 alert) | [Wazuh from Suricata](docs/WAZUH_SURICATA_ALERT.md), [Wazuh from Snort](docs/WAZUH_SNORT_ALERT.md) |
 | Wazuh, deception | `wazuh-cowrie-alert-v1` (Wazuh manager alert raised from Cowrie) | [Wazuh from Cowrie](docs/WAZUH_COWRIE_ALERT.md) |
@@ -106,7 +112,7 @@ No parser opens a network connection or executes a scenario.
 
 ## Current implementation: scenario contract
 
-[Scenario YAML v0.1](docs/SCENARIO_SCHEMA.md) validates the four draft manifests,
+[Scenario YAML v0.1](docs/SCENARIO_SCHEMA.md) validates the six draft manifests,
 their safety metadata, source declarations and assertion identities. Approved
 ground-truth changes include the SCN-002-A04 rewording (PR #65) and the addition
 of SCN-004-A04 in scenario 0.2.0
@@ -125,6 +131,8 @@ a lab action, evaluate log evidence or return detection/prevention results.
 | [SCN-002](scenarios/SCN-002-attempted-exfiltration.yaml) attempted exfiltration | `prevented` | `Prevented` on real lab evidence, 2026-09-22; [public profile](docs/SCN002_EVALUATION_PROFILE.md), [block-round runbook](docs/SCN002_BLOCK_RUN_RUNBOOK.md), [`aegis collect scn002`](docs/SCN002_COLLECT.md), [result](docs/SCN002_RESULT_2026-09-22.md), [lab-derived sanitized bundles](tests/fixtures/cli/scn002-lab-sanitized/README.md) |
 | [SCN-003](scenarios/SCN-003-internal-deception.yaml) internal deception | `detected` | `Detected` on real lab evidence, 2026-09-26/27; [public profile](scenarios/profiles/scn-003/README.md), [control-run runbook](docs/SCN003_CONTROL_RUN_RUNBOOK.md), [`aegis collect scn003`](docs/SCN003_COLLECT.md), [result](docs/SCN003_RESULT_2026-09-26.md), [lab-derived sanitized bundle](tests/fixtures/cli/scn003-lab-sanitized/README.md) |
 | [SCN-004](scenarios/SCN-004-attempted-exfiltration-lab-c.yaml) attempted exfiltration, Lab C (Snort 3, OPNsense, Wazuh) | `prevented` | Technical acceptance and photos/dashboard accepted by the owner on 2026-10-09; scenario/profile 0.2.0 covers A01–A04. Historical 0.1.0 results, five live 0.2.0 runs, and two historical re-evaluations are recorded separately. [Configuration](docs/SCN004_LAB_C.md), [acceptance and evidence](docs/SCN004_LAB_C_ACCEPTANCE.md), [approval/pins](docs/SCN004_A04_APPROVAL_AND_PINS.md), [runbook](docs/LABC_RUNBOOK.md), [sanitized bundles](tests/fixtures/cli/scn004-lab-c-sanitized/README.md) |
+| [SCN-005](scenarios/SCN-005-powershell-elastic-lab-b.yaml) PowerShell telemetry and Elastic alert, Lab B | `detected` | `Detected` with 3/3 assertions and byte-identical replay for the reviewed run; [conditional technical acceptance](#lab-b-conditional-technical-acceptance), [profile](scenarios/profiles/scn-005/README.md). Full prepared timing contract remains unmet. |
+| [SCN-006](scenarios/SCN-006-http-visibility-lab-b.yaml) HTTP visibility, Lab B | `detected` | Endpoint telemetry, Suricata IDS and pfSense allow for the tested flow; accepted Elastic network alerts = 0. [Conditional technical acceptance](#lab-b-conditional-technical-acceptance), [profile](scenarios/profiles/scn-006/README.md). No prevention claim. |
 
 Ground truth changes need explicit owner approval; every manifest still says
 `status: draft`.
@@ -138,8 +146,54 @@ evidence links: [MVP_ACCEPTANCE.md](docs/MVP_ACCEPTANCE.md).
 | Lab | Stack and current status | Start here |
 | --- | --- | --- |
 | Lab A | Wazuh, pfSense, Suricata, Cowrie and Windows; original SCN-001/002/003 lab evidence | [Onboarding](docs/LAB_ONBOARDING.md), scenario result links above |
-| Lab B | Offline Elastic Sysmon1/3, PowerShell4104 and Security alert exports; distinct `elastic` source and SCN-005/006 draft profiles. Direct EVE/filterlog supported; EVTX retained as native comparison evidence. No live Elastic collector. | [Lab B integration](docs/LABB_ELASTIC.md) |
+| Lab B | **Technical evidence accepted with conditions on 2026-10-20.** Offline Elastic Sysmon1/3, PowerShell4104 and Security alerts; SCN-005/006 draft profiles, direct EVE/filterlog and native EVTX comparison. Human review, operator decision and backup/exception remain open. | [Acceptance and conditions](#lab-b-conditional-technical-acceptance), [integration](docs/LABB_ELASTIC.md) |
 | Lab C | OPNsense, Snort 3, Wazuh and Windows. The reviewed code, runbook and acceptance chain is merged into main | [Runbook](docs/LABC_RUNBOOK.md), [acceptance](docs/SCN004_LAB_C_ACCEPTANCE.md), [approval and pins](docs/SCN004_A04_APPROVAL_AND_PINS.md) |
+
+### Lab B conditional technical acceptance
+
+**Lab B đã nghiệm thu kỹ thuật có điều kiện ngày 20/10/2026.** The project
+user explicitly confirmed conditional acceptance of the reviewed technical
+evidence. The private minutes record that decision; the conditions below
+remain open.
+
+- Code integration: [PR #144](https://github.com/Tindaptrai/aegis-verify/pull/144)
+  was merged on 2026-10-19 at `a8c894f8ad4e1ddecace4a9d73b2e35c9fbe4b22`.
+- Reviewed SCN-005 run `LABB-OP-PS-20261019-01`: native → Elastic **28/28**,
+  engine **`Detected`, 3/3 assertions**, and byte-identical offline replay.
+  Codex software performed that run; independent human operation remains unproven.
+- The two new Kibana photos are accepted. V2's **10/10** previously missing
+  references and the appendix's **60/60** index entries and **58/58** technical
+  references were checked. Neither new photos nor another V2 delivery is required.
+- SCN-006 evidence is scoped to endpoint telemetry, Suricata IDS and pfSense
+  allow for the tested flow. A historical PowerShell alert in the NET export is
+  not a new network detection; accepted Elastic network alerts = **0**.
+
+The full prepared timing contract **did not pass**: two ancillary Sysmon3 records
+have absolute time differences of **3.5660511 s** and **3.5847297 s**, exceeding
+the prepared **3 s** threshold. Neither is a child-process assertion witness;
+the engine's 3/3 result retains its narrower scope. Preflight also changed
+replicas from 1 to 0 on exactly two Security UI lists/items indices; the recorded
+requests and readbacks were checked, with human review of the change still open.
+
+| Open condition | Required resolution |
+| --- | --- |
+| DK-01 — actual human review | Nguyễn Lê Trọng Tín or a designated replacement records the evidence reviewed, date, scope and conclusions, including timing variance and the replica change. |
+| DK-02 — different human operator | The project owner chooses one approved SCN-005 or SCN-006 live run by a demonstrably different human, or records a scoped exception accepting the software-operated run. |
+| DK-03 — VM backup/recovery | Provide VM disk/configuration backup and restore evidence, or a direct owner exception naming the affected VMs/items, reason, scope and accepted risk. |
+
+Conditional technical acceptance does not waive these conditions or authorize
+VM cleanup. Manifests remain `draft` and collection assurance remains `unknown`;
+there is no claim of sustained stability, prevention, gap→fix/regression or
+outage→recovery for Lab B.
+
+The reviewed SCN-005 witnesses are retained in the private report under these EIDs:
+
+- Child Sysmon1: `elastic:evidence-v1:f2337755b8c2a2d8671232677c3c7d0473443a4647aa8e8db66ef84829b8f60b`.
+- PowerShell marker: `elastic:evidence-v1:bb74454425768bef7e27600b1323131921c772a378684e10d4c6eaba56edc023`.
+- Linked alert: `elastic:evidence-v1:52cac63fbf7e0f12d7fc4c88d82bdbf01d5076cfe19248f297558f342abaccc3`.
+
+The local-only minutes and review archives are listed below. Lab B's public
+fixture examples are synthetic; its raw lab evidence is not published here.
 
 ### Lab C integration verification — 2026-10-09
 
@@ -169,17 +223,18 @@ They are ignored by Git and will not be downloaded by cloning the repository:
 | --- | --- |
 | `raw-evidence/lab-c/nghiem-thu-2026-10-09/` | Three source handoff/photo archives, the merged-main handoff ZIP and SHA-256 sidecar, audit reports, final integration receipt, `README.txt` and `SHA256SUMS.txt` |
 | `raw-evidence/lab-b/YEU-CAU-BAN-GIAO-LAB-B.md` | Operator handoff checklist: native EVTX, Elastic source events and separate alerts, queries/count reconciliation, run provenance, hashes, checks, screenshots, runbook and backup |
+| `raw-evidence/lab-b/BIEN-BAN-NGHIEM-THU-KY-THUAT-LAB-B-CO-DIEU-KIEN-20261020.md` | Conditional technical acceptance minutes, including the user's confirmation and open conditions DK-01/02/03 |
+| `raw-evidence/lab-b/nghiem-thu-2026-10-19/`, `raw-evidence/lab-b/nghiem-thu-2026-10-20/`, `raw-evidence/lab-b/nghiem-thu-2026-10-20-phu-luc/` | Frozen FINAL/live evidence and the V2/appendix archives, hash inventories, independent checks and review reports |
 
 Collect and assemble evidence into a private directory **outside a Git working
 tree**, even if a subdirectory is ignored. Reviewed archive copies can be stored
 locally afterward. Keep an independent backup of raw evidence, VM disks and
 configuration, and check recovery before removing lab VMs.
 
-Lab B can deliver its raw data before an Elastic connector exists. AEGIS verdicts
-require reviewed connectors and a suitable approved scenario/profile contract;
-the current Wazuh SCN-001 cannot be converted to Elastic by changing its profile
-alone. Do not relabel Elastic records as Wazuh or modify existing ground truth
-to make them pass.
+Lab B evaluates exported Elastic evidence through its own offline parsers and
+SCN-005/006 contracts. Native EVTX remains comparison evidence. Use the matching
+profile and reviewed context bindings; do not relabel Elastic records as Wazuh
+or change existing ground truth to make them pass.
 
 ## First technical milestone
 
