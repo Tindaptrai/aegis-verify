@@ -21,9 +21,9 @@ rule changes remain separate, operator-controlled steps.
 >   [approval and pins](docs/SCN004_A04_APPROVAL_AND_PINS.md)).
 > - SCN-005/006 / Lab B: offline Elastic integration is merged in
 >   [PR #144](https://github.com/Tindaptrai/aegis-verify/pull/144). Technical
->   evidence was **accepted with conditions on 2026-10-20**; human review,
->   the independent operator decision, and backup or a scoped exception remain
->   open ([acceptance and remaining conditions](#lab-b-conditional-technical-acceptance)).
+>   evidence was **accepted with conditions on 2026-10-20**. A run-specific
+>   software-operation exception is recorded; human review and VM backup/recovery
+>   remain open ([acceptance and remaining conditions](#lab-b-conditional-technical-acceptance)).
 >
 > Read-only collectors exist for the Wazuh Indexer (Python 3.11–3.13) and for
 > SCN-002/SCN-003 lab rounds (`aegis collect`). This is a single-operator lab tool,
@@ -146,15 +146,16 @@ evidence links: [MVP_ACCEPTANCE.md](docs/MVP_ACCEPTANCE.md).
 | Lab | Stack and current status | Start here |
 | --- | --- | --- |
 | Lab A | Wazuh, pfSense, Suricata, Cowrie and Windows; original SCN-001/002/003 lab evidence | [Onboarding](docs/LAB_ONBOARDING.md), scenario result links above |
-| Lab B | **Technical evidence accepted with conditions on 2026-10-20.** Offline Elastic Sysmon1/3, PowerShell4104 and Security alerts; SCN-005/006 draft profiles, direct EVE/filterlog and native EVTX comparison. Human review, operator decision and backup/exception remain open. | [Acceptance and conditions](#lab-b-conditional-technical-acceptance), [integration](docs/LABB_ELASTIC.md) |
+| Lab B | **Technical evidence accepted with conditions on 2026-10-20.** Offline Elastic Sysmon1/3, PowerShell4104 and Security alerts; SCN-005/006 draft profiles, direct EVE/filterlog and native EVTX comparison. A run-specific software-operation exception is recorded; human review and VM backup/recovery remain open. | [Acceptance and conditions](#lab-b-conditional-technical-acceptance), [integration](docs/LABB_ELASTIC.md) |
 | Lab C | OPNsense, Snort 3, Wazuh and Windows. The reviewed code, runbook and acceptance chain is merged into main | [Runbook](docs/LABC_RUNBOOK.md), [acceptance](docs/SCN004_LAB_C_ACCEPTANCE.md), [approval and pins](docs/SCN004_A04_APPROVAL_AND_PINS.md) |
 
 ### Lab B conditional technical acceptance
 
 **Lab B đã nghiệm thu kỹ thuật có điều kiện ngày 20/10/2026.** The project
 user explicitly confirmed conditional acceptance of the reviewed technical
-evidence. The private minutes record that decision; the conditions below
-remain open.
+evidence. A subsequent direct decision resolves DK-02 by a scoped exception
+and retains actual backup/recovery under DK-03. The private minutes and decision
+appendix record both decisions; DK-01 and DK-03 remain open.
 
 - Code integration: [PR #144](https://github.com/Tindaptrai/aegis-verify/pull/144)
   was merged on 2026-10-19 at `a8c894f8ad4e1ddecace4a9d73b2e35c9fbe4b22`.
@@ -178,10 +179,14 @@ requests and readbacks were checked, with human review of the change still open.
 | Open condition | Required resolution |
 | --- | --- |
 | DK-01 — actual human review | Nguyễn Lê Trọng Tín or a designated replacement records the evidence reviewed, date, scope and conclusions, including timing variance and the replica change. |
-| DK-02 — different human operator | The project owner chooses one approved SCN-005 or SCN-006 live run by a demonstrably different human, or records a scoped exception accepting the software-operated run. |
-| DK-03 — VM backup/recovery | Provide VM disk/configuration backup and restore evidence, or a direct owner exception naming the affected VMs/items, reason, scope and accepted risk. |
+| DK-03 — VM backup/recovery | The user retained the requirement to back up VM disks/configuration and test recovery for the VMs that must be kept. Provide the actual inventory, independent storage, hashes and isolated restore results; no backup exception was selected. |
 
-Conditional technical acceptance does not waive these conditions or authorize
+**DK-02 — resolved by scoped exception on 2026-10-20:** the user accepted only
+the reviewed evidence from software-operated run `LABB-OP-PS-20261019-01`.
+This does not demonstrate that another human can independently operate the
+runbook, or waive independent-operation requirements for other runs.
+
+Conditional technical acceptance does not close DK-01 or DK-03 or authorize
 VM cleanup. Manifests remain `draft` and collection assurance remains `unknown`;
 there is no claim of sustained stability, prevention, gap→fix/regression or
 outage→recovery for Lab B.
@@ -223,7 +228,8 @@ They are ignored by Git and will not be downloaded by cloning the repository:
 | --- | --- |
 | `raw-evidence/lab-c/nghiem-thu-2026-10-09/` | Three source handoff/photo archives, the merged-main handoff ZIP and SHA-256 sidecar, audit reports, final integration receipt, `README.txt` and `SHA256SUMS.txt` |
 | `raw-evidence/lab-b/YEU-CAU-BAN-GIAO-LAB-B.md` | Operator handoff checklist: native EVTX, Elastic source events and separate alerts, queries/count reconciliation, run provenance, hashes, checks, screenshots, runbook and backup |
-| `raw-evidence/lab-b/BIEN-BAN-NGHIEM-THU-KY-THUAT-LAB-B-CO-DIEU-KIEN-20261020.md` | Conditional technical acceptance minutes, including the user's confirmation and open conditions DK-01/02/03 |
+| `raw-evidence/lab-b/BIEN-BAN-NGHIEM-THU-KY-THUAT-LAB-B-CO-DIEU-KIEN-20261020.md` | Original conditional technical acceptance minutes; subsequent decisions are recorded separately below |
+| `raw-evidence/lab-b/PHU-LUC-QUYET-DINH-DK02-DK03-LAB-B-20261020.md` | Direct user decisions: DK-02 closed by a run-specific software-operation exception; DK-03 retains actual backup/restore. DK-01 and DK-03 remain open |
 | `raw-evidence/lab-b/nghiem-thu-2026-10-19/`, `raw-evidence/lab-b/nghiem-thu-2026-10-20/`, `raw-evidence/lab-b/nghiem-thu-2026-10-20-phu-luc/` | Frozen FINAL/live evidence and the V2/appendix archives, hash inventories, independent checks and review reports |
 
 Collect and assemble evidence into a private directory **outside a Git working
