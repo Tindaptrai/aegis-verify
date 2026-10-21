@@ -1,0 +1,4 @@
+include packaging/public-resources.json
+include scripts/stage_release_resources.py
+# Resource data is added by SourceWithResources from the same allowlist as the
+# wheel, including only assets referenced by the fresh frontend index.
