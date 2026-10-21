@@ -79,6 +79,8 @@ jobs:
           subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'scripts/smoke_distribution.py'), '--exe', str(release / 'aegis/aegis.exe'), '--result', str(work / 'portable-smoke.json')], cwd=work, check=True)
           subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/build.py'), '--python', str(python), '--wheel', str(wheel), '--out', str(work / 'onefile'), '--onefile'], cwd=work, check=True)
           subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'scripts/smoke_distribution.py'), '--exe', str(work / 'onefile/release/aegis.exe'), '--result', str(work / 'onefile-smoke.json')], cwd=work, check=True)
+          launcher_environment = dict(os.environ, AEGIS_DEMO_TEST_EXE=str(work / 'onefile/release/aegis.exe'))
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/demo-launcher/test_launcher.py')], cwd=work, env=launcher_environment, check=True)
           subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/msi.py'), '--release', str(release), '--wix', str(tools / 'wix.exe'), '--out', str(work / 'msi')], cwd=work, check=True)
       - name: Create labelled synthetic older MSI for upgrade checks
         shell: python

@@ -1,0 +1,35 @@
+AEGIS VERIFY — BẤM ĐÚP ĐỂ MỞ DEMO
+
+1. Bấm đúp file AEGIS-Demo.exe (icon khiên chữ A), hoặc shortcut AEGIS Verify Demo
+   trên Desktop nếu đã được tạo trên máy này.
+2. Chờ launcher tạo bộ demo mới và khởi động dashboard. Trình duyệt mặc định
+   sẽ tự mở khi dữ liệu đã sẵn sàng.
+3. Giữ cửa sổ launcher mở khi đang xem dashboard. Có thể dùng nút Open Dashboard
+   để mở lại trình duyệt, và Stop/đóng cửa sổ launcher để dừng dashboard của lượt này.
+
+KHÔNG CẦN NHẬP LỆNH POWERSHELL, CÀI PYTHON HAY NODE.
+Máy Windows x64 cần có .NET Framework 4.8 (máy hiện tại đã có).
+
+DỮ LIỆU VÀ LOG
+
+- Mỗi lần mở tạo một thư mục demo riêng dưới LocalAppData/AEGIS Verify/Demo.
+- Xem đường dẫn cụ thể trên cửa sổ launcher; log vẫn được giữ để chẩn đoán lỗi.
+- Đóng launcher không xóa report/demo và không dừng các ứng dụng khác.
+- Đây là replay dữ liệu demo: không tấn công hệ thống, không kết nối SIEM,
+  không sửa rule, không tạo bằng chứng thực nghiệm mới.
+
+GỬI SANG MÁY KHÁC
+
+Giải nén toàn bộ ZIP, giữ nguyên thư mục và bấm đúp AEGIS-Demo.exe.
+Giữ AEGIS-Demo.exe, aegis.exe và các file giấy phép/metadata đi kèm cùng nhau.
+Shortcut Desktop của máy này chỉ trỏ đến vị trí bộ demo trên máy này.
+
+NẾU GẶP LỖI
+
+Đọc thông báo trong cửa sổ launcher và log tại thư mục dữ liệu được hiển thị.
+Kiểm tra aegis.exe vẫn nằm cạnh AEGIS-Demo.exe. Nếu trình duyệt không tự mở,
+dùng nút Open Dashboard hoặc sao chép địa chỉ hiện trên launcher.
+Bản pilot chưa ký số; áp dụng chính sách phần mềm của máy/tổ chức.
+
+Core AEGIS Verify: 0.4.0. Launcher là tiện ích mở demo riêng, có icon riêng;
+bộ cài Portable/MSI 0.4.0 đã nghiệm thu trước đó vẫn có hồ sơ riêng.
