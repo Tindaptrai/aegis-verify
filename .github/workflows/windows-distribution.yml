@@ -1,0 +1,200 @@
+name: Windows distribution
+
+on:
+  pull_request:
+    paths:
+      - 'packaging/windows/**'
+      - '.github/workflows/windows-distribution.yml'
+      - 'pyproject.toml'
+      - 'setup.py'
+      - 'MANIFEST.in'
+      - 'scripts/stage_release_resources.py'
+      - 'scripts/smoke_distribution.py'
+      - 'backend/app/**'
+      - 'connectors/**'
+      - 'frontend/**'
+      - 'scenarios/**'
+      - 'tests/fixtures/cli/**'
+      - 'tests/fixtures/dashboard/**'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-distribution-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  msi:
+    name: MSI install, repair and upgrade (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Prepare isolated build tools and wheel
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+          import venv
+
+          checkout = Path.cwd().resolve()
+          work = Path(tempfile.mkdtemp(prefix='aegis-msi-ci-', dir=os.environ['RUNNER_TEMP'])).resolve()
+          assert not work.is_relative_to(checkout)
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as output:
+              output.write(f'AEGIS_MSI_WORK={work}\n')
+          tools = work / 'wix-tools'
+          subprocess.run(['dotnet', 'tool', 'install', 'wix', '--version', '5.0.2', '--tool-path', str(tools)], check=True)
+          subprocess.run(['npm.cmd', 'ci'], cwd=checkout / 'frontend', check=True)
+          subprocess.run(['npm.cmd', 'run', 'build'], cwd=checkout / 'frontend', check=True)
+          wheels = work / 'wheels'
+          wheels.mkdir()
+          subprocess.run([sys.executable, '-m', 'pip', 'wheel', '.', '--no-deps', '--wheel-dir', str(wheels)], check=True)
+          wheel, = wheels.glob('aegis_verify-*.whl')
+          environment = work / 'build-environment'
+          venv.EnvBuilder(with_pip=True).create(environment)
+          python = environment / 'Scripts/python.exe'
+          subprocess.run([str(python), '-I', '-m', 'pip', 'install', str(wheel)], cwd=work, check=True)
+          subprocess.run([str(python), '-I', '-m', 'pip', 'install', '-r', str(checkout / 'packaging/windows/requirements-build.txt')], cwd=work, check=True)
+          subprocess.run([str(python), '-I', '-m', 'pip', 'check'], cwd=work, check=True)
+          subprocess.run([str(python), '-I', '-m', 'unittest', 'discover', '-s', str(checkout / 'packaging/windows'), '-p', 'test_*.py', '-v'], cwd=work, check=True)
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'scripts/smoke_distribution.py'), '--python', str(python), '--result', str(work / 'wheel-smoke.json')], cwd=work, check=True)
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/build.py'), '--python', str(python), '--wheel', str(wheel), '--out', str(work / 'onedir')], cwd=work, check=True)
+          release = work / 'onedir/release'
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'scripts/smoke_distribution.py'), '--exe', str(release / 'aegis/aegis.exe'), '--result', str(work / 'portable-smoke.json')], cwd=work, check=True)
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/build.py'), '--python', str(python), '--wheel', str(wheel), '--out', str(work / 'onefile'), '--onefile'], cwd=work, check=True)
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'scripts/smoke_distribution.py'), '--exe', str(work / 'onefile/release/aegis.exe'), '--result', str(work / 'onefile-smoke.json')], cwd=work, check=True)
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/msi.py'), '--release', str(release), '--wix', str(tools / 'wix.exe'), '--out', str(work / 'msi')], cwd=work, check=True)
+      - name: Create labelled synthetic older MSI for upgrade checks
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          from uuid import UUID, uuid5
+          import xml.etree.ElementTree as ET
+
+          work = Path(os.environ['AEGIS_MSI_WORK'])
+          fixture = work / 'synthetic-upgrade-fixture'
+          fixture.mkdir()
+          source = work / 'msi/build-context/AEGIS-Verify.wxs'
+          ns = {'w': 'http://wixtoolset.org/schemas/v4/wxs'}
+          ET.register_namespace('', ns['w'])
+          tree = ET.parse(source)
+          package = tree.getroot().find('w:Package', ns)
+          upgrade = UUID(package.attrib['UpgradeCode'].strip('{}'))
+          package.set('Version', '0.3.99')
+          package.set('ProductCode', '{' + str(uuid5(upgrade, 'ci-synthetic-product:0.3.99')).upper() + '}')
+          tag = lambda name: '{' + ns['w'] + '}' + name
+          ET.SubElement(package, tag('Property'), Id='AEGIS_SYNTHETIC_UPGRADE_FIXTURE', Value='1')
+          for value in package.findall('.//w:RegistryValue', ns):
+              if value.attrib.get('Name') == 'Version':
+                  value.set('Value', '0.3.99')
+          changed = fixture / 'QUICKSTART.md'
+          changed.write_text('CI SYNTHETIC OLDER MSI: changed unversioned file; not a production release.\n', encoding='utf-8')
+          quickstart, = [row for row in package.findall('.//w:File', ns) if row.attrib.get('Name') == 'QUICKSTART.md']
+          quickstart.set('Source', str(changed))
+          removed = fixture / 'CI_SYNTHETIC_OLDER_ONLY.txt'
+          removed.write_text('CI SYNTHETIC OLDER MSI: upgrade must remove this test-only marker.\n', encoding='utf-8')
+          install, = [row for row in package.findall('.//w:Directory', ns) if row.attrib.get('Id') == 'INSTALLFOLDER']
+          component = ET.SubElement(install, tag('Component'), Id='C_CI_SYNTHETIC_OLDER_ONLY', Guid='{' + str(uuid5(upgrade, 'ci-synthetic-removed-marker')).upper() + '}', Bitness='always64')
+          ET.SubElement(component, tag('File'), Id='F_CI_SYNTHETIC_OLDER_ONLY', Name=removed.name, Source=str(removed), KeyPath='yes')
+          feature = package.find('w:Feature', ns)
+          ET.SubElement(feature, tag('ComponentRef'), Id=component.attrib['Id'])
+          authoring = fixture / 'SYNTHETIC-OLDER-NOT-A-PRODUCTION-RELEASE.wxs'
+          tree.write(authoring, encoding='utf-8', xml_declaration=True)
+          (fixture / 'README.txt').write_text('Synthetic 0.3.99 fixture tests MSI upgrade mechanics only. The application payload is the current version; it is not evidence of migration from a previous production release.\n', encoding='utf-8')
+          subprocess.run([str(work / 'wix-tools/wix.exe'), 'build', str(authoring), '-arch', 'x64', '-o', str(fixture / 'SYNTHETIC-OLDER.msi')], cwd=fixture, check=True)
+      - name: Inspect, extract and exercise MSI on disposable runner
+        shell: pwsh
+        run: |
+          $work = $env:AEGIS_MSI_WORK
+          $msi = Join-Path $work 'msi/AEGIS-Verify-0.4.0-x64.msi'
+          $release = Join-Path $work 'onedir/release'
+          $smoke = Join-Path $env:GITHUB_WORKSPACE 'scripts/smoke_distribution.py'
+          $verifier = Join-Path $env:GITHUB_WORKSPACE 'packaging/windows/verify_msi.ps1'
+          & powershell -NoProfile -File $verifier -Msi $msi -Release $release -ExtractTo (Join-Path $work 'administrative-image') -LogDirectory (Join-Path $work 'extraction-logs') -Python (Get-Command python).Source -SmokeScript $smoke -Result (Join-Path $work 'extraction-result.json')
+          if ($LASTEXITCODE -ne 0) { throw 'MSI extraction verification failed' }
+          & powershell -NoProfile -File $verifier -Msi $msi -Release $release -InstallTest -AcknowledgeDisposableRunner -BaselineMsi (Join-Path $work 'synthetic-upgrade-fixture/SYNTHETIC-OLDER.msi') -LogDirectory (Join-Path $work 'installation-logs') -Python (Get-Command python).Source -SmokeScript $smoke -Result (Join-Path $work 'installation-result.json')
+          if ($LASTEXITCODE -ne 0) { throw 'MSI installation verification failed' }
+      - name: Curate delivery files and validation logs
+        if: always() && env.AEGIS_MSI_WORK != ''
+        shell: python
+        run: |
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+
+          work = Path(os.environ['AEGIS_MSI_WORK'])
+          delivery = work / 'delivery'
+          delivery.mkdir()
+          for name, label in [('onedir', 'Portable'), ('onefile', 'Onefile')]:
+              release = work / name / 'release'
+              if (work / ('portable-smoke.json' if name == 'onedir' else 'onefile-smoke.json')).is_file():
+                  shutil.make_archive(str(delivery / f'AEGIS-Verify-0.4.0-{label}-x64'), 'zip', root_dir=release)
+          wheels = work / 'wheels'
+          if wheels.is_dir():
+              for wheel in wheels.glob('aegis_verify-*.whl'):
+                  shutil.copyfile(wheel, delivery / wheel.name)
+          msi_root = work / 'msi'
+          if msi_root.is_dir():
+              for source in msi_root.iterdir():
+                  if source.is_file() and source.suffix.lower() in {'.msi', '.json', '.txt', '.md'}:
+                      shutil.copyfile(source, delivery / source.name)
+              authoring = msi_root / 'build-context/AEGIS-Verify.wxs'
+              if authoring.is_file():
+                  shutil.copyfile(authoring, delivery / authoring.name)
+          checks = delivery / 'checks'
+          checks.mkdir()
+          for pattern in ('*-smoke.json', '*result.json'):
+              for source in work.glob(pattern):
+                  shutil.copyfile(source, checks / source.name)
+          for name in ('extraction-logs', 'installation-logs'):
+              source = work / name
+              if source.is_dir():
+                  selected = checks / name
+                  selected.mkdir()
+                  for path in source.iterdir():
+                      if path.is_file() and path.suffix.lower() in {'.log', '.json'}:
+                          shutil.copyfile(path, selected / path.name)
+          (delivery / 'VALIDATION-SCOPE.txt').write_text('Unsigned CI artifacts. Inspect installation-result.json before treating MSI lifecycle checks as passed. Hosted Windows runner includes development tools; EXE smoke removes Python and Node from runtime PATH. This is not a fresh enterprise VM or EDR/signing acceptance. Synthetic older MSI checks upgrade mechanics only.\n', encoding='utf-8')
+          (delivery / 'BUILD-SOURCE.json').write_text(json.dumps({'source_commit': os.environ['GITHUB_SHA'], 'source_ref': os.environ['GITHUB_REF'], 'event': os.environ['GITHUB_EVENT_NAME'], 'run_id': os.environ['GITHUB_RUN_ID']}, indent=2) + '\n', encoding='utf-8')
+          manifest = ''.join(f'{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(delivery).as_posix()}\n' for path in sorted(delivery.rglob('*')) if path.is_file())
+          (delivery / 'DELIVERY-SHA256SUMS.txt').write_text(manifest, encoding='utf-8')
+      - name: Show retained validation records
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:AEGIS_MSI_WORK -and (Test-Path -LiteralPath $env:AEGIS_MSI_WORK)) {
+            Get-ChildItem -LiteralPath $env:AEGIS_MSI_WORK -Filter '*result.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName }
+            Get-ChildItem -LiteralPath $env:AEGIS_MSI_WORK -Filter 'installer-steps.json' -File -Recurse | ForEach-Object { Get-Content -LiteralPath $_.FullName }
+            Get-ChildItem -LiteralPath $env:AEGIS_MSI_WORK -Filter '*.log' -File -Recurse | ForEach-Object {
+              Write-Output ('Installer log: ' + $_.FullName)
+              Get-Content -LiteralPath $_.FullName -Tail 35
+            }
+          }
+      - name: Retain private delivery artifacts and logs
+        if: always() && env.AEGIS_MSI_WORK != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: AEGIS-Verify-0.4.0-Windows-${{ github.run_id }}
+          path: ${{ env.AEGIS_MSI_WORK }}/delivery
+          retention-days: 7
+          if-no-files-found: warn

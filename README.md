@@ -7,7 +7,7 @@ telemetry from security controls, and links each validation result to raw eviden
 Its core workflow is **Gap → Rule Fix → Re-test → Pass**. Scenario execution and
 rule changes remain separate, operator-controlled steps.
 
-> Status (2026-10-21, package version **0.3.0**, Apache-2.0): lab MVP with six
+> Status (2026-10-21, package version **0.4.0**, Apache-2.0): lab MVP with six
 > scenarios and the merged Lab B and Lab C integrations. Results use real lab
 > evidence evaluated offline through the engine:
 >
@@ -39,7 +39,20 @@ rule changes remain separate, operator-controlled steps.
 > [offline demo](docs/DEMO_WALKTHROUGH.md). Release notes:
 > [0.3.0](docs/RELEASE_NOTES_0.3.0.md).
 
-## Standalone distribution preview
+## Windows 0.4.0 distribution preview
+
+Two Windows x64 packages share the same core and scenario/evidence contracts:
+
+| Package | Intended use | Installation |
+| --- | --- | --- |
+| Windows Portable (EXE/ZIP) | Individual operators, offline demo and trial | Extract and run from a terminal; no system installation |
+| Windows MSI | IT-managed installation of the local application | Per-machine Program Files installation, Start Menu shortcuts, silent maintenance and major upgrades |
+
+MSI deployment does not add a shared server, accounts/RBAC, automatic collection
+or a Windows service. Reports and private configuration belong outside the
+installation directory and are preserved by maintenance. These are unsigned pilot
+artifacts; see [0.4.0 release notes](docs/RELEASE_NOTES_0.4.0.md),
+[MSI deployment](docs/WINDOWS_MSI.md) and [installer validation](docs/MSI_VALIDATION.md).
 
 The wheel includes the built dashboard, six unchanged scenario manifests and
 reviewed public demo inputs. After installing the wheel in a fresh environment,
@@ -57,8 +70,8 @@ Without `--bundled`, the dashboard retains its explicit static/scenario options.
 
 For Windows EXE builds and the fresh-machine acceptance checklist, see
 [Windows distribution](docs/WINDOWS_DISTRIBUTION.md). The offline EXE includes
-Python and the UI; it is a local CLI preview. MSI rollout and authenticated shared
-server deployment have separate gates in [enterprise deployment](docs/ENTERPRISE_DEPLOYMENT.md).
+Python and the UI; it is a local CLI preview. Enterprise pilot and authenticated
+shared-server deployment have separate gates in [enterprise deployment](docs/ENTERPRISE_DEPLOYMENT.md).
 Source wheel builds require a fresh `npm ci` / `npm run build` in `frontend/` first.
 
 ## Implemented lab scope
