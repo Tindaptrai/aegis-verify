@@ -43,8 +43,6 @@ jobs:
         run: python -m pip check
       - name: Run complete fixture suite
         run: python -m pytest -q -rs -p no:cacheprovider
-      - name: Build package
-        run: python -m pip wheel . --no-deps --wheel-dir dist
 
   frontend:
     name: Frontend tests and build
@@ -64,3 +62,57 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
+  standalone-distribution:
+    name: Installed wheel (${{ matrix.os }}, Python 3.13)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Build fresh dashboard resources
+        shell: python
+        run: |
+          import os
+          import subprocess
+          npm = 'npm.cmd' if os.name == 'nt' else 'npm'
+          subprocess.run([npm, 'ci'], cwd='frontend', check=True)
+          subprocess.run([npm, 'run', 'build'], cwd='frontend', check=True)
+      - name: Build wheel and test a clean external installation
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+          import venv
+
+          checkout = Path.cwd().resolve()
+          work = Path(tempfile.mkdtemp(prefix='aegis-wheel-install-', dir=os.environ['RUNNER_TEMP'])).resolve()
+          assert not work.is_relative_to(checkout)
+          wheels = work / 'wheels'
+          wheels.mkdir()
+          subprocess.run([sys.executable, '-m', 'pip', 'wheel', '.', '--no-deps',
+                          '--wheel-dir', str(wheels)], check=True)
+          built = list(wheels.glob('aegis_verify-*.whl'))
+          assert len(built) == 1, 'Expected exactly one newly built AEGIS wheel'
+          environment = work / 'environment'
+          venv.EnvBuilder(with_pip=True).create(environment)
+          python = environment / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+          subprocess.run([str(python), '-I', '-m', 'pip', 'install', str(built[0])], cwd=work, check=True)
+          subprocess.run([str(python), '-I', '-m', 'pip', 'check'], cwd=work, check=True)
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'scripts/smoke_distribution.py'),
+                          '--python', str(python), '--result', str(work / 'result.json')], cwd=work, check=True)

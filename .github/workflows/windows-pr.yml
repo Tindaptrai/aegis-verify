@@ -1,15 +1,16 @@
 name: Windows PR checks
 
-# Pull requests run Linux only in ci.yml to save Actions minutes. A pull request
-# that touches code with Windows-specific behaviour (ACLs, PowerShell launcher and
-# runner, Operations, Wazuh collectors) also runs one Windows job here, so a Windows
-# regression is caught before merge rather than on main (#111, #114).
+# The full fixture suite normally runs Linux only for PRs in ci.yml. Its separate
+# installed-wheel jobs always test Linux and Windows. Changes to Windows-specific
+# behaviour also run the complete Windows fixture suite here (#111, #114).
 on:
   pull_request:
     paths:
       - 'backend/app/private_fs.py'
+      - 'backend/app/cli/**'
       - 'backend/app/dashboard/**'
       - 'backend/app/demo/**'
+      - 'backend/app/resources/**'
       - 'backend/app/intake/io.py'
       - 'connectors/wazuh/**'
       - 'demos/**'
@@ -19,10 +20,16 @@ on:
       - 'backend/tests/test_operations_*.py'
       - 'backend/tests/test_private_fs.py'
       - 'backend/tests/test_scn001_runner.py'
+      - 'backend/tests/test_standalone_demo.py'
+      - 'backend/tests/test_release_resources.py'
       - 'backend/tests/test_snapshot_bundle.py'
       - 'backend/tests/test_wazuh_*.py'
       - 'backend/tests/windows_acl.py'
       - 'pyproject.toml'
+      - 'setup.py'
+      - 'MANIFEST.in'
+      - 'packaging/**'
+      - '.gitattributes'
       - '.github/workflows/**'
 
 permissions:

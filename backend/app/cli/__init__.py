@@ -5,6 +5,7 @@ import datetime
 import json
 import os
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from ..intake import IntakeError
@@ -116,7 +117,15 @@ class _SafeParser(argparse.ArgumentParser):
 
 def _parser() -> argparse.ArgumentParser:
     parser = _SafeParser(prog="aegis", allow_abbrev=False)
+    try:
+        installed_version = version("aegis-verify")
+    except PackageNotFoundError:
+        installed_version = "unknown"
+    parser.add_argument("--version", action="version", version="AEGIS Verify " + installed_version)
     commands = parser.add_subparsers(dest="command", required=True)
+    demo = commands.add_parser("demo", allow_abbrev=False)
+    demo.add_argument("--out", required=True,
+                      help="Create a new offline public replay kit; existing paths are never overwritten.")
     validate = commands.add_parser("validate", allow_abbrev=False)
     validate.add_argument("--scenario", required=True)
     validate.add_argument("--fixture", required=True)
@@ -136,6 +145,8 @@ def _parser() -> argparse.ArgumentParser:
     dashboard.add_argument("--static")
     dashboard.add_argument("--operations-config")
     dashboard.add_argument("--scenarios")
+    dashboard.add_argument("--bundled", action="store_true",
+                           help="Use installed dashboard/scenarios when explicit paths are omitted.")
 
     collect = commands.add_parser("collect", allow_abbrev=False)
     collect.add_argument("target", choices=("scn002", "scn003"))
@@ -171,6 +182,8 @@ def _duplicates(arguments: list[str]) -> bool:
         "--host",
         "--port",
         "--static",
+        "--scenarios",
+        "--bundled",
         "--operations-config",
         "--config",
         "--key",
@@ -228,11 +241,31 @@ def main(argv=None) -> int:
     if options.command == "collect":
         return _collect(options)
 
+    if options.command == "demo":
+        from ..demo.standalone import prepare_demo
+        try:
+            summary = prepare_demo(options.out)
+        except IntakeError as error:
+            return 2 if _emit_error(error, "json") else 4
+        except OSError:
+            return 2 if _emit_error(IntakeError("output_error", stage="output"), "json") else 4
+        except Exception:
+            _emit_error(IntakeError("internal_error"), "json")
+            return 4
+        return 0 if _write_stream("stdout", json.dumps(summary, ensure_ascii=True, indent=2) + "\n") else 4
+
     if options.command == "dashboard":
         if not 0 <= options.port <= 65535:
             error = IntakeError("invalid_arguments")
             return 2 if _emit_error(error, "text") else 4
         try:
+            if options.bundled and (options.static is None or options.scenarios is None):
+                from ..resources import resource_root
+                bundled_root = resource_root()
+                if options.static is None:
+                    options.static = bundled_root / "static"
+                if options.scenarios is None:
+                    options.scenarios = bundled_root / "scenarios"
             return serve(options.reports, host=options.host, port=options.port,
                          static_dir=options.static, operations_config=options.operations_config,
                          scenarios_dir=options.scenarios,

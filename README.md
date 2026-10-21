@@ -39,6 +39,28 @@ rule changes remain separate, operator-controlled steps.
 > [offline demo](docs/DEMO_WALKTHROUGH.md). Release notes:
 > [0.3.0](docs/RELEASE_NOTES_0.3.0.md).
 
+## Standalone distribution preview
+
+The wheel includes the built dashboard, six unchanged scenario manifests and
+reviewed public demo inputs. After installing the wheel in a fresh environment,
+run outside the checkout (the output directory must be new and its parent must exist):
+
+```powershell
+aegis demo --out "$env:TEMP\aegis-demo-new"
+aegis dashboard --bundled --reports "$env:TEMP\aegis-demo-new\reports"
+```
+
+The replay evaluates eight cases and writes twelve reports. SCN-002/003/004 use
+sanitized derivatives; SCN-005/006 and the separate Gap/Fix comparison are
+synthetic examples. It does not run live scenarios or certify enterprise coverage.
+Without `--bundled`, the dashboard retains its explicit static/scenario options.
+
+For Windows EXE builds and the fresh-machine acceptance checklist, see
+[Windows distribution](docs/WINDOWS_DISTRIBUTION.md). The offline EXE includes
+Python and the UI; it is a local CLI preview. MSI rollout and authenticated shared
+server deployment have separate gates in [enterprise deployment](docs/ENTERPRISE_DEPLOYMENT.md).
+Source wheel builds require a fresh `npm ci` / `npm run build` in `frontend/` first.
+
 ## Implemented lab scope
 
 - 6 security scenario manifests: SCN-001 through SCN-006

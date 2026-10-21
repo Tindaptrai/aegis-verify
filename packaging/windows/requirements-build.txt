@@ -1,0 +1,3 @@
+# Build tools only; not application runtime dependencies.
+# Bundles the reviewed installed wheel and Python runtime for Windows users.
+PyInstaller==6.22.3
