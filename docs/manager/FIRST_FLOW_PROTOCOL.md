@@ -40,13 +40,15 @@ All requests are POST with `application/json`, except the response to a poll may
 - `POST /agent/v1/jobs/<job_id>/start` with `{ "protocol": "0.1.0", "payload_sha256": "..." }`: 200 `{ "authorized": true }` exactly once for a valid current lease. Any duplicate/uncertain start is 409; the agent must not execute on a missing/non-200 start response. The owner reconciles ambiguous starts. Revoked/cancelled/expired leases fail.
 - `POST /agent/v1/jobs/<job_id>/receipt` with the receipt object below: 200 `{ "accepted": true }` on first receipt or byte-equivalent validated retry. Changed receipt is 409. Cross-device submissions fail.
 
+An authenticated `execution_unknown` receipt may reconcile a durably leased job even when its start request never reached Manager. A late unknown receipt after owner reconciliation/cancellation/expiry is acknowledged without reopening that terminal state or changing a newer job. Never-leased jobs cannot use this path. Unknown execution still requires owner reconciliation before new dispatch where the old state is unresolved.
+
 No live running-job cancellation endpoint in this foreground slice. Owner can Ctrl+C the foreground agent; local timeout and Job Object bound execution when Manager is unavailable. Queued jobs can be cancelled in Manager before start. Full service cancellation is a later v1 gate.
 
 ## Terminal receipt
 
 Exactly: `protocol`, `receipt_id` (UUID), `job_id`, `payload_sha256` (SHA-256 of signed payload bytes), `state` (`succeeded`, `failed`, `execution_unknown`), `started_at`, `finished_at` (UTC second precision), `exit_code` (integer or null), `cleanup_succeeded` (bool).
 
-`succeeded` requires exit_code 0 and cleanup true. Times must lie within approved start/deadline bounds and finished >= started. Receipt is an authenticated caller report, not a Wazuh event or independent attestation. It never supplies canonical evidence IDs or a detection verdict. Detailed runner output remains private in the agent spool for later study review, not uploaded as detection evidence.
+`succeeded` requires exit_code 0 and cleanup true. For succeeded/failed, times must lie within approved start/deadline bounds and finished >= started. For `execution_unknown`, `started_at` may be null when launch was not observed; `finished_at` means journal reconciliation time, may be later than the execution deadline, and must be between not_before and Manager receipt time plus five seconds. It does not attest an execution end. Cleanup remains false unless actually checked. Receipt is an authenticated caller report, not a Wazuh event or independent attestation. It never supplies canonical evidence IDs or a detection verdict. Detailed runner output remains private in the agent spool for later study review, not uploaded as detection evidence.
 
 ## Journal and recovery
 
