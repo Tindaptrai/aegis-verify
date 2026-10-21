@@ -7,7 +7,7 @@ telemetry from security controls, and links each validation result to raw eviden
 Its core workflow is **Gap → Rule Fix → Re-test → Pass**. Scenario execution and
 rule changes remain separate, operator-controlled steps.
 
-> Status (2026-10-20, package version **0.3.0**, Apache-2.0): lab MVP with six
+> Status (2026-10-21, package version **0.3.0**, Apache-2.0): lab MVP with six
 > scenarios and the merged Lab B and Lab C integrations. Results use real lab
 > evidence evaluated offline through the engine:
 >
@@ -21,9 +21,10 @@ rule changes remain separate, operator-controlled steps.
 >   [approval and pins](docs/SCN004_A04_APPROVAL_AND_PINS.md)).
 > - SCN-005/006 / Lab B: offline Elastic integration is merged in
 >   [PR #144](https://github.com/Tindaptrai/aegis-verify/pull/144). Technical
->   evidence was **accepted with conditions on 2026-10-20**. A run-specific
->   software-operation exception is recorded; human review and VM backup/recovery
->   remain open ([acceptance and remaining conditions](#lab-b-conditional-technical-acceptance)).
+>   evidence was **accepted within the reviewed lab scope on 2026-10-21**:
+>   DK-01 human review and DK-03 backup/recovery are closed; DK-02 retains its
+>   run-specific software-operation exception
+>   ([acceptance and scope](#lab-b-conditional-technical-acceptance)).
 >
 > Read-only collectors exist for the Wazuh Indexer (Python 3.11–3.13) and for
 > SCN-002/SCN-003 lab rounds (`aegis collect`). This is a single-operator lab tool,
@@ -131,8 +132,8 @@ a lab action, evaluate log evidence or return detection/prevention results.
 | [SCN-002](scenarios/SCN-002-attempted-exfiltration.yaml) attempted exfiltration | `prevented` | `Prevented` on real lab evidence, 2026-09-22; [public profile](docs/SCN002_EVALUATION_PROFILE.md), [block-round runbook](docs/SCN002_BLOCK_RUN_RUNBOOK.md), [`aegis collect scn002`](docs/SCN002_COLLECT.md), [result](docs/SCN002_RESULT_2026-09-22.md), [lab-derived sanitized bundles](tests/fixtures/cli/scn002-lab-sanitized/README.md) |
 | [SCN-003](scenarios/SCN-003-internal-deception.yaml) internal deception | `detected` | `Detected` on real lab evidence, 2026-09-26/27; [public profile](scenarios/profiles/scn-003/README.md), [control-run runbook](docs/SCN003_CONTROL_RUN_RUNBOOK.md), [`aegis collect scn003`](docs/SCN003_COLLECT.md), [result](docs/SCN003_RESULT_2026-09-26.md), [lab-derived sanitized bundle](tests/fixtures/cli/scn003-lab-sanitized/README.md) |
 | [SCN-004](scenarios/SCN-004-attempted-exfiltration-lab-c.yaml) attempted exfiltration, Lab C (Snort 3, OPNsense, Wazuh) | `prevented` | Technical acceptance and photos/dashboard accepted by the owner on 2026-10-09; scenario/profile 0.2.0 covers A01–A04. Historical 0.1.0 results, five live 0.2.0 runs, and two historical re-evaluations are recorded separately. [Configuration](docs/SCN004_LAB_C.md), [acceptance and evidence](docs/SCN004_LAB_C_ACCEPTANCE.md), [approval/pins](docs/SCN004_A04_APPROVAL_AND_PINS.md), [runbook](docs/LABC_RUNBOOK.md), [sanitized bundles](tests/fixtures/cli/scn004-lab-c-sanitized/README.md) |
-| [SCN-005](scenarios/SCN-005-powershell-elastic-lab-b.yaml) PowerShell telemetry and Elastic alert, Lab B | `detected` | `Detected` with 3/3 assertions and byte-identical replay for the reviewed run; [conditional technical acceptance](#lab-b-conditional-technical-acceptance), [profile](scenarios/profiles/scn-005/README.md). Full prepared timing contract remains unmet. |
-| [SCN-006](scenarios/SCN-006-http-visibility-lab-b.yaml) HTTP visibility, Lab B | `detected` | Endpoint telemetry, Suricata IDS and pfSense allow for the tested flow; accepted Elastic network alerts = 0. [Conditional technical acceptance](#lab-b-conditional-technical-acceptance), [profile](scenarios/profiles/scn-006/README.md). No prevention claim. |
+| [SCN-005](scenarios/SCN-005-powershell-elastic-lab-b.yaml) PowerShell telemetry and Elastic alert, Lab B | `detected` | `Detected` with 3/3 assertions and byte-identical replay for the reviewed run; [technical acceptance and scope](#lab-b-conditional-technical-acceptance), [profile](scenarios/profiles/scn-005/README.md). Full prepared timing contract remains unmet. |
+| [SCN-006](scenarios/SCN-006-http-visibility-lab-b.yaml) HTTP visibility, Lab B | `detected` | Endpoint telemetry, Suricata IDS and pfSense allow for the tested flow; accepted Elastic network alerts = 0. [Technical acceptance and scope](#lab-b-conditional-technical-acceptance), [profile](scenarios/profiles/scn-006/README.md). No prevention claim. |
 
 Ground truth changes need explicit owner approval; every manifest still says
 `status: draft`.
@@ -146,16 +147,21 @@ evidence links: [MVP_ACCEPTANCE.md](docs/MVP_ACCEPTANCE.md).
 | Lab | Stack and current status | Start here |
 | --- | --- | --- |
 | Lab A | Wazuh, pfSense, Suricata, Cowrie and Windows; original SCN-001/002/003 lab evidence | [Onboarding](docs/LAB_ONBOARDING.md), scenario result links above |
-| Lab B | **Technical evidence accepted with conditions on 2026-10-20.** Offline Elastic Sysmon1/3, PowerShell4104 and Security alerts; SCN-005/006 draft profiles, direct EVE/filterlog and native EVTX comparison. A run-specific software-operation exception is recorded; human review and VM backup/recovery remain open. | [Acceptance and conditions](#lab-b-conditional-technical-acceptance), [integration](docs/LABB_ELASTIC.md) |
+| Lab B | **Technical acceptance completed within the reviewed lab scope on 2026-10-21.** Offline Elastic Sysmon1/3, PowerShell4104 and Security alerts; SCN-005/006 draft profiles, direct EVE/filterlog and native EVTX comparison. DK-01 and DK-03 are closed; DK-02 retains its exception for the reviewed software-operated run only. | [Acceptance and scope](#lab-b-conditional-technical-acceptance), [integration](docs/LABB_ELASTIC.md) |
 | Lab C | OPNsense, Snort 3, Wazuh and Windows. The reviewed code, runbook and acceptance chain is merged into main | [Runbook](docs/LABC_RUNBOOK.md), [acceptance](docs/SCN004_LAB_C_ACCEPTANCE.md), [approval and pins](docs/SCN004_A04_APPROVAL_AND_PINS.md) |
 
-### Lab B conditional technical acceptance
+<a id="lab-b-conditional-technical-acceptance"></a>
 
-**Lab B đã nghiệm thu kỹ thuật có điều kiện ngày 20/10/2026.** The project
-user explicitly confirmed conditional acceptance of the reviewed technical
-evidence. A subsequent direct decision resolves DK-02 by a scoped exception
-and retains actual backup/recovery under DK-03. The private minutes and decision
-appendix record both decisions; DK-01 and DK-03 remain open.
+### Lab B technical acceptance
+
+**Lab B đã hoàn tất nghiệm thu kỹ thuật trong phạm vi bằng chứng đã kiểm ngày
+21/10/2026: DK-01 và DK-03 đã đóng; DK-02 giữ ngoại lệ có phạm vi.** The original
+conditional acceptance dated 2026-10-20 is retained as a historical record.
+On 2026-10-21 the user accepted the reviewed backup/recovery evidence, and
+Nguyễn Lê Trọng Tín directly confirmed in this chat that he had reviewed the
+dossier and accepted the two disclosed timing variances and the replica change
+within the lab scope. The private confirmation and closing appendix record these
+decisions.
 
 - Code integration: [PR #144](https://github.com/Tindaptrai/aegis-verify/pull/144)
   was merged on 2026-10-19 at `a8c894f8ad4e1ddecace4a9d73b2e35c9fbe4b22`.
@@ -174,22 +180,31 @@ have absolute time differences of **3.5660511 s** and **3.5847297 s**, exceeding
 the prepared **3 s** threshold. Neither is a child-process assertion witness;
 the engine's 3/3 result retains its narrower scope. Preflight also changed
 replicas from 1 to 0 on exactly two Security UI lists/items indices; the recorded
-requests and readbacks were checked, with human review of the change still open.
+requests and readbacks were checked. Tín accepted these disclosed limits within
+the lab scope; this does not turn the timing contract into a pass or provide
+node-loss redundancy for the two indices.
 
-| Open condition | Required resolution |
+| Condition | Recorded resolution |
 | --- | --- |
-| DK-01 — actual human review | Nguyễn Lê Trọng Tín or a designated replacement records the evidence reviewed, date, scope and conclusions, including timing variance and the replica change. |
-| DK-03 — VM backup/recovery | The user retained the requirement to back up VM disks/configuration and test recovery for the VMs that must be kept. Provide the actual inventory, independent storage, hashes and isolated restore results; no backup exception was selected. |
+| DK-01 — actual human review | **Closed, 2026-10-21.** Nguyễn Lê Trọng Tín directly confirmed that he reviewed the dossier and accepted both timing variances and the replica 1→0 change within the lab scope. His actual confirmation is retained with the completed review record. |
+| DK-02 — independent operation | **Resolved by scoped exception, 2026-10-20.** Applies only to the reviewed evidence from `LABB-OP-PS-20261019-01`; independent human operation is not proven. |
+| DK-03 — VM backup/recovery | **Closed, 2026-10-21.** The user accepted the inventory, disk/config hash catalogs and isolated boot/data/local-service recovery evidence for pfSense, Elastic, Windows, Sensor and DMZ. Full VM disks remain private; no disk upload or new recovery run is required. |
+
+DK-03 closure covers the documented recovery checks. Source application
+consistency and full-topology recovery were not established; four restored copies
+needed disk repair before successful boot. Elastic and Windows source/copy pairs
+share a drive, so this evidence does not establish independent protection against
+loss of that physical drive.
 
 **DK-02 — resolved by scoped exception on 2026-10-20:** the user accepted only
 the reviewed evidence from software-operated run `LABB-OP-PS-20261019-01`.
 This does not demonstrate that another human can independently operate the
 runbook, or waive independent-operation requirements for other runs.
 
-Conditional technical acceptance does not close DK-01 or DK-03 or authorize
-VM cleanup. Manifests remain `draft` and collection assurance remains `unknown`;
+These decisions close the acceptance conditions within their recorded scope and
+do not authorize VM cleanup. Manifests remain `draft` and collection assurance remains `unknown`;
 there is no claim of sustained stability, prevention, gap→fix/regression or
-outage→recovery for Lab B.
+detection outage→recovery for Lab B.
 
 The reviewed SCN-005 witnesses are retained in the private report under these EIDs:
 
@@ -229,8 +244,12 @@ They are ignored by Git and will not be downloaded by cloning the repository:
 | `raw-evidence/lab-c/nghiem-thu-2026-10-09/` | Three source handoff/photo archives, the merged-main handoff ZIP and SHA-256 sidecar, audit reports, final integration receipt, `README.txt` and `SHA256SUMS.txt` |
 | `raw-evidence/lab-b/YEU-CAU-BAN-GIAO-LAB-B.md` | Operator handoff checklist: native EVTX, Elastic source events and separate alerts, queries/count reconciliation, run provenance, hashes, checks, screenshots, runbook and backup |
 | `raw-evidence/lab-b/BIEN-BAN-NGHIEM-THU-KY-THUAT-LAB-B-CO-DIEU-KIEN-20261020.md` | Original conditional technical acceptance minutes; subsequent decisions are recorded separately below |
-| `raw-evidence/lab-b/PHU-LUC-QUYET-DINH-DK02-DK03-LAB-B-20261020.md` | Direct user decisions: DK-02 closed by a run-specific software-operation exception; DK-03 retains actual backup/restore. DK-01 and DK-03 remain open |
+| `raw-evidence/lab-b/PHU-LUC-QUYET-DINH-DK02-DK03-LAB-B-20261020.md` | Historical decisions dated 2026-10-20: DK-02 run-specific exception and the retained backup/restore requirement. Later DK-01/DK-03 closure is recorded separately below |
 | `raw-evidence/lab-b/nghiem-thu-2026-10-19/`, `raw-evidence/lab-b/nghiem-thu-2026-10-20/`, `raw-evidence/lab-b/nghiem-thu-2026-10-20-phu-luc/` | Frozen FINAL/live evidence and the V2/appendix archives, hash inventories, independent checks and review reports |
+| `raw-evidence/lab-b/nghiem-thu-2026-10-21-dk01-dk03/` | Final documentary handoff, original ZIP, extracted members, hash verification and independent review of five-VM recovery proof |
+| `raw-evidence/lab-b/nghiem-thu-2026-10-21-quyet-dinh/` | Historical DK-03 closure appendix and the unfilled DK-01 template prepared before Tín's confirmation |
+| `raw-evidence/lab-b/nghiem-thu-2026-10-21-dong-dk01/` | Tín's exact direct confirmation, completed DK-01 review record and final scoped technical acceptance appendix |
+| `raw-evidence/lab-b/LAB-B-CURRENT-STATUS.json` | Current acceptance state: DK-01 and DK-03 closed; DK-02 retains the run-specific exception |
 
 Collect and assemble evidence into a private directory **outside a Git working
 tree**, even if a subdirectory is ignored. Reviewed archive copies can be stored
