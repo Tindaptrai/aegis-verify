@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,29 @@ RUNTIME_DISTRIBUTIONS = (
     "aegis-verify", "pydantic", "pydantic_core", "PyYAML", "annotated-types",
     "typing-extensions", "typing-inspection",
 )
+
+
+def _version_resource(version):
+    """Use the installed wheel version in the Windows PE version resource."""
+    if not re.fullmatch(r"(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)", version):
+        raise ValueError("invalid_windows_version")
+    parts = tuple(int(part) for part in version.split("."))
+    if any(part > 65535 for part in parts):
+        raise ValueError("invalid_windows_version")
+    numbers = repr((*parts, 0))
+    return f"""VSVersionInfo(
+  ffi=FixedFileInfo(filevers={numbers}, prodvers={numbers}, mask=0x3f,
+    flags=0, OS=0x40004, fileType=0x1, subtype=0, date=(0, 0)),
+  kids=[StringFileInfo([StringTable('040904B0', [
+    StringStruct('CompanyName', 'AEGIS Verify contributors'),
+    StringStruct('FileDescription', 'AEGIS Verify for Windows'),
+    StringStruct('FileVersion', '{version}.0'),
+    StringStruct('InternalName', 'aegis'),
+    StringStruct('OriginalFilename', 'aegis.exe'),
+    StringStruct('ProductName', 'AEGIS Verify'),
+    StringStruct('ProductVersion', '{version}')
+  ])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])]
+)\n"""
 
 # Runs in the selected interpreter with -I, outside the checkout. Only installed
 # files are accepted; RECORD is expected to change during wheel installation.
@@ -166,7 +190,8 @@ credentials, CA and network access; SSH collection also needs OpenSSH. Windows
 Operations checks need system PowerShell. No such operation starts automatically.
 
 Keep SHA256SUMS.txt, BUILD-INFO.json and LICENSES with the release. Verify hashes
-before use. This preview is not an MSI, Windows service or shared intranet server.
+before use. This local pilot application does not run as a Windows service or
+provide a shared intranet server. For MSI deployment, follow the separate IT guide.
 """
 
 
@@ -217,9 +242,12 @@ def main(argv=None):
         release.mkdir()
         entry = work / "aegis_entry.py"
         entry.write_text("from aegis_verify.cli import main\n\nraise SystemExit(main())\n", encoding="utf-8")
+        version_file = work / "windows-version.txt"
+        version_file.write_text(_version_resource(installation["version"]), encoding="utf-8")
         command = [str(python), "-I", "-X", "utf8", "-m", "PyInstaller",
             "--noconfirm", "--clean", "--name", "aegis", "--console",
             "--onefile" if options.onefile else "--onedir",
+            "--version-file", str(version_file),
             "--distpath", str(release), "--workpath", str(work / "work"), "--specpath", str(work),
             "--collect-submodules", "aegis_verify", "--collect-data", "aegis_verify.resources",
             "--recursive-copy-metadata", "aegis-verify"]
@@ -240,8 +268,10 @@ def main(argv=None):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(item["path"], destination)
         (release / "QUICKSTART.md").write_text(_quickstart(options.onefile), encoding="utf-8")
+        application_version = installation.pop("version")
         information = {"kind": "aegis_windows_build", "version": "0.1.0",
-            "application_version": installation.pop("version"),
+            "application_version": application_version,
+            "windows_file_version": application_version + ".0",
             "mode": "onefile" if options.onefile else "onedir", "signed": False,
             "source_wheel": wheel.name, "source_wheel_sha256": wheel_hash,
             "pyinstaller": PYINSTALLER_VERSION, **installation,

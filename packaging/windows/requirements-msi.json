@@ -1,0 +1,18 @@
+{
+  "tool": "wix",
+  "version": "5.0.2",
+  "package": "https://www.nuget.org/packages/wix/5.0.2",
+  "license": "MS-RL",
+  "build_only": true,
+  "extensions": [],
+  "rationale": "Core Windows Installer authoring for the verified onedir payload; no runtime dependency, Burn bundle, custom action, HeatWave tool or paid extension.",
+  "licensing_review": "This v5 package predates the OSMF terms introduced in WiX v6. Its NuGet metadata declares requireLicenseAcceptance=false. No OSMF EULA acceptance flag or purchase is part of this build.",
+  "consumer_security_servicing_ended": "2026-02-05",
+  "release_policy": "Reevaluate the pin and official security advisories before future production releases. This is a reviewed build pin, not a claim that WiX v5 remains supported or is the latest release.",
+  "official_sources": [
+    "https://raw.githubusercontent.com/wixtoolset/wix/v5.0.2/LICENSE.TXT",
+    "https://docs.firegiant.com/wix/whatsnew/",
+    "https://docs.firegiant.com/wix/#lifecycle",
+    "https://github.com/wixtoolset/issues/security/advisories"
+  ]
+}
