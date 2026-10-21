@@ -1,0 +1,4 @@
+Django==5.2.18
+cryptography==50.0.2
+psycopg[binary]==3.3.6
+gunicorn==26.2.0

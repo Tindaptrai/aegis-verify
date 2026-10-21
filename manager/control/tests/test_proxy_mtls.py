@@ -1,0 +1,200 @@
+"""Synthetic, local nginx mTLS deployment-boundary test."""
+
+import http.client
+import json
+import shutil
+import socket
+import ssl
+import subprocess
+import tempfile
+import time
+import unittest
+from datetime import timedelta
+from pathlib import Path
+from urllib.parse import quote
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from django.test import LiveServerTestCase, override_settings
+from django.utils import timezone
+
+from control.models import Device, DispatchLock
+
+
+def _key():
+    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def _certificate(subject, key, issuer, issuer_key, *, ca=False, usage=None):
+    now = timezone.now()
+    builder = (x509.CertificateBuilder()
+               .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)]))
+               .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer)]))
+               .public_key(key.public_key())
+               .serial_number(x509.random_serial_number())
+               .not_valid_before(now - timedelta(minutes=5))
+               .not_valid_after(now + timedelta(days=1))
+               .add_extension(x509.BasicConstraints(ca=ca, path_length=0 if ca else None), critical=True)
+               .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+               .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(issuer_key.public_key()), critical=False)
+               .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
+                   key_encipherment=not ca, data_encipherment=False, key_agreement=False,
+                   key_cert_sign=ca, crl_sign=ca, encipher_only=False, decipher_only=False), critical=True))
+    if subject == "localhost" and not ca:
+        builder = builder.add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), critical=False)
+    if usage:
+        builder = builder.add_extension(x509.ExtendedKeyUsage([usage]), critical=False)
+    return builder.sign(issuer_key, hashes.SHA256())
+
+
+def _write_pair(directory, stem, key, cert):
+    cert_path = directory / f"{stem}.pem"
+    key_path = directory / f"{stem}-key.pem"
+    cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(key.private_bytes(serialization.Encoding.PEM,
+                                            serialization.PrivateFormat.PKCS8,
+                                            serialization.NoEncryption()))
+    return cert_path, key_path
+
+
+@unittest.skipUnless(shutil.which("nginx"), "nginx executable is required for real mTLS integration")
+@override_settings(ALLOWED_HOSTS=["localhost", "testserver"])
+class NginxMutualTlsTests(LiveServerTestCase):
+    """Run the shipped proxy policy with synthetic keys and a real ORM API."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.temp = tempfile.TemporaryDirectory(prefix="aegis-nginx-mtls-")
+        cls.addClassCleanup(cls.temp.cleanup)
+        root = Path(cls.temp.name)
+        cls.ca_key = _key()
+        cls.ca = _certificate("synthetic-agent-ca", cls.ca_key,
+                              "synthetic-agent-ca", cls.ca_key, ca=True)
+        (root / "agent-ca.pem").write_bytes(cls.ca.public_bytes(serialization.Encoding.PEM))
+        server_key = _key()
+        server = _certificate("localhost", server_key, "synthetic-agent-ca", cls.ca_key,
+                              usage=ExtendedKeyUsageOID.SERVER_AUTH)
+        server_cert, server_key_path = _write_pair(root, "server", server_key, server)
+        cls.client_key = _key()
+        cls.client_cert = _certificate("synthetic-enrolled", cls.client_key,
+                                       "synthetic-agent-ca", cls.ca_key,
+                                       usage=ExtendedKeyUsageOID.CLIENT_AUTH)
+        cls.client_path, cls.client_key_path = _write_pair(root, "client", cls.client_key, cls.client_cert)
+        other_key = _key()
+        other = _certificate("synthetic-unenrolled", other_key,
+                             "synthetic-agent-ca", cls.ca_key,
+                             usage=ExtendedKeyUsageOID.CLIENT_AUTH)
+        cls.other_path, cls.other_key_path = _write_pair(root, "unenrolled", other_key, other)
+        foreign_ca_key = _key()
+        foreign_ca = _certificate("synthetic-foreign-ca", foreign_ca_key,
+                                  "synthetic-foreign-ca", foreign_ca_key, ca=True)
+        foreign_key = _key()
+        foreign = _certificate("synthetic-foreign", foreign_key,
+                               "synthetic-foreign-ca", foreign_ca_key,
+                               usage=ExtendedKeyUsageOID.CLIENT_AUTH)
+        cls.foreign_path, cls.foreign_key_path = _write_pair(root, "foreign", foreign_key, foreign)
+
+        with socket.create_server(("localhost", 0)) as reserved:
+            cls.port = reserved.getsockname()[1]
+        template = (Path(__file__).resolve().parents[3] / "deploy/manager/nginx.conf.example").read_text()
+        # Keep the shipped server and location directives intact; substitute only
+        # ephemeral listener, upstream, certificate and static-directory values.
+        replacements = {
+            "listen 443 ssl;": f"listen localhost:{cls.port} ssl;",
+            "REPLACE_MANAGER_HOSTNAME": "localhost",
+            "/etc/aegis-manager/tls/manager-chain.pem": server_cert.as_posix(),
+            "/etc/aegis-manager/tls/manager-key.pem": server_key_path.as_posix(),
+            "/etc/aegis-manager/tls/agent-ca.pem": (root / "agent-ca.pem").as_posix(),
+            "http://localhost:8001": cls.live_server_url,
+            "/srv/aegis-manager-static/": (root / "static").as_posix() + "/",
+        }
+        for old, new in replacements.items():
+            if old not in template:
+                raise AssertionError(f"nginx template changed: missing {old}")
+            template = template.replace(old, new)
+        (root / "static").mkdir()
+        (root / "logs").mkdir()
+        config = root / "nginx.conf"
+        config.write_text(f"pid {root.as_posix()}/nginx.pid;\n"
+                          f"error_log {root.as_posix()}/error.log;\n"
+                          "events {}\nhttp {\naccess_log off;\n" + template + "\n}\n")
+        command = [shutil.which("nginx"), "-p", str(root) + "/", "-c", str(config), "-g", "daemon off;"]
+        check = subprocess.run(command[:-2] + ["-t"], capture_output=True, text=True)
+        if check.returncode:
+            raise AssertionError(f"nginx configuration failed: {check.stderr}")
+        cls.nginx_log = (root / "nginx-output.log").open("w+")
+        cls.addClassCleanup(cls.nginx_log.close)
+        cls.nginx = subprocess.Popen(command, stdout=cls.nginx_log, stderr=subprocess.STDOUT)
+        cls.addClassCleanup(cls._stop_nginx)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if cls.nginx.poll() is not None:
+                raise AssertionError("nginx exited before serving HTTPS")
+            try:
+                cls._request()
+                break
+            except (ConnectionRefusedError, TimeoutError, OSError):
+                time.sleep(0.05)
+        else:
+            raise AssertionError("nginx did not begin serving HTTPS")
+
+    @classmethod
+    def _stop_nginx(cls):
+        if cls.nginx.poll() is None:
+            cls.nginx.terminate()
+            try:
+                cls.nginx.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                cls.nginx.kill()
+                cls.nginx.wait(timeout=5)
+
+    @classmethod
+    def _request(cls, cert=None, key=None, headers=None):
+        context = ssl.create_default_context(cafile=str(Path(cls.temp.name) / "agent-ca.pem"))
+        if cert:
+            context.load_cert_chain(str(cert), str(key))
+        connection = http.client.HTTPSConnection("localhost", cls.port, context=context, timeout=2)
+        try:
+            connection.request("POST", "/agent/v1/poll", json.dumps({"protocol": "0.1.0"}),
+                               {"Content-Type": "application/json"} | (headers or {}))
+            response = connection.getresponse()
+            response.read()
+            return response.status
+        finally:
+            connection.close()
+
+    def test_enrolled_certificate_reaches_poll(self):
+        DispatchLock.objects.get_or_create(pk=1)
+        Device.objects.create(environment_id="synthetic", wazuh_agent_id="synthetic",
+                              certificate_sha256=self.client_cert.fingerprint(hashes.SHA256()).hex())
+        self.assertEqual(self._request(self.client_path, self.client_key_path), 204)
+
+    def test_missing_certificate_cannot_spoof_proxy_identity(self):
+        spoof = {"X-Aegis-Client-Verify": "SUCCESS", "X-Aegis-Client-Cert":
+                 quote(self.client_cert.public_bytes(serialization.Encoding.PEM).decode(), safe="")}
+        self.assertEqual(self._request(headers=spoof), 403)
+
+    def test_valid_ca_but_unenrolled_certificate_is_denied(self):
+        self.assertEqual(self._request(self.other_path, self.other_key_path), 403)
+
+    def test_revoked_database_device_is_denied(self):
+        Device.objects.create(environment_id="synthetic", wazuh_agent_id="synthetic",
+                              certificate_sha256=self.client_cert.fingerprint(hashes.SHA256()).hex(),
+                              revoked=True)
+        self.assertEqual(self._request(self.client_path, self.client_key_path), 403)
+
+    def test_wrong_ca_client_certificate_is_rejected(self):
+        try:
+            status = self._request(self.foreign_path, self.foreign_key_path)
+        except (ssl.SSLError, ConnectionResetError, http.client.RemoteDisconnected):
+            return  # Some nginx/TLS versions close the connection before HTTP.
+        self.assertGreaterEqual(status, 400)
+
+    def test_server_certificate_requires_matching_hostname(self):
+        context = ssl.create_default_context(cafile=str(Path(self.temp.name) / "agent-ca.pem"))
+        with socket.create_connection(("localhost", self.port), timeout=2) as raw:
+            with self.assertRaises(ssl.SSLCertVerificationError):
+                context.wrap_socket(raw, server_hostname="wrong.example")

@@ -1,0 +1,25 @@
+{
+  "manager_url": "https://MANAGER_HOSTNAME/",
+  "agent_id": "00000000-0000-0000-0000-000000000000",
+  "environment_id": "REPLACE_ENVIRONMENT",
+  "generation": 1,
+  "client_certificate_sha256": "REPLACE_SHA256_DER_LOWERCASE",
+  "signing_public_key_path": "C:\\AEGISPrivate\\manager-public.pem",
+  "spool_directory": "C:\\AEGISPrivate\\spool",
+  "catalog": {
+    "scenario_path": "C:\\AEGISPrivate\\catalog\\SCN-001.yaml",
+    "profile_path": "C:\\AEGISPrivate\\catalog\\profile.json",
+    "runner_path": "C:\\AEGISPrivate\\catalog\\Invoke-SafeDemo.ps1",
+    "kit_directory": "C:\\AEGISPrivate\\kit",
+    "run_directory": "C:\\AEGISPrivate\\runs",
+    "expected_computer_name": "REPLACE_APPROVED_VM_NAME",
+    "allow_rehearsal": false,
+    "scenario_sha256": "REPLACE_HASH",
+    "profile_sha256": "REPLACE_HASH",
+    "runner_sha256": "REPLACE_HASH",
+    "kit_sha256": "REPLACE_EXACT_KIT_JSON_BYTES_HASH",
+    "payload_sha256": "REPLACE_HASH",
+    "baseline_sha256": "REPLACE_HASH",
+    "behavioral_sha256": "REPLACE_HASH"
+  }
+}

@@ -1,0 +1,102 @@
+name: Manager first flow
+
+on:
+  pull_request:
+    paths:
+      - 'manager/**'
+      - 'agent/windows/**'
+      - 'deploy/manager/**'
+      - '.github/workflows/manager-first-flow.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'manager/**'
+      - 'agent/windows/**'
+      - 'deploy/manager/**'
+      - '.github/workflows/manager-first-flow.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manager-first-flow-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  manager-postgres:
+    name: Manager PostgreSQL and mTLS proxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: python:3.13-slim
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: aegis_ci
+          POSTGRES_USER: aegis_ci
+          # Isolated ephemeral CI value, never a lab or release credential.
+          POSTGRES_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        options: >-
+          --health-cmd "pg_isready -U aegis_ci -d aegis_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      AEGIS_MANAGER_CI: '1'
+      AEGIS_MANAGER_DB_NAME: aegis_ci
+      AEGIS_MANAGER_DB_USER: aegis_ci
+      AEGIS_MANAGER_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+      AEGIS_MANAGER_DB_HOST: postgres
+      AEGIS_MANAGER_DB_PORT: '5432'
+      DJANGO_SETTINGS_MODULE: aegis_manager.ci_settings
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install isolated test runtime
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends nginx
+          python -m pip install -e . -r manager/requirements.txt
+          python -m pip check
+      - name: Verify migrations and real PostgreSQL suite
+        run: |
+          python manager/manage.py makemigrations --check --dry-run
+          python manager/manage.py test control.tests --verbosity 2
+
+  windows-agent:
+    name: Windows agent and Python signing
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      DJANGO_SETTINGS_MODULE: aegis_manager.test_settings
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build and exercise dependency-free Windows agent
+        run: |
+          dotnet --list-sdks
+          dotnet run --project agent/windows/Aegis.Agent.Tests/Aegis.Agent.Tests.csproj
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify Manager and cross-language contract
+        run: |
+          python -m pip install -e . -r manager/requirements.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip check
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python manager/manage.py test control.tests --verbosity 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish and verify self-contained agent
+        run: |
+          $buildOutput = Join-Path $env:RUNNER_TEMP 'aegis-first-flow-agent'
+          dotnet publish agent/windows/Aegis.Agent -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o $buildOutput
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:AEGIS_AGENT_TEST_EXE = Join-Path $buildOutput 'Aegis.Agent.exe'
+          python manager/manage.py test control.tests.test_cross_language --verbosity 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
