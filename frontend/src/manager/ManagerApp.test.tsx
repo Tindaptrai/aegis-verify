@@ -85,18 +85,25 @@ describe('real Manager shell', () => {
     expect(screen.getByRole('button', { name: 'Menu tài khoản New user' })).toBeVisible();
     expect(screen.queryByRole('button', { name: /Tài khoản & quyền/ })).not.toBeInTheDocument();
   });
-  it('prevents restoration from overlapping a pending login cookie write', async () => {
+  it.each(['success', 'failure'] as const)('queues restoration during login %s and stays masked until anonymous revalidation', async (outcome) => {
     const api = signedInApiFixture('viewer');
-    api.session = vi.fn().mockResolvedValue(anonymousSession);
+    let validate!: (value: unknown) => void;
+    api.session = vi.fn().mockResolvedValueOnce(anonymousSession)
+      .mockImplementationOnce(() => new Promise((resolve) => { validate = resolve; }));
     let finish!: (value: unknown) => void;
-    api.login = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    let fail!: (error: Error) => void;
+    api.login = vi.fn().mockImplementation(() => new Promise((resolve, reject) => { finish = resolve; fail = reject; }));
     render(<ManagerApp api={api} />);
     await login();
     act(() => { window.dispatchEvent(new Event('pageshow')); });
     expect(api.session).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Đang đăng nhập…' })).toBeDisabled();
-    await act(async () => { finish(userSession('viewer')); });
-    expect(await screen.findByText('17')).toBeVisible();
+    await act(async () => { if (outcome === 'success') finish(userSession('viewer')); else fail(new ManagerApiError(401)); });
+    expect(api.session).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button', { name: /Menu tài khoản/ })).not.toBeInTheDocument();
+    expect(api.overview).not.toHaveBeenCalled();
+    await act(async () => { validate(anonymousSession); });
+    expect(await screen.findByRole('heading', { name: 'Đăng nhập Manager' })).toBeVisible();
+    expect(screen.queryByText('17')).not.toBeInTheDocument();
   });
   it('masks restored pages until session revalidation completes with expired cookie', async () => {
     const api = signedInApiFixture('admin');
@@ -146,6 +153,45 @@ describe('real Manager shell', () => {
     fireEvent.change(screen.getByLabelText('Mật khẩu mới'), { target: { value: 'discard-test-only' } });
     fireEvent.click(screen.getByRole('button', { name: 'Đóng tài khoản' }));
     expect(screen.queryByLabelText('Mật khẩu mới')).not.toBeInTheDocument();
+  });
+  it.each([
+    ['logout', 'success'], ['restoration', 'success'],
+    ['logout', 'failure'], ['restoration', 'failure'],
+  ] as const)('serializes %s after a pending password %s even when its drawer closes', async (action, outcome) => {
+    const api = signedInApiFixture('viewer');
+    const events: string[] = [];
+    let finishPassword!: () => void;
+    let passwordSignal: AbortSignal | undefined;
+    api.changePassword = vi.fn().mockImplementation((_input, signal?: AbortSignal) => {
+      passwordSignal = signal;
+      events.push('password-start');
+      return new Promise<void>((resolve, reject) => {
+        finishPassword = () => { events.push('password-end'); if (outcome === 'success') resolve(); else reject(new ManagerApiError(401)); };
+      });
+    });
+    api.session = vi.fn().mockResolvedValueOnce(userSession('viewer')).mockImplementation(async () => {
+      events.push('session'); return anonymousSession;
+    });
+    api.logout = vi.fn(async () => { events.push('logout'); });
+    render(<ManagerApp api={api} />);
+    await screen.findByText('17');
+    fireEvent.click(screen.getByRole('button', { name: /Menu tài khoản/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tài khoản của tôi' }));
+    fireEvent.change(screen.getByLabelText('Mật khẩu hiện tại'), { target: { value: 'old-test-only' } });
+    fireEvent.change(screen.getByLabelText('Mật khẩu mới'), { target: { value: 'new-test-only' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Đổi mật khẩu' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Đóng tài khoản' }));
+    expect(passwordSignal?.aborted ?? false).toBe(false);
+    if (action === 'logout') await logout();
+    act(() => { window.dispatchEvent(new Event('pagehide')); window.dispatchEvent(new Event('pageshow')); });
+    expect(api.logout).not.toHaveBeenCalled();
+    expect(api.session).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('17')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Mật khẩu mới')).not.toBeInTheDocument();
+    await act(async () => { finishPassword(); });
+    expect(await screen.findByRole('heading', { name: 'Đăng nhập Manager' })).toBeVisible();
+    expect(events).toEqual(action === 'logout' ? ['password-start', 'password-end', 'logout', 'session'] : ['password-start', 'password-end', 'session']);
+    expect(passwordSignal?.aborted ?? false).toBe(false);
   });
   it('expires absolute sessions locally and leaves future sections unavailable', async () => {
     const api = signedInApiFixture('viewer');

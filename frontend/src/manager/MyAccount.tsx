@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import type { ManagerApi } from './api';
-import { ManagerApiError } from './api';
 import type { Capability, UserDTO } from './contracts';
 import { roleLabels } from './AccountMenu';
 
@@ -12,15 +10,20 @@ const capabilityLabels: Record<Capability, string> = {
   manage_connections: 'Quản lý kết nối', export_evidence: 'Xuất bằng chứng', manage_users: 'Quản lý tài khoản',
 };
 
-export function MyAccount({ user, api, onClose, onUnauthorized }: { user: UserDTO; api: ManagerApi; onClose: () => void; onUnauthorized: () => void }) {
+export function MyAccount({ user, onChangePassword, onClose }: {
+  user: UserDTO;
+  onChangePassword: (input: { current_password: string; new_password: string }) => Promise<void>;
+  onClose: () => void;
+}) {
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const controller = useRef<AbortController | null>(null);
+  const mounted = useRef(true);
   const dialog = useRef<HTMLElement>(null);
   useEffect(() => {
+    mounted.current = true;
     const previous = document.activeElement as HTMLElement | null;
     dialog.current?.focus();
     function keyboard(event: KeyboardEvent) {
@@ -32,19 +35,16 @@ export function MyAccount({ user, api, onClose, onUnauthorized }: { user: UserDT
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     }
     document.addEventListener('keydown', keyboard);
-    return () => { controller.current?.abort(); document.removeEventListener('keydown', keyboard); previous?.focus(); };
+    return () => { mounted.current = false; document.removeEventListener('keydown', keyboard); previous?.focus(); };
   }, [onClose]);
   async function submit(event: FormEvent) {
     event.preventDefault();
     const input = { current_password: currentPassword, new_password: newPassword };
     setCurrentPassword(''); setNewPassword(''); setBusy(true); setError(''); setMessage('');
-    const request = new AbortController(); controller.current = request;
-    try { await api.changePassword(input, request.signal); if (!request.signal.aborted) setMessage('Đã đổi mật khẩu.'); }
-    catch (failure) {
-      if (request.signal.aborted) return;
-      if (failure instanceof ManagerApiError && failure.status === 401) onUnauthorized();
-      else setError('Không thể đổi mật khẩu. Kiểm tra mật khẩu hiện tại và yêu cầu mật khẩu mới.');
-    } finally { if (!request.signal.aborted) setBusy(false); }
+    try { await onChangePassword(input); if (mounted.current) setMessage('Đã đổi mật khẩu.'); }
+    catch {
+      if (mounted.current) setError('Không thể đổi mật khẩu. Kiểm tra mật khẩu hiện tại và yêu cầu mật khẩu mới.');
+    } finally { if (mounted.current) setBusy(false); }
   }
   return <div className="drawer-backdrop" onClick={onClose}><section className="account-drawer" role="dialog" aria-modal="true" aria-labelledby="my-account-title" tabIndex={-1} ref={dialog} onClick={(event) => event.stopPropagation()}>
     <header><h2 id="my-account-title">Tài khoản của tôi</h2><button aria-label="Đóng tài khoản" onClick={onClose}>×</button></header>

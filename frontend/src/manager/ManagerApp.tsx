@@ -21,6 +21,9 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const active = useRef<AbortController | null>(null);
   const writingAuth = useRef(false);
   const logoutFailed = useRef(false);
+  const mounted = useRef(true);
+  const pendingRevalidation = useRef<{ forceAnonymous: boolean } | null>(null);
+  const pendingLogout = useRef(false);
 
   const clear = useCallback(() => {
     generation.current += 1; active.current?.abort();
@@ -31,7 +34,12 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const isCurrent = (request: { controller: AbortController; generation: number }) => request.generation === generation.current && !request.controller.signal.aborted;
 
   const revalidate = useCallback(async (forceAnonymous = false) => {
-    if (writingAuth.current || logoutFailed.current) return;
+    if (writingAuth.current) {
+      pendingRevalidation.current = { forceAnonymous: forceAnonymous || !!pendingRevalidation.current?.forceAnonymous };
+      setSession(null); setOverview(null); setAccountOpen(false);
+      return;
+    }
+    if (logoutFailed.current) return;
     const request = clear(); api.invalidate(); setSession(null); setSessionError('');
     try {
       const result = await api.session(request.controller.signal);
@@ -44,14 +52,15 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   }, [api, clear]);
 
   useEffect(() => {
+    mounted.current = true;
     void revalidate();
     function restored() { void revalidate(); }
     function hidden() {
-      if (writingAuth.current) return;
+      if (writingAuth.current) { void revalidate(); return; }
       clear(); api.invalidate(); setSession(null);
     }
     window.addEventListener('pageshow', restored); window.addEventListener('pagehide', hidden);
-    return () => { generation.current += 1; active.current?.abort(); api.invalidate(); window.removeEventListener('pageshow', restored); window.removeEventListener('pagehide', hidden); };
+    return () => { mounted.current = false; generation.current += 1; active.current?.abort(); api.invalidate(); window.removeEventListener('pageshow', restored); window.removeEventListener('pagehide', hidden); };
   }, [api, clear, revalidate]);
 
   const unauthorized = useCallback(() => { void revalidate(true); }, [revalidate]);
@@ -75,19 +84,40 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
     return () => controller.abort();
   }, [api, session, unauthorized]);
 
+  function settleAuthWrite(forceAnonymous = false) {
+    writingAuth.current = false;
+    if (!mounted.current) return;
+    if (pendingLogout.current) {
+      pendingLogout.current = false;
+      pendingRevalidation.current = null;
+      void logout();
+    } else if (pendingRevalidation.current) {
+      const pending = pendingRevalidation.current;
+      pendingRevalidation.current = null;
+      void revalidate(forceAnonymous || pending.forceAnonymous);
+    }
+  }
+
   async function login(input: { username: string; password: string }) {
     if (writingAuth.current || logoutFailed.current) return;
     writingAuth.current = true; const request = clear(); setAuthBusy(true); setLoginError('');
     try {
       const result = await api.login(input, request.controller.signal);
-      if (isCurrent(request)) setSession(result);
+      if (isCurrent(request) && !pendingRevalidation.current && !pendingLogout.current) setSession(result);
     } catch {
       if (isCurrent(request)) setLoginError('Không thể đăng nhập. Kiểm tra thông tin và thử lại.');
-    } finally { writingAuth.current = false; if (isCurrent(request)) setAuthBusy(false); }
+    } finally {
+      if (isCurrent(request)) setAuthBusy(false);
+      settleAuthWrite();
+    }
   }
 
   async function logout() {
-    if (writingAuth.current) return;
+    if (writingAuth.current) {
+      pendingLogout.current = true;
+      setSession(null); setOverview(null); setAccountOpen(false);
+      return;
+    }
     writingAuth.current = true; const request = clear(); setSession(null); setSessionError('');
     try {
       // A failed logout may already have reached Django. Refresh CSRF while
@@ -96,11 +126,27 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
       if (!isCurrent(request)) return;
       await api.logout(request.controller.signal);
       if (!isCurrent(request)) return;
+      // This fresh read fulfils restoration requests queued before the logout
+      // settled; later restoration events are drained after this read settles.
+      pendingRevalidation.current = null;
       const result = await api.session(request.controller.signal);
       if (isCurrent(request)) { logoutFailed.current = false; setSession({ ...anonymous, csrf_token: result.csrf_token }); }
     } catch {
       if (isCurrent(request)) { logoutFailed.current = true; setSessionError('Chưa thể xác nhận đăng xuất. Vui lòng thử lại.'); }
-    } finally { writingAuth.current = false; }
+    } finally { settleAuthWrite(true); }
+  }
+
+  async function changePassword(input: { current_password: string; new_password: string }) {
+    if (writingAuth.current) throw new ManagerApiError(409);
+    writingAuth.current = true;
+    try {
+      // The root retains ownership until settlement. Closing the drawer must
+      // not abort a mutation that may already have renewed Django's cookie.
+      await api.changePassword(input);
+    } catch (failure) {
+      if (mounted.current && failure instanceof ManagerApiError && failure.status === 401) unauthorized();
+      throw failure;
+    } finally { settleAuthWrite(); }
   }
   const closeAccount = useCallback(() => setAccountOpen(false), []);
   const user = session?.authenticated ? session.user : null;
@@ -117,7 +163,7 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
         {!user.capabilities.includes('view') ? <p className="manager-alert" role="alert">Bạn không có quyền xem dữ liệu. Liên hệ quản trị viên để được cấp quyền.</p> : overviewError ? <section className="panel panel-body"><p className="manager-alert" role="alert">{overviewError}</p><button onClick={() => void revalidate()}>Xác minh lại phiên</button></section> : !overview ? <p>Đang tải tổng quan…</p> : <section className="overview-counts" aria-label="Số liệu đã ghi nhận">
           <article className="panel"><p>Thiết bị đã đăng ký</p><strong>{overview.registered_devices}</strong><small>Số đăng ký trong cơ sở dữ liệu</small></article><article className="panel"><p>Tác vụ đã ghi nhận</p><strong>{overview.recorded_jobs}</strong><small>Số tác vụ trong cơ sở dữ liệu</small></article><article className="panel"><p>Phiên bản đã ghi nhận</p><strong>{overview.recorded_releases}</strong><small>Số phiên bản trong cơ sở dữ liệu</small></article>
         </section>}
-      </main></div>{accountOpen && <MyAccount key={user.id} user={user} api={api} onClose={closeAccount} onUnauthorized={unauthorized} />}
+      </main></div>{accountOpen && <MyAccount key={user.id} user={user} onChangePassword={changePassword} onClose={closeAccount} />}
     </>}
   </div>;
 }
