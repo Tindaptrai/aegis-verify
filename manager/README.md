@@ -10,6 +10,15 @@ It does not establish live lab acceptance or enterprise readiness.
 - [Protocol](../docs/manager/FIRST_FLOW_PROTOCOL.md)
 - [Vietnamese deployment and recovery runbook](../docs/manager/FIRST_FLOW_RUNBOOK.md)
 - [Windows foreground agent](../agent/windows/README.md)
+- [Authenticated web UI build, fresh bootstrap, upgrade and lab checklist](../docs/manager/WEB_AUTH_RUNBOOK.md)
+
+The independently built `/manager/` UI adds real sessions, product accounts and
+per-action capabilities. `/` redirects there; `/admin/` remains technical
+administration and `/agent/v1/` retains its certificate boundary. An absent or
+invalid `AEGIS_MANAGER_UI_ROOT` returns `503 manager_ui_unavailable`. Build with
+`npm run build:manager` in `frontend`, then stage public assets with
+`python scripts/stage_manager_ui.py --build-root frontend/dist-manager --static-root <public-static>`.
+Do not point the setting or nginx at private configuration or the dashboard build.
 
 ## Development checks
 
@@ -18,13 +27,26 @@ Do not change the user's core installation or expose development settings on a L
 
 ```sh
 dotnet run --project agent/windows/Aegis.Agent.Tests
-python manager/manage.py test control.tests --settings=aegis_manager.test_settings
+python manager/manage.py test accounts.tests control.tests --settings=aegis_manager.test_settings --verbosity 2
 python manager/manage.py makemigrations --check --dry-run --settings=aegis_manager.test_settings
+python -m pytest backend/tests/test_manager_ui_staging.py -q
+# In frontend (locked dependencies):
+npm test
+npm run build
+npm run build:manager
 ```
 
 On Windows, building the agent first is required for the Python/.NET contract
 tests. nginx tests skip explicitly when nginx is absent; PostgreSQL concurrency
-tests skip on SQLite. The separate CI workflow exercises both on Linux. Neither
+tests skip on SQLite. The separate CI workflow exercises both on Linux, including
+five auth authority/bootstrap races and one control dispatch race with actual
+PostgreSQL row locks. Its dedicated gate is:
+
+```sh
+python manager/manage.py test accounts.tests.test_postgres_concurrency control.tests.test_postgres_concurrency --settings=aegis_manager.ci_settings --verbosity 2
+```
+
+CI settings require the isolated CI environment and must not target a lab DB. Neither
 CI nor synthetic fixtures count as evidence of a live Windows/Wazuh run.
 
 New dependencies are isolated here: Django supplies auth/CSRF/ORM/admin;
