@@ -94,7 +94,8 @@ Identity is fingerprint + paired kind + generation + UUID, not body/hostname alo
 The application trusts only loopback nginx with HTTPS and verified certificate headers.
 Revoke and heartbeat serialize on the device row. Use server time for last heartbeat;
 Online iff valid/unrevoked and `0 <= now-last_heartbeat_at < 60 seconds`. Enrollment
-alone is Offline. Expired/revoked status takes precedence; legacy presence is `unknown`.
+alone is Offline. Revoked, then known certificate expiry takes precedence for every
+connection kind; legacy presence is otherwise `unknown` (unknown expiry stays null).
 
 `GET /api/v1/devices?page=1&search=...`: session + view; page size 50, stable UUID order;
 response `{results,count,page,page_size}`. Each DTO:
@@ -144,6 +145,12 @@ or certificate expired reports action needed and stops successfully reconnecting
 claims Online locally without a successful response. Status distinguishes enrolled,
 last acknowledged contact and terminal failure; Manager is the authority for Online.
 No scenario, polling, PowerShell runner, evidence evaluation or Wazuh settings in this core.
+
+Transient HTTP429/5xx bodies may originate from nginx and be HTML; after bounded reading
+they are discarded and cannot grant identity/state. Strict closed JSON validation applies
+to accepted success and fixed4xx decisions; a malformed proxy503 remains transient,
+whereas any oversized response is rejected. Enrollment still makes only one redemption
+attempt and preserves pending state when its outcome is unknown.
 
 Windows SCM service name `AegisAgent`, dedicated virtual account `NT SERVICE\AegisAgent`,
 Automatic (Delayed Start) and failure restart, starts before interactive login. Binary
