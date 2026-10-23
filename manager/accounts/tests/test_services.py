@@ -44,6 +44,29 @@ class ProductMutationTests(AccountsCase):
         self.assertNotIn("synthetic-password", encoded)
         self.assertNotIn(user.password, encoded)
 
+    def test_inactive_creation_audits_assigned_preset_grants(self):
+        user = self.create(active=False, capabilities=("view", "run_jobs", "export_evidence"))
+        self.assertEqual(AuthAudit.objects.get().after["capabilities"], ["export_evidence", "run_jobs", "view"])
+        self.assertEqual(effective_product_permissions(user), set())
+
+    def test_inactive_grant_update_audits_retained_and_external_grants(self):
+        external = Group.objects.create(name="Synthetic locked audit inheritance")
+        external.permissions.add(Permission.objects.get(content_type__app_label="accounts", codename="export_evidence"))
+        self.viewer.groups.add(external)
+        self.viewer.is_active = False
+        self.viewer.save(update_fields=["is_active"])
+        self.update(capabilities=("view", "run_jobs", "export_evidence"), active=False)
+        audit = AuthAudit.objects.get()
+        self.assertEqual(audit.before["capabilities"], ["export_evidence", "view"])
+        self.assertEqual(audit.after["capabilities"], ["export_evidence", "run_jobs", "view"])
+        self.assertFalse(audit.before["is_active"] or audit.after["is_active"])
+        self.assertEqual(effective_product_permissions(self.viewer), set())
+        self.update(capabilities=("view", "manage_devices", "export_evidence"), active=False)
+        audit = AuthAudit.objects.latest("pk")
+        self.assertEqual(audit.before["capabilities"], ["export_evidence", "run_jobs", "view"])
+        self.assertEqual(audit.after["capabilities"], ["export_evidence", "manage_devices", "view"])
+        self.assertEqual(set(self.viewer.groups.values_list("name", flat=True)), {external.name})
+
     def test_presets_and_custom_effective_union_preserve_unrelated_authority(self):
         unrelated = Permission.objects.get(codename="change_group")
         external = Group.objects.create(name="Synthetic inherited")

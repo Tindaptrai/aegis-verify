@@ -30,14 +30,22 @@ def _fresh_active_user(actor):
     return get_user_model().objects.filter(pk=actor.pk, is_active=True).first()
 
 
-def _effective_permissions(user):
+def assigned_product_permissions(user) -> frozenset[str]:
+    """Read assigned grants for presentation/audit, including locked accounts.
+
+    Callers supply a freshly loaded User; this is not an authorization check.
+    """
     if user.is_superuser:
         return frozenset(CAPABILITIES)
-    capabilities = frozenset(Permission.objects.filter(
+    return frozenset(Permission.objects.filter(
         Q(user=user) | Q(group__user=user),
         content_type__app_label="accounts", content_type__model="accountsecurity",
         codename__in=CAPABILITIES,
     ).values_list("codename", flat=True))
+
+
+def _effective_permissions(user):
+    capabilities = assigned_product_permissions(user)
     return capabilities if "view" in capabilities else frozenset()
 
 

@@ -11,7 +11,7 @@ from django.db.models import F
 from .errors import AccountError
 from .models import AccountMutationLock, AccountSecurity, AuthAudit
 from .permissions import (
-    CAPABILITIES, PRESETS, PRESET_GROUP_NAMES, effective_product_permissions,
+    CAPABILITIES, PRESETS, PRESET_GROUP_NAMES, assigned_product_permissions, effective_product_permissions,
     require_product_permission,
 )
 
@@ -94,7 +94,7 @@ def user_snapshot(user):
     security, _ = AccountSecurity.objects.get_or_create(user=user)
     return {
         "display_name": security.display_name,
-        "capabilities": sorted(effective_product_permissions(user)),
+        "capabilities": sorted(assigned_product_permissions(user)),
         "is_active": user.is_active, "is_staff": user.is_staff, "is_superuser": user.is_superuser,
         "has_usable_password": user.has_usable_password(), "generation": security.generation,
     }

@@ -6,7 +6,7 @@ replaces database execution, policy checks, services, forms or Admin routes.
 """
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
-from threading import Barrier
+from threading import Barrier, Event
 from unittest import skipUnless
 
 from django.contrib.admin.models import LogEntry
@@ -42,10 +42,11 @@ class PostgreSQLAuthorityTests(TransactionTestCase):
         self.technician = users.create_user("synthetic-technician", password="synthetic-password", is_staff=True)
         self.technician.user_permissions.set(Permission.objects.filter(content_type__app_label="auth"))
 
-    def race(self, first, second):
+    def race(self, first, second, *, second_commits_first=False):
         barrier = Barrier(2)
+        second_finished = Event()
 
-        def worker(operation):
+        def worker(index, operation):
             connections.close_all()
             try:
                 with connection.cursor() as cursor:
@@ -59,20 +60,77 @@ class PostgreSQLAuthorityTests(TransactionTestCase):
                     if not reached_lock and "accounts_accountmutationlock" in sql and "FOR UPDATE" in sql:
                         reached_lock = True
                         barrier.wait(timeout=10)
+                        if second_commits_first and index == 0:
+                            if not second_finished.wait(timeout=15):
+                                raise AssertionError("Competing Admin write did not finish")
                     return execute(sql, params, many, context)
 
                 with connection.execute_wrapper(before_lock):
                     result = operation()
                 return backend_id, reached_lock, result
             finally:
+                if index == 1:
+                    second_finished.set()
                 connections.close_all()
 
         with ThreadPoolExecutor(max_workers=2) as pool:
-            futures = [pool.submit(worker, operation) for operation in (first, second)]
+            futures = [pool.submit(worker, index, operation) for index, operation in enumerate((first, second))]
             results = [future.result(timeout=25) for future in futures]
         self.assertEqual(len({result[0] for result in results}), 2, "Workers must own distinct PostgreSQL connections")
         self.assertTrue(all(result[1] for result in results), "Both operations must reach the real singleton lock")
         return [result[2] for result in results]
+
+    def native_password_race(self, *, demote=False, unlock=False):
+        self.administrators()
+        self.first.is_staff = True
+        self.first.save(update_fields=["is_staff"])
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.first)
+        client.get(reverse("admin:password_change"))
+        original_hash = self.first.password
+        original_deadline = client.session["aegis_deadline"]
+        route = reverse("admin:auth_user_change", args=[self.first.pk])
+        data = user_form(self.first, **({"is_staff": "", "groups": []} if demote else {"is_active": ""}))
+
+        def own_password():
+            response = client.post(reverse("admin:password_change"), {
+                "old_password": "synthetic-password", "new_password1": "synthetic-replacement",
+                "new_password2": "synthetic-replacement",
+            }, HTTP_X_CSRFTOKEN=client.cookies["csrftoken"].value)
+            return response.status_code
+
+        def technical_change():
+            result = self.admin_post(route, data)
+            if unlock:
+                self.assertEqual(result, "committed")
+                result = self.admin_post(route, user_form(self.first))
+            return result
+
+        results = self.race(own_password, technical_change, second_commits_first=True)
+        self.assertEqual(results, [401 if unlock else 403, "committed"])
+        self.first.refresh_from_db()
+        self.assertEqual(self.first.password, original_hash)
+        self.assertEqual(self.first.is_active, demote or unlock)
+        self.assertEqual(self.first.is_staff, not demote)
+        self.assertEqual(AccountSecurity.objects.get(user=self.first).generation, 1 if demote else 2)
+        self.assertEqual(AuthAudit.objects.count(), 2 if unlock else 1)
+        audit = AuthAudit.objects.latest("pk")
+        self.assertEqual((audit.action, audit.actor_id, audit.target_id),
+                         ("user_updated", self.technician.pk, self.first.pk))
+        self.assertEqual(LogEntry.objects.count(), 2 if unlock else 1)
+        if demote:
+            self.assertEqual(client.session["aegis_deadline"], original_deadline)
+            self.assertEqual(effective_product_permissions(self.first), set())
+        self.assertEqual(client.get(reverse("admin:index")).status_code, 302)
+
+    def test_native_password_waiting_on_actual_admin_lock_cannot_reactivate_user(self):
+        self.native_password_race()
+
+    def test_native_password_waiting_on_actual_admin_demotion_rechecks_technical_access(self):
+        self.native_password_race(demote=True)
+
+    def test_native_password_waiting_on_actual_admin_lock_unlock_rejects_revoked_cookie(self):
+        self.native_password_race(unlock=True)
 
     def demote_self(self, user_id):
         user = get_user_model().objects.get(pk=user_id)

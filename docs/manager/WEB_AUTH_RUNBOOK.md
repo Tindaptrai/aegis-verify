@@ -142,7 +142,7 @@ explicit concurrency command:
 python manager/manage.py test accounts.tests.test_postgres_concurrency control.tests.test_postgres_concurrency --settings=aegis_manager.ci_settings --verbosity 2
 ```
 
-That gate runs five actual PostgreSQL account/bootstrap races and the control
+That gate runs eight actual PostgreSQL account/bootstrap races and the control
 dispatch race. SQLite skips do not verify row locking. CI settings require the
 ephemeral CI environment and never target a lab DB. Existing Linux nginx/mTLS,
 Windows agent, Python/.NET cross-language and published-agent gates remain.
@@ -162,6 +162,12 @@ and commit/manifest hashes; never pre-fill a pass for a pending environment.
   mutations; the old cookie must still fail. Newly authenticated access succeeds.
 - Logout clears protected content; reload stays signed out; a late request cannot
   restore the prior workspace. Eight-hour absolute expiry is covered by tests.
+- Native technical Admin: the owner changes their own password at
+  `/admin/password_change/`, confirms the success page and continued access in
+  that browser, and verifies another browser's prior cookie is rejected. Compare
+  the session API's `expires_at` before and after: the original absolute deadline
+  must remain unchanged. Review the `password_changed` audit; the owner enters
+  the current and replacement passwords privately.
 - Actual API-backed browser at normal width and 634px: inspect the real logo,
   account name/role/menu/My Account, create-user editor, custom grants and logout;
   include a long synthetic display name, reachable permission/save/cancel controls,

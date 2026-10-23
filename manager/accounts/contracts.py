@@ -4,12 +4,11 @@ import json
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.core.exceptions import RequestDataTooBig
-from django.db.models import Q
 from django.middleware.csrf import get_token
 
 from .errors import AccountError
 from .models import AccountSecurity
-from .permissions import CAPABILITIES, PRESETS, PRESET_GROUP_NAMES, effective_product_permissions
+from .permissions import CAPABILITIES, PRESETS, PRESET_GROUP_NAMES, assigned_product_permissions, effective_product_permissions
 
 
 def _unique_object(pairs):
@@ -86,9 +85,7 @@ def user_dto(user, actor) -> dict:
     # still uses the active-only permission helpers and a fresh actor lookup.
     user = get_user_model().objects.get(pk=user.pk)
     product = Permission.objects.filter(content_type__app_label="accounts", content_type__model="accountsecurity", codename__in=CAPABILITIES)
-    assigned = (frozenset(CAPABILITIES) if user.is_superuser else frozenset(
-        product.filter(Q(user=user) | Q(group__user=user)).values_list("codename", flat=True)
-    ))
+    assigned = assigned_product_permissions(user)
     inherited = frozenset(product.filter(
         group__in=user.groups.exclude(name__in=PRESET_GROUP_NAMES.values())
     ).values_list("codename", flat=True))
