@@ -67,6 +67,16 @@ class ProtocolTests(TestCase):
         self.job()
         self.assertEqual(self.post().status_code,204)
 
+    def test_paired_presence_cannot_be_approved_even_with_manual_mapping(self):
+        self.device.connection_kind = "paired_presence"
+        self.device.save(update_fields=["connection_kind"])
+        job = self.job()
+        with self.assertRaisesMessage(ValueError, "Device unavailable"):
+            approve_job(job.pk, self.owner)
+        job.refresh_from_db()
+        self.assertEqual(job.execution_state, "draft")
+        self.assertIsNone(job.envelope)
+
     def test_approval_requires_owner(self):
         job=self.job()
         outsider=get_user_model().objects.create_user("viewer")
