@@ -50,7 +50,9 @@ Never put a code in URL, argv, environment, logs, audit or a download.
 Anonymous machine enrollment is HTTPS only, strict bounded JSON with duplicates,
 unknown keys and unsupported values rejected. The only accepted CSR key is RSA 3072–4096
 bits with a valid SHA-256 signature. Issuer chooses a new UUID, generation 1, UUID SAN,
-clientAuth EKU, digital-signature key usage, non-CA leaf and 30-day validity. Requested
+clientAuth EKU, digital-signature key usage, non-CA leaf and 30-day validity. The sole
+SAN is URI `urn:aegis:agent:<lowercase canonical UUID>` and CN is `AEGIS-Agent-<UUID>`;
+notBefore is server now at second precision, notAfter exactly 30 days later. Requested
 CSR subject/extensions do not grant identity or capabilities. Issue certificate, create
 device and consume code in one PostgreSQL transaction; signing errors roll back.
 Use a separate new CA under Manager private root; preserve existing pilot/Server/job keys.
