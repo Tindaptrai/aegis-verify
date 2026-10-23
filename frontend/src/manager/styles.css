@@ -171,3 +171,11 @@ body { margin: 0; }
 }
 @media(max-width:430px) { .manager-login { padding:74px 16px 30px; } .login-card { padding:23px; } .login-card h2 { font-size:23px; } .login-story .manager-brand strong { font-size:18px; } .account-popover { width:min(265px,calc(100vw - 26px)); } .permission-grid,.role-summaries { grid-template-columns:1fr; } .users-heading { flex-wrap:wrap; } }
 @media(prefers-reduced-motion:reduce) { .manager-app * { animation:none!important; transition:none!important; } }
+.device-tools { display:flex; flex-wrap:wrap; gap:8px; max-width:100%; }
+.presence-help { font-size:12px; }
+.devices-table { min-width:850px; }
+.devices-table td strong { color:var(--text); overflow-wrap:anywhere; }
+.devices-table td small { display:block; margin-top:4px; font-size:9px; overflow-wrap:anywhere; }
+.device-dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:12px; font-size:11px; }
+.device-dialog .pairing-secret { display:block; overflow-wrap:anywhere; padding:14px; border:1px solid var(--mint); border-radius:7px; background:var(--surface); color:var(--mint); font-size:14px; user-select:all; }
+.device-dialog h4 { color:var(--muted); margin-bottom:6px; }
