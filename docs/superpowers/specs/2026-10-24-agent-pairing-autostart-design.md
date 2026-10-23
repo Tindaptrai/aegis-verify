@@ -138,6 +138,11 @@ Key stays local in a PKCS8 PEM protected by service-account filesystem permissio
 no private export in packages/status/logs. This follows the builder's portable choice;
 nonexportable CNG/TPM binding is not promised. No legacy CurrentUser key import.
 
+For controlled child-process integration, connect also accepts one bounded64-lowercase-hex
+line through redirected standard input, without echo. It rejects extra lines/oversize
+and accepts newline or EOF termination. This is not an argv/env/URL/file secret option;
+public instructions never place a real code in a shell literal/history or plaintext file.
+
 Heartbeat every 15s after initial immediate attempt, request timeout 10s, response cap
 16384 bytes; transient network/429/5xx retries use exponential backoff from 2s capped
 60s plus bounded jitter, cancellation interrupts requests and wait. Authorization denied
