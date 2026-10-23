@@ -6,6 +6,16 @@ on:
       - 'manager/**'
       - 'agent/windows/**'
       - 'deploy/manager/**'
+      - 'frontend/src/manager/**'
+      - 'frontend/manager.html'
+      - 'frontend/vite.manager.config.ts'
+      - 'frontend/package*.json'
+      - 'frontend/tsconfig*.json'
+      - 'frontend/vitest.config.*'
+      - 'packaging/windows/demo-launcher/assets/aegis-demo-logo.png'
+      - 'scripts/stage_manager_ui.py'
+      - 'backend/tests/test_manager_ui_staging.py'
+      - 'docs/manager/**'
       - '.github/workflows/manager-first-flow.yml'
   push:
     branches: [main]
@@ -13,6 +23,16 @@ on:
       - 'manager/**'
       - 'agent/windows/**'
       - 'deploy/manager/**'
+      - 'frontend/src/manager/**'
+      - 'frontend/manager.html'
+      - 'frontend/vite.manager.config.ts'
+      - 'frontend/package*.json'
+      - 'frontend/tsconfig*.json'
+      - 'frontend/vitest.config.*'
+      - 'packaging/windows/demo-launcher/assets/aegis-demo-logo.png'
+      - 'scripts/stage_manager_ui.py'
+      - 'backend/tests/test_manager_ui_staging.py'
+      - 'docs/manager/**'
       - '.github/workflows/manager-first-flow.yml'
   workflow_dispatch:
 
@@ -60,8 +80,40 @@ jobs:
           python -m pip check
       - name: Verify migrations and real PostgreSQL suite
         run: |
-          python manager/manage.py makemigrations --check --dry-run
-          python manager/manage.py test control.tests --verbosity 2
+          python manager/manage.py makemigrations --check --dry-run --settings=aegis_manager.ci_settings
+          python manager/manage.py test accounts.tests control.tests --settings=aegis_manager.ci_settings --verbosity 2
+      - name: Require real PostgreSQL auth and control concurrency
+        # Five authority/bootstrap races plus one dispatch race; SQLite skips
+        # never count as concurrent-policy coverage.
+        run: python manager/manage.py test accounts.tests.test_postgres_concurrency control.tests.test_postgres_concurrency --settings=aegis_manager.ci_settings --verbosity 2
+
+  manager-ui:
+    name: Standalone Manager public build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - name: Test and build both separate frontends
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+          npm run build:manager
+      - name: Verify public staging and stage the real Manager build
+        run: |
+          python -m pip install -e '.[test]'
+          python -m pytest backend/tests/test_manager_ui_staging.py -q -p no:cacheprovider
+          python scripts/stage_manager_ui.py --build-root frontend/dist-manager --static-root "$RUNNER_TEMP/aegis-manager-public-static"
 
   windows-agent:
     name: Windows agent and Python signing
@@ -90,7 +142,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python manager/manage.py test control.tests --verbosity 2
+          python manager/manage.py test accounts.tests control.tests --settings=aegis_manager.test_settings --verbosity 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish and verify self-contained agent
         run: |

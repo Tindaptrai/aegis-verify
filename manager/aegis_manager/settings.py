@@ -27,4 +27,6 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 
 STATIC_ROOT = str(PRIVATE_ROOT / "static")
+# Trusted, read-only standalone Manager build. No dashboard/private fallback.
+MANAGER_UI_ROOT = os.environ.get("AEGIS_MANAGER_UI_ROOT") or None
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

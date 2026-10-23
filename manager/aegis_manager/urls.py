@@ -1,3 +1,8 @@
 from django.contrib import admin
 from django.urls import path, include
-urlpatterns = [path("admin/", admin.site.urls), path("agent/v1/", include("control.urls"))]
+from django.views.generic import RedirectView
+from accounts.shell import manager_shell
+
+urlpatterns = [path("", RedirectView.as_view(url="/manager/", permanent=False)),
+               path("manager/", manager_shell), path("admin/", admin.site.urls),
+               path("agent/v1/", include("control.urls")), path("api/v1/", include("accounts.urls"))]
