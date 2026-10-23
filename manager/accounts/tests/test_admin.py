@@ -131,6 +131,22 @@ class TechnicalAdminTests(AccountsCase):
         self.assertFalse(AuthAudit.objects.exists())
         self.assertFalse(LogEntry.objects.exists())
 
+    def test_reset_unusable_password_is_audited_despite_ignored_disable_input(self):
+        self.viewer.set_unusable_password()
+        self.viewer.save(update_fields=["password"])
+        response = self.password(self.viewer, usable_password="false")
+        self.assertEqual(response.status_code, 302)
+        self.viewer.refresh_from_db()
+        self.assertTrue(self.viewer.check_password("synthetic-new-password"))
+        self.assertEqual(AuthAudit.objects.count(), 1)
+        audit = AuthAudit.objects.get()
+        self.assertEqual((audit.action, audit.actor_id, audit.target_id),
+                         ("password_reset", self.owner.pk, self.viewer.pk))
+        self.assertFalse(audit.before["has_usable_password"])
+        self.assertTrue(audit.after["has_usable_password"])
+        self.assertNotIn(self.viewer.password, repr((audit.before, audit.after)))
+        self.assertNotIn("synthetic-new-password", repr((audit.before, audit.after)))
+
     def test_last_staff_superuser_requires_usable_password(self):
         self.only_owner_is_admin()
         replacement = get_user_model().objects.create_user("synthetic-unusable", is_superuser=True)

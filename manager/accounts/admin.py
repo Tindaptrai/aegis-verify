@@ -89,11 +89,12 @@ class GuardedUserAdmin(AuthorityAdminMixin, UserAdmin):
         def operation():
             user = self.get_object(request, unquote(id))
             before = user_snapshot(user) if user else None
+            previous_password = user.password if user else None
             response = super(GuardedUserAdmin, self).user_change_password(request, id, form_url)
             if response.status_code == 302 and before is not None:
                 user.refresh_from_db()
                 # Conflicting form submissions also redirect without a save.
-                if request.POST.get("usable_password") != "false" or "unset-password" in request.POST:
+                if user.password != previous_password:
                     record_user_mutation(actor=request.user, user=user, before=before, action="password_reset")
             return response
         return self._guard_post(request, operation) if request.method == "POST" else operation()
