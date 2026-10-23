@@ -37,6 +37,50 @@ def parse_json(request) -> dict:
         raise AccountError("invalid_request", 400) from None
 
 
+def product_user_input(request, *, creating=False) -> dict:
+    data = parse_json(request)
+    fields = {"display_name": str, "capabilities": list, "is_active": bool}
+    if creating:
+        fields.update(username=str, password=str)
+    if set(data) != set(fields) or any(type(data[key]) is not kind for key, kind in fields.items()):
+        raise AccountError("invalid_request", 400)
+    # The service owns capability vocabulary, uniqueness, view prerequisites and
+    # account policy. HTTP input alone translates the public active field.
+    data["active"] = data.pop("is_active")
+    return data
+
+
+def users_query(request) -> tuple[int, str]:
+    query = request.GET
+    if set(query) - {"page", "q"} or any(len(query.getlist(key)) != 1 for key in query):
+        raise AccountError("invalid_request", 400)
+    raw_page, search = query.get("page", "1"), query.get("q", "")
+    # Bound integer conversion and database offsets while allowing empty pages.
+    if (not raw_page.isascii() or not raw_page.isdecimal() or len(raw_page) > 9
+            or int(raw_page) < 1 or len(search) > 100):
+        raise AccountError("invalid_request", 400)
+    return int(raw_page), search
+
+
+def permissions_dto() -> dict:
+    descriptions = (
+        ("Xem dữ liệu", "Xem tổng quan và dữ liệu trong không gian làm việc."),
+        ("Chạy tác vụ", "Phê duyệt và hủy các tác vụ kiểm thử trong phạm vi cho phép."),
+        ("Nhập kịch bản", "Thêm kịch bản kiểm thử vào thư viện."),
+        ("Xuất bản kịch bản", "Xuất bản các phiên bản kịch bản đã được duyệt."),
+        ("Quản lý thiết bị", "Quản lý các thiết bị đã đăng ký."),
+        ("Quản lý kết nối", "Quản lý các kết nối thu thập dữ liệu."),
+        ("Xuất bằng chứng", "Xuất bằng chứng và báo cáo kiểm thử."),
+        ("Quản lý tài khoản", "Tạo, cập nhật, khóa và đặt lại mật khẩu tài khoản."),
+    )
+    return {
+        "capabilities": [{"key": key, "label": label, "description": description}
+                         for key, (label, description) in zip(CAPABILITIES, descriptions)],
+        "presets": {role: [key for key in CAPABILITIES if key in grants] for role, grants in PRESETS.items()},
+        "inheritance_explanation": "Quyền kế thừa từ nhóm bên ngoài được giữ lại và không thể gỡ tại đây. Mọi quyền thao tác đều cần quyền xem dữ liệu.",
+    }
+
+
 def user_dto(user, actor) -> dict:
     # Assigned authority is presented even for a locked target. Authorization
     # still uses the active-only permission helpers and a fresh actor lookup.

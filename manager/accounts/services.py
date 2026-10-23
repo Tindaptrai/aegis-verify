@@ -12,7 +12,7 @@ from .errors import AccountError
 from .models import AccountMutationLock, AccountSecurity, AuthAudit
 from .permissions import (
     CAPABILITIES, PRESETS, PRESET_GROUP_NAMES, effective_product_permissions,
-    require_product_admin,
+    require_product_permission,
 )
 
 
@@ -123,7 +123,7 @@ def _product_target(user_id):
 
 def create_product_user(*, actor, username, display_name, password, capabilities, active, **extra):
     with authority_mutation(actor=actor):
-        actor = require_product_admin(actor)
+        actor = require_product_permission(actor, "manage_users")
         desired = _validate_fields(display_name, capabilities, active, extra)
         validate_product_password(password)
         if type(username) is not str:
@@ -150,7 +150,7 @@ def create_product_user(*, actor, username, display_name, password, capabilities
 
 def update_product_user(*, actor, user_id, display_name, capabilities, active, **extra):
     with authority_mutation(actor=actor):
-        actor = require_product_admin(actor)
+        actor = require_product_permission(actor, "manage_users")
         desired = _validate_fields(display_name, capabilities, active, extra)
         user = _product_target(user_id)
         if actor.pk == user.pk and not active:
@@ -166,7 +166,7 @@ def update_product_user(*, actor, user_id, display_name, capabilities, active, *
 
 def reset_product_password(*, actor, user_id, new_password):
     with authority_mutation(actor=actor):
-        actor = require_product_admin(actor)
+        actor = require_product_permission(actor, "manage_users")
         user = _product_target(user_id)
         validate_product_password(new_password)
         before = user_snapshot(user)

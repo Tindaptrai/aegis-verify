@@ -29,6 +29,18 @@ class PermissionTests(AccountsCase):
             require_product_permission(self.viewer, "run_jobs")
         self.assertEqual(require_product_permission(self.viewer, "view").pk, self.viewer.pk)
 
+    def test_full_admin_helper_rejects_custom_account_manager_with_cached_grants(self):
+        self.viewer.user_permissions.add(Permission.objects.get(content_type__app_label='accounts', codename='manage_users'))
+        self.viewer.get_all_permissions()
+        self.assertEqual(require_product_permission(self.viewer, 'manage_users').pk, self.viewer.pk)
+        with self.assertRaises(PermissionError):
+            require_product_admin(self.viewer)
+        self.assertEqual(require_product_admin(self.admin).pk, self.admin.pk)
+        self.admin.get_all_permissions()
+        self.admin.groups.clear()
+        with self.assertRaises(PermissionError):
+            require_product_admin(self.admin)
+
     def test_active_technical_superuser_retains_authority(self):
         self.assertEqual(effective_product_permissions(self.owner), ALL)
         self.assertEqual(require_product_admin(self.owner).pk, self.owner.pk)

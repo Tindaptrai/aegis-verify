@@ -65,4 +65,7 @@ def require_product_permission(actor, codename: str) -> "User":
 
 
 def require_product_admin(actor) -> "User":
-    return require_product_permission(actor, "manage_users")
+    user = _fresh_active_user(actor)
+    if user is None or _effective_permissions(user) != PRESETS["admin"]:
+        raise PermissionError("permission_denied")
+    return user
