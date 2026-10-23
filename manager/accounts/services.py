@@ -173,3 +173,27 @@ def reset_product_password(*, actor, user_id, new_password):
         user.set_password(new_password)
         user.save(update_fields=["password"])
         record_user_mutation(actor=actor, user=user, before=before, action="password_reset")
+
+
+def change_own_password(*, request, current_password, new_password):
+    from .sessions import refresh_own_password_session, validate_human_session
+
+    if not request.user.is_authenticated:
+        raise AccountError("unauthenticated", 401)
+    with transaction.atomic():
+        with authority_mutation(actor=request.user):
+            # Recheck the cookie under the mutation lock, after concurrent lock/reset.
+            if not validate_human_session(request):
+                raise AccountError("unauthenticated", 401)
+            user = get_user_model().objects.get(pk=request.user.pk, is_active=True)
+            if type(current_password) is not str or not user.check_password(current_password):
+                raise AccountError("current_password_invalid", 400)
+            validate_product_password(new_password)
+            original_deadline = request.session["aegis_deadline"]
+            before = user_snapshot(user)
+            user.set_password(new_password)
+            user.save(update_fields=["password"])
+            record_user_mutation(actor=user, user=user, before=before, action="password_changed")
+        # The outer transaction retains the lock until the session has captured
+        # this password change's generation, after the final authority check.
+        refresh_own_password_session(request, user, original_deadline=original_deadline)
