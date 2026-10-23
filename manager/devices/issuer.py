@@ -79,7 +79,8 @@ def load_issuer():
             if other.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo) == key.public_key().public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo):
                 raise IssuerUnavailable()
         return key, cert
-    except (OSError, ValueError, TypeError, AttributeError, x509.ExtensionNotFound, InvalidSignature, UnsupportedAlgorithm):
+    except (OSError, ValueError, TypeError, AttributeError, x509.ExtensionNotFound, x509.DuplicateExtension,
+            InvalidSignature, UnsupportedAlgorithm):
         raise IssuerUnavailable() from None
 
 

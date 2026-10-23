@@ -6,7 +6,7 @@ from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 from django.test import override_settings
 
@@ -29,6 +29,42 @@ def csr(key=None, algorithm=None, extensions=False):
     return key, request.public_bytes(serialization.Encoding.PEM).decode("ascii")
 
 
+def duplicate_extension_certificate(key, certificate):
+    """Build real malformed DER; the public certificate builder forbids duplicates.
+
+    Keep the original key, identity, dates and signature algorithm, duplicate a
+    real extension, and sign the changed TBS so signature corruption cannot mask
+    the extension parser failure. Only synthetic test certificates enter here.
+    """
+    def encode(tag, value):
+        size = len(value)
+        length = bytes([size]) if size < 128 else size.to_bytes((size.bit_length() + 7) // 8, "big")
+        if size >= 128:
+            length = bytes([0x80 | len(length)]) + length
+        return bytes([tag]) + length + value
+
+    def parts(value):
+        while value:
+            tag, size, offset = value[0], value[1], 2
+            if size & 0x80:
+                count = size & 0x7f
+                size, offset = int.from_bytes(value[2:2 + count], "big"), 2 + count
+            yield tag, value[offset:offset + size]
+            value = value[offset + size:]
+
+    _, outer = next(parts(certificate.public_bytes(serialization.Encoding.DER)))
+    certificate_parts = list(parts(outer))
+    fields = list(parts(certificate_parts[0][1]))
+    assert fields[-1][0] == 0xa3, "Synthetic issuer must have explicit extensions"
+    _, extensions = next(parts(fields[-1][1]))
+    first = next(parts(extensions))
+    fields[-1] = (0xa3, encode(0x30, extensions + encode(*first)))
+    tbs = encode(0x30, b"".join(encode(*field) for field in fields))
+    signature = key.sign(tbs, padding.PKCS1v15(), hashes.SHA256())
+    der = encode(0x30, tbs + encode(*certificate_parts[1]) + encode(0x03, b"\x00" + signature))
+    return x509.load_der_x509_certificate(der).public_bytes(serialization.Encoding.PEM)
+
+
 class PairingCase(AccountsCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="aegis-synthetic-enrollment-")
@@ -43,6 +79,16 @@ class PairingCase(AccountsCase):
 
     def initialize(self):
         component(self, "issuer").initialize_issuer()
+
+    def install_duplicate_extension_issuer(self):
+        self.initialize()
+        key, certificate = component(self, "issuer").load_issuer()
+        pem = duplicate_extension_certificate(key, certificate)
+        # Confirm the malformed input exercises the real DuplicateExtension path.
+        with self.assertRaises(x509.DuplicateExtension):
+            x509.load_pem_x509_certificate(pem).extensions
+        (self.root / "issuer.pem").write_bytes(pem)
+        return {path.name: path.read_bytes() for path in self.root.iterdir()}
 
     def mint(self):
         return component(self, "services").create_pairing_code(actor=self.admin, environment_id="synthetic.env")

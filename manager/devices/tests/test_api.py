@@ -5,6 +5,24 @@ from .helpers import PairingCase, component
 
 
 class ApiTests(PairingCase):
+    def test_duplicate_extension_issuer_returns_fixed_503_and_preserves_pairing_state(self):
+        before_files = self.install_duplicate_extension_issuer()
+        data = self.enrollment()
+        models = component(self, "models")
+        audits_before = list(models.EnrollmentAudit.objects.values())
+        from control.models import Device
+        self.client.raise_request_exception = False
+        response = self.client.post("/agent/v2/enroll", data, content_type="application/json", secure=True)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json(), {"error": {"code": "issuer_unavailable"}})
+        self.assertEqual(response["Cache-Control"], "no-store")
+        self.assertFalse(Device.objects.exists())
+        code = models.PairingCode.objects.get()
+        self.assertIsNone(code.consumed_at)
+        self.assertIsNone(code.consumed_device_id)
+        self.assertEqual(list(models.EnrollmentAudit.objects.values()), audits_before)
+        self.assertEqual(before_files, {path.name: path.read_bytes() for path in self.root.iterdir()})
+
     def test_human_permission_csrf_no_store_and_closed_input(self):
         component(self, "views")
         viewer = self.login_human(self.viewer)

@@ -8,6 +8,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import override_settings
 from django.utils import timezone
 
@@ -15,6 +16,21 @@ from .helpers import PairingCase, component, csr
 
 
 class IssuerTests(PairingCase):
+    def test_duplicate_extensions_are_normalized_as_issuer_unavailable(self):
+        self.install_duplicate_extension_issuer()
+        issuer = component(self, "issuer")
+        with self.assertRaises(issuer.IssuerUnavailable):
+            issuer.load_issuer()
+
+    def test_init_command_refuses_duplicate_extensions_with_fixed_diagnostic(self):
+        before = self.install_duplicate_extension_issuer()
+        output = io.StringIO()
+        with self.assertRaises(CommandError) as failure:
+            call_command("init_enrollment_ca", stdout=output)
+        self.assertEqual(str(failure.exception), "Enrollment issuer unavailable; inspect configured paths and permissions.")
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(before, {path.name: path.read_bytes() for path in self.root.iterdir()})
+
     def test_configured_parent_traversal_cannot_escape_private_root(self):
         issuer = component(self, "issuer")
         private = self.root / "private"
