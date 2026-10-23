@@ -1,4 +1,4 @@
-INSTALLED_APPS = ["accounts.apps.GuardedAdminConfig", "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "control", "accounts.apps.AccountsConfig"]
+INSTALLED_APPS = ["accounts.apps.GuardedAdminConfig", "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "control", "accounts.apps.AccountsConfig", "devices"]
 MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware", "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware", "accounts.middleware.HumanSessionMiddleware", "django.contrib.messages.middleware.MessageMiddleware", "django.middleware.clickjacking.XFrameOptionsMiddleware"]
 CSRF_FAILURE_VIEW = "accounts.views.csrf_failure"
 ROOT_URLCONF = "aegis_manager.urls"
@@ -8,3 +8,5 @@ TIME_ZONE = "UTC"
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 65536
+ENROLLMENT_CA_KEY = None
+ENROLLMENT_CA_CERT = None

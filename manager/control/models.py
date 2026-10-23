@@ -8,8 +8,16 @@ class Device(models.Model):
     generation = models.PositiveIntegerField(default=1)
     certificate_sha256 = models.CharField(max_length=64, unique=True)
     revoked = models.BooleanField(default=False)
-    wazuh_agent_id = models.CharField(max_length=64)
+    wazuh_agent_id = models.CharField(max_length=64, null=True, blank=True)
     hostname = models.CharField(max_length=255, blank=True)
+    connection_kind = models.CharField(max_length=32, choices=[("legacy_v1", "legacy_v1"), ("paired_presence", "paired_presence")], default="legacy_v1")
+    os = models.CharField(max_length=16, null=True, blank=True)
+    architecture = models.CharField(max_length=16, null=True, blank=True)
+    agent_version = models.CharField(max_length=32, null=True, blank=True)
+    enrolled_at = models.DateTimeField(null=True, blank=True)
+    certificate_not_before = models.DateTimeField(null=True, blank=True)
+    certificate_expires_at = models.DateTimeField(null=True, blank=True)
+    last_heartbeat_at = models.DateTimeField(null=True, blank=True)
 
 
 class RunnerRelease(models.Model):

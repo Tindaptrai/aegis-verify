@@ -50,7 +50,7 @@ def approve_job(job_id, actor):
     device = Device.objects.select_for_update().get(pk=job.device_id)
     release = job.release
     release_pins(release)
-    if device.revoked or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", device.environment_id) or not 1 <= device.generation <= 2147483647:
+    if device.connection_kind != "legacy_v1" or device.revoked or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", device.environment_id) or not 1 <= device.generation <= 2147483647:
         raise ValueError("Device unavailable")
     p = job.parameters
     if not isinstance(p, dict) or set(p) != {"run_label", "rule_revision", "rule_sha256"}: raise ValueError("Invalid parameters")
@@ -79,7 +79,7 @@ def approve_job(job_id, actor):
 def claim_job(device):
     lock_dispatch()
     device = Device.objects.select_for_update().get(pk=device.pk)
-    if device.revoked: raise PermissionError()
+    if device.revoked or device.connection_kind != "legacy_v1": raise PermissionError()
     job = Job.objects.select_for_update().filter(device=device, approved_generation=device.generation, execution_state__in=("queued", "leased")).order_by("created_at").first()
     if job is None: return None
     now = timezone.now()

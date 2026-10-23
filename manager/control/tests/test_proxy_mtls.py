@@ -18,9 +18,14 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from django.test import LiveServerTestCase, override_settings
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from control.models import Device, DispatchLock
+from accounts.models import AccountMutationLock
+from devices.issuer import initialize_issuer
+from devices.services import create_pairing_code
+from devices.tests.helpers import csr
 
 
 def _key():
@@ -70,10 +75,16 @@ class NginxMutualTlsTests(LiveServerTestCase):
         cls.temp = tempfile.TemporaryDirectory(prefix="aegis-nginx-mtls-")
         cls.addClassCleanup(cls.temp.cleanup)
         root = Path(cls.temp.name)
+        root = root.resolve()
+        cls.issuer_settings = override_settings(PRIVATE_ROOT=root, ENROLLMENT_CA_KEY=str(root / "enrollment-key.pem"),
+                                                ENROLLMENT_CA_CERT=str(root / "enrollment.pem"))
+        cls.issuer_settings.enable()
+        cls.addClassCleanup(cls.issuer_settings.disable)
+        initialize_issuer()
         cls.ca_key = _key()
         cls.ca = _certificate("synthetic-agent-ca", cls.ca_key,
                               "synthetic-agent-ca", cls.ca_key, ca=True)
-        (root / "agent-ca.pem").write_bytes(cls.ca.public_bytes(serialization.Encoding.PEM))
+        (root / "agent-ca.pem").write_bytes(cls.ca.public_bytes(serialization.Encoding.PEM) + (root / "enrollment.pem").read_bytes())
         server_key = _key()
         server = _certificate("localhost", server_key, "synthetic-agent-ca", cls.ca_key,
                               usage=ExtendedKeyUsageOID.SERVER_AUTH)
@@ -152,17 +163,17 @@ class NginxMutualTlsTests(LiveServerTestCase):
                 cls.nginx.wait(timeout=5)
 
     @classmethod
-    def _request(cls, cert=None, key=None, headers=None):
+    def _request(cls, cert=None, key=None, headers=None, *, path="/agent/v1/poll", body=None, return_body=False):
         context = ssl.create_default_context(cafile=str(Path(cls.temp.name) / "agent-ca.pem"))
         if cert:
             context.load_cert_chain(str(cert), str(key))
         connection = http.client.HTTPSConnection("localhost", cls.port, context=context, timeout=2)
         try:
-            connection.request("POST", "/agent/v1/poll", json.dumps({"protocol": "0.1.0"}),
+            connection.request("POST", path, json.dumps({"protocol": "0.1.0"} if body is None else body),
                                {"Content-Type": "application/json"} | (headers or {}))
             response = connection.getresponse()
-            response.read()
-            return response.status
+            payload = response.read()
+            return (response.status, payload) if return_body else response.status
         finally:
             connection.close()
 
@@ -198,3 +209,50 @@ class NginxMutualTlsTests(LiveServerTestCase):
         with socket.create_connection(("localhost", self.port), timeout=2) as raw:
             with self.assertRaises(ssl.SSLCertVerificationError):
                 context.wrap_socket(raw, server_hostname="wrong.example")
+
+    def _enrollment_body(self):
+        AccountMutationLock.objects.get_or_create(pk=1)
+        owner = get_user_model().objects.create_superuser("synthetic-pairing-owner")
+        mint = create_pairing_code(actor=owner, environment_id="synthetic")
+        key, pem = csr()
+        return key, {"protocol": "2.0", "pairing_code": mint["code"], "csr_pem": pem,
+                     "hostname": "synthetic-host", "os": "linux", "architecture": "x64", "agent_version": "0.1.0"}
+
+    def test_bootstrap_without_certificate_and_paired_heartbeat_preserve_v1_exclusion(self):
+        key, body = self._enrollment_body()
+        status, payload = self._request(path="/agent/v2/enroll", body=body, return_body=True)
+        self.assertEqual(status, 201)
+        result = json.loads(payload)
+        root = Path(self.temp.name)
+        certificate = x509.load_pem_x509_certificate(result["certificate_pem"].encode())
+        cert_path, key_path = _write_pair(root, "new-paired", key, certificate)
+        heartbeat = {"protocol": "2.0", "device_id": result["device_id"], "generation": 1}
+        self.assertEqual(self._request(cert_path, key_path, path="/agent/v2/heartbeat", body=heartbeat), 200)
+        self.assertEqual(self._request(cert_path, key_path), 403)
+        device = Device.objects.get(pk=result["device_id"])
+        self.assertIsNotNone(device.last_heartbeat_at)
+
+    def test_bootstrap_strips_spoofed_identity_and_cannot_write_presence(self):
+        _, body = self._enrollment_body()
+        spoof = {"X-Aegis-Client-Verify": "SUCCESS", "X-Aegis-Client-Cert":
+                 quote(self.client_cert.public_bytes(serialization.Encoding.PEM).decode(), safe="")}
+        status, _ = self._request(headers=spoof, path="/agent/v2/enroll", body=body, return_body=True)
+        self.assertEqual(status, 201)
+        device = Device.objects.get()
+        self.assertIsNone(device.last_heartbeat_at)
+        heartbeat = {"protocol": "2.0", "device_id": str(device.pk), "generation": 1}
+        self.assertEqual(self._request(headers=spoof, path="/agent/v2/heartbeat", body=heartbeat), 403)
+        self.assertEqual(self._request(self.client_path, self.client_key_path,
+                                      path="/agent/v2/heartbeat", body=heartbeat), 403)
+
+    def test_heartbeat_rejects_wrong_trust_chain(self):
+        try:
+            status = self._request(self.foreign_path, self.foreign_key_path, path="/agent/v2/heartbeat", body={})
+        except (ssl.SSLError, ConnectionResetError, http.client.RemoteDisconnected):
+            return
+        self.assertGreaterEqual(status, 400)
+
+    def test_z_bootstrap_enforces_request_body_and_rate_limits(self):
+        self.assertEqual(self._request(path="/agent/v2/enroll", body={"padding": "x" * 16385}), 413)
+        statuses = [self._request(path="/agent/v2/enroll", body={}) for _ in range(8)]
+        self.assertIn(429, statuses)

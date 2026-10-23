@@ -1,11 +1,13 @@
 # Install inside nginx http{} after replacing ALL REPLACE_* placeholders.
 # Only trusted administrators may modify this file or the static directory.
+limit_req_zone $binary_remote_addr zone=aegis_enrollment:10m rate=5r/m;
 server {
     listen 443 ssl;
     server_name REPLACE_MANAGER_HOSTNAME;
     ssl_certificate /etc/aegis-manager/tls/manager-chain.pem;
     ssl_certificate_key /etc/aegis-manager/tls/manager-key.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
+    # Bundle the existing legacy CA and the new public enrollment CA here.
     ssl_client_certificate /etc/aegis-manager/tls/agent-ca.pem;
     ssl_verify_client optional;
     ssl_verify_depth 2;
@@ -13,6 +15,32 @@ server {
     add_header X-Content-Type-Options nosniff always;
     client_max_body_size 64k;
     server_tokens off;
+
+    location = /agent/v2/enroll {
+        client_max_body_size 16k;
+        limit_req zone=aegis_enrollment burst=5 nodelay;
+        limit_req_status 429;
+        proxy_pass http://localhost:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Aegis-Client-Verify "";
+        proxy_set_header X-Aegis-Client-Cert "";
+        proxy_redirect off;
+    }
+    location = /agent/v2/heartbeat {
+        if ($ssl_client_verify != SUCCESS) { return 403; }
+        client_max_body_size 16k;
+        proxy_pass http://localhost:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Aegis-Client-Verify $ssl_client_verify;
+        proxy_set_header X-Aegis-Client-Cert $ssl_client_escaped_cert;
+        proxy_redirect off;
+    }
 
     # optional at server level permits browser login without an agent cert;
     # this location requires nginx chain verification before proxying.
