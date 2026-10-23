@@ -1,7 +1,8 @@
 # AEGIS Manager, agents và catalog trên web — thiết kế đề xuất
 
 Ngày: 2026-10-23; bổ sung đăng nhập và quản lý tài khoản ngày 2026-10-24.
-Trạng thái: đề xuất, chờ duyệt bản thiết kế này trước khi triển khai sản phẩm.
+Trạng thái: phạm vi và giao diện v3 đã được chốt qua trao đổi ngày 2026-10-24;
+kế hoạch triển khai phần đầu (đăng nhập, tài khoản, phân quyền) chờ review trước khi sửa code.
 
 ## 1. Phần đã được người dùng chọn
 
@@ -122,7 +123,7 @@ checkbox. Không xóa group/permission ngoài namespace AEGIS. Django superuser
 active có quyền hiệu lực đầy đủ, không thể hạ đặc quyền đó bằng form sản phẩm.
 
 Server kiểm quyền lại ở mọi endpoint và trong service thực hiện hành động, cùng
-với readiness/approval invariants hiện có. `OwnerAdmin` và `_owner` trong jobs.py
+với readiness/approval invariants hiện có. `OwnerAdmin` và `owner` trong jobs.py
 hiện yêu cầu superuser: bổ sung authorization service được test cho API mới,
 không chỉ đổi nút UI hoặc cho Vận hành thành Django superuser. `/admin/` giữ quyền
 quản trị kỹ thuật hiện tại. User quản trị sản phẩm có đủ tám quyền không tự có
