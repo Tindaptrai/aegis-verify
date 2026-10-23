@@ -1,0 +1,112 @@
+* { box-sizing: border-box; }
+body { margin: 0; }
+.manager-app { --page:#0b131c; --sidebar:#0d1722; --card:#111e2a; --surface:#152330; --border:#223340; --text:#e8eff5; --muted:#93a5b5; --faint:#657c8f; --mint:#80e3bf; --mint-surface:#14382f; --primary-text:#0b2e24; --amber:#e7bd7c; background:var(--page); color:var(--text); min-height:100vh; font:13px/1.5 Inter,"Segoe UI",system-ui,-apple-system,sans-serif; -webkit-font-smoothing:antialiased; }
+.manager-app[data-theme=light] { --page:#f2f5f7; --sidebar:#fff; --card:#fff; --surface:#f7f9fa; --border:#dfe7ec; --text:#172e3f; --muted:#62798b; --faint:#8293a0; --mint:#176d53; --mint-surface:#e3f5ed; --primary-text:#fff; --amber:#946426; }
+.manager-app button,.manager-app input { font:inherit; }
+.manager-app button { cursor:pointer; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:8px; padding:10px 14px; font-size:12px; font-weight:600; min-height:38px; }
+.manager-app button:hover:not(:disabled) { border-color:var(--mint); }
+.manager-app button:disabled { cursor:not-allowed; opacity:.55; }
+.manager-app :focus-visible { outline:2px solid var(--mint); outline-offset:4px; }
+.manager-app input { width:100%; background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:7px; padding:11px 12px; min-width:0; font-size:12px; }
+.manager-app label { display:block; font-size:11px; font-weight:550; margin:15px 0 7px; }
+.manager-app .primary { background:var(--mint); color:var(--primary-text); border-color:var(--mint); }
+.manager-app h1 { font-size:27px; line-height:1.3; font-weight:650; letter-spacing:-.9px; margin:0 0 8px; }
+.manager-app h2 { font-size:16px; font-weight:620; margin:0; }
+.manager-app h3 { font-size:14px; font-weight:620; }
+.manager-app p { color:var(--muted); }
+.manager-app .eyebrow { color:var(--faint); font-size:10px; font-weight:700; letter-spacing:1.4px; }
+.panel { background:var(--card); border:1px solid var(--border); border-radius:13px; }
+.panel-body { padding:22px; }
+.manager-brand { display:flex; align-items:center; gap:11px; min-width:0; }
+.manager-brand img { height:38px; width:38px; object-fit:contain; }
+.manager-brand strong { display:block; font-size:18px; font-weight:750; letter-spacing:2.4px; line-height:1.2; }
+.manager-brand small { display:block; color:var(--muted); font-size:9px; letter-spacing:2px; margin-top:4px; }
+.session-pending { min-height:100vh; display:flex; align-items:center; justify-content:center; flex-direction:column; padding:24px; }
+.manager-login { min-height:100vh; padding:98px 35px 55px; background:radial-gradient(ellipse at 14% 23%,#3d9c8112,transparent 55%); display:grid; grid-template-columns:1fr 420px; gap:80px; align-content:center; align-items:center; max-width:1090px; margin:auto; }
+.login-story .manager-brand { gap:13px; }
+.login-story .manager-brand img { height:62px; width:62px; }
+.login-story .manager-brand strong { font-size:22px; letter-spacing:3px; }
+.story-copy { margin-top:38px; }
+.story-copy h1 { font-size:38px; line-height:1.3; font-weight:630; letter-spacing:-1.5px; }
+.story-copy>p:last-child { font-size:13px; line-height:1.9; max-width:370px; }
+.login-card { padding:30px; box-shadow:0 20px 80px #0005; }
+.login-card h2 { font-size:25px; letter-spacing:-.6px; }
+.login-card>p { font-size:12px; }
+.login-card form { margin-top:23px; }
+.password-field { display:flex; position:relative; gap:6px; }
+.password-field button { font-size:10px; padding:5px 10px; }
+.manager-app .login-submit { width:100%; margin-top:22px; min-height:42px; }
+.manager-app .manager-alert { font-size:11px; padding:11px 13px; border:1px solid #b24f4455; background:#b24f4415; color:var(--amber); border-radius:7px; }
+.manager-sidebar { position:fixed; left:0; top:0; bottom:0; width:222px; background:var(--sidebar); border-right:1px solid var(--border); padding:25px 16px; }
+.manager-sidebar .manager-brand { padding:0 12px; }
+.nav-label { margin:38px 14px 12px; }
+.manager-sidebar nav { display:flex; flex-direction:column; gap:5px; }
+.manager-sidebar nav button { text-align:left; padding:11px 14px; background:transparent; border-color:transparent; font-weight:550; }
+.manager-sidebar nav button small { display:block; font-size:9px; color:var(--faint); font-weight:400; }
+.manager-sidebar nav .selected { background:var(--mint-surface); color:var(--mint); }
+.manager-workspace { margin-left:222px; }
+.manager-header { min-height:76px; padding:15px 33px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.header-identity { display:flex; align-items:center; gap:20px; min-width:0; }
+.manager-header .manager-brand strong { font-size:14px; letter-spacing:2.1px; }
+.manager-header .manager-brand small { font-size:8px; }
+.breadcrumb { border-left:1px solid var(--border); padding-left:18px; font-size:11px; color:var(--muted); }
+.header-actions { display:flex; align-items:center; gap:10px; flex-shrink:0; }
+.manager-app .theme-toggle { width:35px; height:35px; min-height:35px; padding:0; font-size:18px; }
+.manager-content { padding:31px 33px 24px; max-width:1680px; margin:auto; }
+.page-heading { margin-bottom:25px; }
+.page-heading .eyebrow { margin-top:0; }
+.page-heading>p:last-child { margin:0; font-size:12px; }
+.overview-counts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:18px; }
+.overview-counts article { padding:22px; }
+.overview-counts p { margin:0 0 14px; font-size:12px; }
+.overview-counts strong { display:block; font-size:32px; font-weight:650; color:var(--mint); }
+.overview-counts small { display:block; margin-top:14px; font-size:10px; color:var(--faint); }
+.account-menu { position:relative; flex-shrink:0; }
+.manager-app .account-trigger { display:flex; align-items:center; height:35px; min-height:35px; padding:5px 8px; gap:8px; max-width:170px; }
+.initial { display:grid; place-items:center; width:24px; height:24px; flex-shrink:0; border-radius:5px; background:var(--mint-surface); color:var(--mint); }
+.account-name { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; font-size:10px; font-weight:550; }
+.account-popover { position:absolute; right:0; top:43px; width:min(270px,calc(100vw - 26px)); padding:8px; border:1px solid var(--border); border-radius:11px; background:var(--card); box-shadow:0 14px 35px #0005; z-index:60; }
+.account-summary { padding:10px 10px 12px; border-bottom:1px solid var(--border); overflow-wrap:anywhere; }
+.account-summary strong { font-size:12px; }
+.account-summary p { font-size:10px; margin:4px 0 0; }
+.manager-app .account-popover button { display:block; text-align:left; width:100%; border:0; background:transparent; padding:10px; font-size:11px; border-radius:6px; }
+.manager-app .account-popover button:hover { background:var(--surface); }
+.drawer-backdrop { position:fixed; inset:0; background:#050b1477; backdrop-filter:blur(3px); z-index:100; display:flex; justify-content:flex-end; }
+.account-drawer { width:470px; max-width:100vw; height:100dvh; overflow:auto; background:var(--card); border-left:1px solid var(--border); box-shadow:-12px 0 35px #0005; }
+.account-drawer header { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:25px; border-bottom:1px solid var(--border); }
+.account-drawer header h2 { font-size:20px; }
+.drawer-body { padding:25px; }
+.drawer-body>h3 { margin:0; }
+.drawer-body>p { font-size:12px; overflow-wrap:anywhere; }
+.drawer-body>h3:not(:first-child) { margin-top:28px; }
+.capability-list { list-style:none; padding:0; }
+.capability-list li { padding:10px 0; border-bottom:1px solid var(--border); font-size:11px; display:flex; flex-wrap:wrap; gap:4px 12px; justify-content:space-between; }
+.capability-list code { font-family:"Cascadia Code",Consolas,monospace; color:var(--faint); }
+.drawer-body form { margin-top:28px; }
+.drawer-body form .primary { margin-top:22px; }
+@media(min-width:1500px) { .manager-content { padding-top:38px; } }
+@media(max-width:1200px) { .manager-sidebar { width:194px; padding-right:12px; padding-left:12px; } .manager-workspace { margin-left:194px; } .manager-header { padding-left:24px; padding-right:24px; } .header-identity { gap:12px; } .manager-content { padding-left:24px; padding-right:24px; } .account-name { display:none; } .manager-app .account-trigger { width:35px; padding:5px; } }
+@media(max-width:1000px) { .overview-counts { grid-template-columns:1fr; } .breadcrumb { display:none; } }
+@media(max-width:900px) { .manager-login { grid-template-columns:1fr; max-width:450px; gap:30px; padding-top:78px; } .story-copy { display:none; } .login-story .manager-brand { justify-content:center; } .login-story .manager-brand img { width:50px; height:50px; } .login-story .manager-brand strong { font-size:20px; } .login-card { padding:28px; } }
+@media(max-width:760px) {
+  .manager-sidebar { top:auto; width:100%; height:67px; padding:6px 10px; border-right:0; border-top:1px solid var(--border); z-index:30; overflow-x:auto; }
+  .manager-sidebar>.manager-brand,.nav-label { display:none; }
+  .manager-sidebar nav { flex-direction:row; gap:4px; width:max-content; min-width:100%; }
+  .manager-sidebar nav button { padding:7px 10px; font-size:10px; min-height:48px; }
+  .manager-sidebar nav button small { font-size:8px; }
+  .manager-workspace { margin-left:0; }
+  .manager-header { min-height:67px; padding:12px 18px; gap:5px; }
+  .header-identity,.header-actions { gap:5px; }
+  .manager-header .manager-brand { gap:7px; }
+  .manager-header .manager-brand img { width:34px; height:34px; }
+  .manager-header .manager-brand strong { font-size:10px; letter-spacing:1.1px; }
+  .manager-header .manager-brand small { font-size:6px; letter-spacing:1px; }
+  .manager-app .account-trigger { display:flex; width:33px; min-width:33px; height:33px; min-height:33px; padding:4px; }
+  .initial { width:23px; height:23px; }
+  .manager-app .theme-toggle { width:33px; height:33px; min-height:33px; }
+  .manager-content { padding:23px 18px 95px; }
+  .account-drawer { width:440px; }
+  .account-drawer header,.drawer-body { padding:22px; }
+}
+@media(max-width:430px) { .manager-login { padding:74px 16px 30px; } .login-card { padding:23px; } .login-card h2 { font-size:23px; } .login-story .manager-brand strong { font-size:18px; } .account-popover { width:min(265px,calc(100vw - 26px)); } }
+@media(prefers-reduced-motion:reduce) { .manager-app * { animation:none!important; transition:none!important; } }

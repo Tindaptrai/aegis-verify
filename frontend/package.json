@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
+    "build:manager": "tsc --noEmit -p tsconfig.json && vite build --config vite.manager.config.ts",
+    "dev:manager": "vite --config vite.manager.config.ts --open manager.html",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

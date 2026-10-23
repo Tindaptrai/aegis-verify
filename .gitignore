@@ -48,3 +48,4 @@ logs/
 runs/
 *.log
 !tests/fixtures/**/*.log
+frontend/dist-manager/
