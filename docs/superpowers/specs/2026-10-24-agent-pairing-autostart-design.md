@@ -70,7 +70,10 @@ Paths have no trailing slash and never redirect. All JSON object schemas are clo
 Protocol string: `2.0`. Times are RFC3339 UTC. Machine errors are
 `{"error":{"code":"<fixed_code>"}}`, without request content or exception text.
 Enrollment errors: invalid_request 400; pairing_denied 403; issuer_unavailable 503.
-Heartbeat errors: invalid_request 400; identity_denied 403; transient failures 503.
+Heartbeat errors: invalid_request 400; identity_denied 403; temporarily_unavailable 503.
+Human unknown code/device resource: invalid_request 400; attempting paired-only revoke
+on legacy identity: device_conflict 409. Keep these fixed errors in devices, not an
+unrelated expansion of the accounts error vocabulary.
 
 `POST /agent/v2/enroll` (no client cert required, no browser session):
 request `{protocol,pairing_code,csr_pem,hostname,os,architecture,agent_version}`.
