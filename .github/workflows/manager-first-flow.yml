@@ -5,6 +5,11 @@ on:
     paths:
       - 'manager/**'
       - 'agent/windows/**'
+      - 'agent/connection/**'
+      - 'deploy/agent/**'
+      - 'scripts/stage_agent_connection.py'
+      - 'scripts/tests/agent/**'
+      - 'backend/tests/test_agent_connection_packaging.py'
       - 'deploy/manager/**'
       - 'frontend/src/manager/**'
       - 'frontend/manager.html'
@@ -22,6 +27,11 @@ on:
     paths:
       - 'manager/**'
       - 'agent/windows/**'
+      - 'agent/connection/**'
+      - 'deploy/agent/**'
+      - 'scripts/stage_agent_connection.py'
+      - 'scripts/tests/agent/**'
+      - 'backend/tests/test_agent_connection_packaging.py'
       - 'deploy/manager/**'
       - 'frontend/src/manager/**'
       - 'frontend/manager.html'
@@ -81,11 +91,10 @@ jobs:
       - name: Verify migrations and real PostgreSQL suite
         run: |
           python manager/manage.py makemigrations --check --dry-run --settings=aegis_manager.ci_settings
-          python manager/manage.py test accounts.tests control.tests --settings=aegis_manager.ci_settings --verbosity 2
-      - name: Require real PostgreSQL auth and control concurrency
-        # Five authority/bootstrap races plus one dispatch race; SQLite skips
-        # never count as concurrent-policy coverage.
-        run: python manager/manage.py test accounts.tests.test_postgres_concurrency control.tests.test_postgres_concurrency --settings=aegis_manager.ci_settings --verbosity 2
+          python manager/manage.py test accounts.tests control.tests devices.tests --settings=aegis_manager.ci_settings --verbosity 2
+      - name: Require real PostgreSQL authority, control and pairing concurrency
+        # SQLite skips never count as row-lock or concurrent-policy coverage.
+        run: python manager/manage.py test accounts.tests.test_postgres_concurrency control.tests.test_postgres_concurrency devices.tests.test_postgres_concurrency --settings=aegis_manager.ci_settings --verbosity 2
 
   manager-ui:
     name: Standalone Manager public build
@@ -142,7 +151,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python manager/manage.py test accounts.tests control.tests --settings=aegis_manager.test_settings --verbosity 2
+          python manager/manage.py test accounts.tests control.tests devices.tests --settings=aegis_manager.test_settings --verbosity 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish and verify self-contained agent
         run: |
