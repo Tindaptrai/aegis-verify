@@ -1,6 +1,7 @@
 # AEGIS Manager, agents và catalog trên web — thiết kế đề xuất
 
-Ngày: 2026-10-23. Trạng thái: đề xuất, chờ duyệt bản thiết kế này trước khi triển khai sản phẩm.
+Ngày: 2026-10-23; bổ sung đăng nhập và quản lý tài khoản ngày 2026-10-24.
+Trạng thái: đề xuất, chờ duyệt bản thiết kế này trước khi triển khai sản phẩm.
 
 ## 1. Phần đã được người dùng chọn
 
@@ -11,6 +12,7 @@ Ngày: 2026-10-23. Trạng thái: đề xuất, chờ duyệt bản thiết kế
 - Chọn một hoặc nhiều máy Windows, chọn SCN-001, chạy đồng thời và theo dõi từng máy.
 - Thêm kịch bản ngay trên web bằng cách tải lên gói ZIP chứa script và cấu hình đánh giá.
 - Người dùng đã đồng ý bố cục bản phác thảo đầu, yêu cầu thêm logo và luồng nhập ZIP.
+- Giao diện phải có đăng nhập/đăng xuất, tạo tài khoản và cấp quyền cho từng tài khoản.
 
 Bản này thay thế đề xuất launcher cho ba VM ngày 2026-10-23. Đề xuất launcher cũ
 chưa được duyệt. Hồ sơ pilot A/B/C và các báo cáo gốc vẫn là hồ sơ lịch sử riêng.
@@ -49,7 +51,8 @@ Windows x64 và Linux x64 cho kết nối; thêm OS/kiến trúc cần acceptanc
 
 ## 3. Giao diện
 
-Menu gồm Tổng quan, Máy đích, Kịch bản, Lượt chạy, Kết nối, Cài đặt. Giao diện
+Menu gồm Tổng quan, Máy đích, Kịch bản, Lượt chạy, Kết nối, Tài khoản & quyền,
+Cài đặt; mục quản trị chỉ hiện cho người có quyền tương ứng. Giao diện
 sáng/tối, tiếng Việt, logo AEGIS hiện có ở header và sidebar. Dùng cùng logo được
 lưu trong repo, không tạo nhận diện mới hoặc cần dịch vụ ảnh bên ngoài.
 
@@ -70,15 +73,99 @@ Mỗi lượt chạy phân biệt: trạng thái thực thi, trạng thái thu t
 Không dùng phần trăm giả hoặc gộp `succeeded` thành `Detected`. UI mô phỏng có nhãn
 dữ liệu minh họa; bản sản phẩm chỉ hiển thị dữ liệu API thực, có trạng thái rỗng/lỗi.
 
+Trước khi vào workspace là trang **Đăng nhập** có logo, tên đăng nhập, mật khẩu,
+hiện/ẩn mật khẩu và thông báo lỗi. Sau đăng nhập, góc phải luôn có nút tài khoản
+với tên/role; mở menu **Tài khoản của tôi / Đăng xuất**. Cửa sổ hẹp vẫn có nút này,
+không giấu chung với avatar như bản phác thảo đầu. Đăng xuất trở về trang login.
+
+**Tài khoản & quyền** gồm bảng username/tên hiển thị/vai trò/trạng thái, tìm kiếm,
+**Tạo tài khoản**, sửa quyền và khóa/mở khóa. Form tạo có username, tên hiển thị,
+mật khẩu ban đầu, preset vai trò và checkbox quyền. Form sửa không đổi username;
+không hiện lại mật khẩu. Khóa tài khoản giữ audit/history và thay cho xóa cứng.
+
+Đề xuất của người triển khai là preset vai trò cộng checkbox theo tài khoản, dùng
+Django Groups/Permissions hiện có. Chỉ có preset cứng sẽ không đáp ứng thao tác
+cấp quyền riêng user; tự xây một hệ thống định danh khác là không cần thiết.
+Chưa có trình tạo vai trò tùy ý trong bản đầu: checkbox lệch preset hiện **Tùy chỉnh**.
+
 ## 4. Manager API, tài khoản và dữ liệu
 
 UI phục vụ cùng origin HTTPS với Django; API `/api/v1/` dùng Django session và CSRF.
 Giữ `/admin/` cho quản trị kỹ thuật. Không dùng API Operations loopback làm API
 quản lý thực thi hoặc vô tình bỏ qua xác thực của Manager.
 
-Mặc định bản đầu chủ lab dùng tài khoản quản trị, có quyền nhập/phát hành và chạy.
-Các quyền `view`, `publish_scenario`, `approve_run`, `manage_devices` được kiểm tra
-ở server; không chỉ ẩn nút. Thiết kế không yêu cầu thêm hệ thống SSO hoặc tenant.
+Mặc định bản đầu chủ lab dùng tài khoản quản trị. Quyền áp dụng trên toàn một lab
+(không chia theo máy/môi trường trong bản đầu). Ma trận đề xuất:
+
+| Quyền sản phẩm | Quản trị | Vận hành | Chỉ xem |
+| --- | --- | --- | --- |
+| `view`: xem máy, catalog, lượt chạy, báo cáo | Có | Có | Có |
+| `run_jobs`: duyệt/chạy và hủy job chưa chạy | Có | Có | — |
+| `import_scenarios`: nhập ZIP và quản lý bản nháp | Có | — | — |
+| `publish_scenarios`: phát hành/ngừng phát hành phiên bản | Có | — | — |
+| `manage_devices`: tạo mã ghép nối, cấu hình mapping, revoke | Có | — | — |
+| `manage_connections`: cấu hình nguồn Wazuh/reader | Có | — | — |
+| `export_evidence`: xuất evidence/báo cáo | Có | Có | — |
+| `manage_users`: tạo/khóa/reset mật khẩu/cấp quyền user | Có | — | — |
+
+Checkbox có hiệu lực thay cho preset; `view` là quyền nền để dùng workspace.
+Tài khoản được cấp các quyền hành động phải có `view`. Cài đặt giao diện và thay
+mật khẩu của mình dành cho mọi user đang active; `manage_connections` mới được
+ghi config nguồn chung. Reconcile job trạng thái mơ hồ vẫn yêu cầu quản trị có
+đủ quyền hoặc owner qua Admin, không ngầm mở cho Vận hành chỉ vì được Run.
+
+Preset dùng ba Django Groups do ứng dụng quản lý; chuyển sang Tùy chỉnh gỡ các
+group preset này rồi ghi các permission sản phẩm đã chọn. Django hợp quyền từ
+groups/direct permissions, không có ô deny: quyền kế thừa từ group ngoài ba
+preset (nếu tồn tại khi nâng cấp) phải hiện rõ là kế thừa, không vờ tắt được bằng
+checkbox. Không xóa group/permission ngoài namespace AEGIS. Django superuser
+active có quyền hiệu lực đầy đủ, không thể hạ đặc quyền đó bằng form sản phẩm.
+
+Server kiểm quyền lại ở mọi endpoint và trong service thực hiện hành động, cùng
+với readiness/approval invariants hiện có. `OwnerAdmin` và `_owner` trong jobs.py
+hiện yêu cầu superuser: bổ sung authorization service được test cho API mới,
+không chỉ đổi nút UI hoặc cho Vận hành thành Django superuser. `/admin/` giữ quyền
+quản trị kỹ thuật hiện tại. User quản trị sản phẩm có đủ tám quyền không tự có
+`is_superuser`/`is_staff`; form web không nhận hai trường đặc quyền Django đó.
+`manage_users` chỉ quản lý tài khoản sản phẩm không có `is_staff/is_superuser`.
+Tài khoản quản trị kỹ thuật hiện có được hiển thị read-only trong trang này;
+không reset password, khóa hay đổi nhóm của tài khoản đó từ API quản trị sản
+phẩm. Thao tác quản trị kỹ thuật cần đường `/admin/` có quyền tương ứng. Mọi
+user vẫn được đổi mật khẩu của chính mình sau khi xác nhận mật khẩu hiện tại.
+
+Danh sách quyền được server xác định, không tin capability từ session payload
+hoặc JSON client. Direct URL/API không đủ quyền trả 403, chưa login trả 401 hoặc
+redirect login đối với trang HTML. Read API không xuất mật khẩu, password hash,
+secret của reader/key hoặc token ghép nối. Vận hành/Chỉ xem không tự đổi quyền.
+
+Login dùng Django authentication/session/CSRF, rotate session lúc thành công;
+lỗi đăng nhập dùng thông báo chung. Redirect sau login chỉ cho origin/đường dẫn
+nội bộ. Session cookie Secure/HttpOnly/SameSite phù hợp, không lưu auth trong
+localStorage. Session hết hạn tuyệt đối sau 8 giờ từ lúc login (đề xuất cấu hình);
+polling trạng thái hoặc mở tab nền không gia hạn mốc này.
+Logout là POST có CSRF, flush session và xóa dữ liệu workspace trong UI; Back
+không được dùng dữ liệu/API đã đăng xuất (no-store cho dữ liệu xác thực/quản trị).
+
+Tạo user hash mật khẩu bằng Django, audit actor/target/role/permission set; không
+ghi mật khẩu vào audit, response hoặc export. Đổi/reset mật khẩu làm mất hiệu lực
+session cũ; tự đổi mật khẩu có thể giữ phiên hiện tại bằng cơ chế Django. Khóa
+user có hiệu lực ở request kế tiếp, không chỉ chặn lần login sau. Thay quyền cũng
+được đọc lại ở request kế tiếp, không dựa trên cache đăng nhập kéo dài tám giờ.
+Khóa user phải thu hồi mọi session hiện có bằng session generation/revocation
+được server kiểm tra hoặc xóa session tương ứng; mở khóa không làm cookie cũ
+sống lại và phải login mới. Không chỉ kiểm tra `is_active` trong lúc đang khóa.
+
+Khóa user không đổi trạng thái hay chạy lại job đã duyệt; actor/snapshot đã lưu
+vẫn giữ trong audit. Đổi quyền không sửa lịch sử approval. Bản đầu không tự xóa
+user để tránh mất liên kết lịch sử. Transaction kiểm tra không khóa/hạ quyền
+người quản trị active cuối cùng; tính cả Django superuser active đang có. Không
+cho user tự khóa mình trong UI. Các thao tác thay quyền đồng thời phải test để
+không vượt qua điều kiện còn ít nhất một admin. Bọc cả UserAdmin/GroupAdmin mặc
+định và các bulk action liên quan qua cùng policy để `/admin/` không là đường
+vòng hạ admin cuối cùng hoặc sửa quyền ngoài audit. Điều kiện admin active tính
+effective permissions sau thay đổi, gồm memberships/direct perms/superuser,
+không dựa riêng vào tên vai trò; tài khoản còn lại phải có mật khẩu usable và
+có thể đăng nhập, không chỉ có cờ active. Thiết kế không thêm SSO/tenant.
 
 Bộ cài mới dùng cơ chế hash mật khẩu Django cho `aegis/aegis`; không log mật khẩu,
 không dùng tài khoản web làm mật khẩu agent/DB/SSH/Indexer. Nâng cấp không reset
@@ -97,7 +184,8 @@ thái catalog nằm ngoài manifest: model manifest hiện yêu cầu `status: d
 không đổi YAML sang `published` chỉ để biểu diễn publication của catalog.
 
 Các endpoint cụ thể và mã lỗi được chốt trong implementation plan; tài nguyên gồm
-devices/heartbeat, pairing, scenario versions/import/validate/publish, batch
+auth/login/logout/me/password, users/permissions, devices/heartbeat, pairing,
+scenario versions/import/validate/publish, batch
 preview/approve/status, report/export. Đọc trạng thái không được lease công việc.
 
 ## 5. Gói ZIP kịch bản
@@ -278,6 +366,13 @@ và private config tương ứng; không hứa downgrade schema tự động. Kh
   → fake agent receipts → fixture evidence → report/export trước live lab.
 - Test quyền/session/CSRF/object access, upload budgets/path/link/duplicates,
   hash/schema/profile mismatch, duplicate immutable version và publish snapshot.
+- Test login đúng/sai, session rotation/expiry/logout, redirect nội bộ, reset mật
+  khẩu và khóa user vô hiệu session cũ; không trả/log password/hash/reader secret.
+  Cookie trước khóa vẫn bị từ chối sau khi mở khóa; API quản lý user sản phẩm
+  không reset/khóa/đổi quyền tài khoản quản trị kỹ thuật để chiếm `/admin/`.
+- Test đủ ba preset và quyền tùy chỉnh: server/service chặn direct API trái quyền,
+  user không tự nâng quyền, khóa/hạ admin cuối cùng (kể cả request đồng thời) bị chặn,
+  user được cấp quyền ngay request sau và không cần thành Django superuser.
 - Test mới tạo `aegis/aegis` một lần, upgrade không reset tài khoản/DB/key/history.
 - Test token expiry/one-use/concurrent redemption, mTLS identity/revocation,
   heartbeat server time, Linux no-dispatch, protocol v1/v2 isolation.
@@ -285,6 +380,9 @@ và private config tương ứng; không hứa downgrade schema tự động. Kh
   failure/reconcile không tự replay và process tree timeout/cleanup.
 - UI test chọn nhiều máy, không chọn Linux/offline/unsupported, import errors,
   draft không Run, version/hash/reviewer, thực thi và detection hiển thị riêng.
+- UI test login/logout trên màn hình rộng/hẹp, account menu luôn tìm thấy, tạo
+  user/đổi preset/checkbox/khóa user; Chỉ xem không có nút Run/Import/User admin,
+  Vận hành có Run/Export và thiếu Publish/Manage users theo ma trận.
 - Regression test giữ bộ canonical/intake/engine/compare và legacy SCN-001.
 - Sau review: lab Ubuntu Manager, Windows 009 hiện có, một Windows thứ hai có
   mapping riêng, một Linux Online-only. Không đánh dấu multi-device đã kiểm chứng
