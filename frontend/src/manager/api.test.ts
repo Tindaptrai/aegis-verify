@@ -47,6 +47,28 @@ describe('Manager same-origin API', () => {
     }
   });
 
+  it.each(['username_exists', 'self_lock', 'last_admin'])('retains the allowlisted %s code for fixed UI messages', async (code) => {
+    const api = createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(json({ error: { code } }, 409)));
+    await expect(api.createUser({ username: 'test', display_name: '', password: 'synthetic', capabilities: ['view'], is_active: true })).rejects.toMatchObject({ status: 409, code });
+  });
+
+  it.each([
+    ['unknown code', { error: { code: 'private-source-value' } }],
+    ['wrong type', { error: { code: { private: 'value' } } }],
+    ['malformed body', null],
+  ])('uses a generic failure for %s', async (_name, body) => {
+    const response = body === null ? new Response('private non-JSON value', { status: 409 }) : json(body, 409);
+    const api = createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(response));
+    await expect(api.updateUser(7, { display_name: '', capabilities: ['view'], is_active: true })).rejects.toMatchObject({ status: 409, code: undefined, message: 'Manager request failed' });
+  });
+
+  it('bounds error bodies and rejects a known code with the wrong HTTP status', async () => {
+    for (const body of [{ error: { code: 'username_exists' }, padding: 'x'.repeat(2048) }, { error: { code: 'invalid_password' } }]) {
+      const api = createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(json(body, 409)));
+      await expect(api.updateUser(7, { display_name: '', capabilities: [], is_active: true })).rejects.toMatchObject({ status: 409, code: undefined });
+    }
+  });
+
   it('maps all account endpoints and bounded query values without Operations auth', async () => {
     const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => json({}));
     const api = createManagerApi(fetcher);

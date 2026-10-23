@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ManagerApi } from './api';
 import { ManagerApiError } from './api';
 import type { OverviewDTO, SessionDTO } from './contracts';
 import { LoginPage } from './LoginPage';
 import { AccountMenu } from './AccountMenu';
 import { MyAccount } from './MyAccount';
+import { UsersPage } from './UsersPage';
 import logo from '../../../packaging/windows/demo-launcher/assets/aegis-demo-logo.png';
 
 const anonymous: SessionDTO = { authenticated: false, csrf_token: '', user: null, expires_at: null };
@@ -16,6 +17,7 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const [sessionError, setSessionError] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [page, setPage] = useState<'overview' | 'users'>('overview');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const generation = useRef(0);
   const active = useRef<AbortController | null>(null);
@@ -24,11 +26,14 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const mounted = useRef(true);
   const pendingRevalidation = useRef<{ forceAnonymous: boolean } | null>(null);
   const pendingLogout = useRef(false);
+  const authorityRefresh = useRef<{ generation: number; promise: Promise<void> } | null>(null);
+  const sessionUserId = useRef<number | null>(null);
+  sessionUserId.current = session?.authenticated ? session.user?.id ?? null : null;
 
   const clear = useCallback(() => {
     generation.current += 1; active.current?.abort();
     const controller = new AbortController(); active.current = controller;
-    setOverview(null); setOverviewError(''); setAccountOpen(false);
+    setOverview(null); setOverviewError(''); setAccountOpen(false); setPage('overview');
     return { controller, generation: generation.current };
   }, []);
   const isCurrent = (request: { controller: AbortController; generation: number }) => request.generation === generation.current && !request.controller.signal.aborted;
@@ -64,6 +69,58 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   }, [api, clear, revalidate]);
 
   const unauthorized = useCallback(() => { void revalidate(true); }, [revalidate]);
+  // Refresh grants without remounting an allowed account page. Coalesce the
+  // list/metadata failure paths so their session reads cannot supersede CSRF.
+  const refreshAuthority = useCallback((): Promise<void> => {
+    if (writingAuth.current) return revalidate();
+    if (authorityRefresh.current?.generation === generation.current) return authorityRefresh.current.promise;
+    const request = { generation: generation.current, controller: active.current ?? new AbortController() };
+    const promise = (async () => {
+      try {
+        const result = await api.session(request.controller.signal);
+        if (!mounted.current || !isCurrent(request)) return;
+        if (!result.authenticated || !result.user || (result.expires_at !== null && result.expires_at * 1000 <= Date.now())) {
+          clear(); setSession({ ...anonymous, csrf_token: result.csrf_token }); return;
+        }
+        if (result.user.id !== sessionUserId.current) clear();
+        if (!result.user.capabilities.includes('view') || !result.user.capabilities.includes('manage_users')) setPage('overview');
+        setSession(result);
+      } catch (failure) {
+        if (!mounted.current || !isCurrent(request)) return;
+        if (failure instanceof ManagerApiError && failure.status === 401) unauthorized();
+        else await revalidate();
+      }
+    })();
+    authorityRefresh.current = { generation: request.generation, promise };
+    void promise.finally(() => { if (authorityRefresh.current?.promise === promise) authorityRefresh.current = null; });
+    return promise;
+  }, [api, clear, revalidate, unauthorized]);
+  const accountsApi = useMemo<ManagerApi>(() => {
+    // Keep this facade stable across shell renders and bound every settlement
+    // to the workspace that issued it, including late authorization failures.
+    async function guarded<T>(action: () => Promise<T>, signal?: AbortSignal) {
+      const current = generation.current;
+      try {
+        const result = await action();
+        if (!mounted.current || current !== generation.current || signal?.aborted) throw new DOMException('Request superseded', 'AbortError');
+        return result;
+      }
+      catch (failure) {
+        if (mounted.current && current === generation.current && !signal?.aborted && failure instanceof ManagerApiError) {
+          if (failure.status === 401) unauthorized();
+          else if (failure.status === 403) void refreshAuthority();
+        }
+        throw failure;
+      }
+    }
+    return { ...api,
+      listUsers: (query, signal) => guarded(() => api.listUsers(query, signal), signal),
+      permissions: (signal) => guarded(() => api.permissions(signal), signal),
+      createUser: (input, signal) => guarded(() => api.createUser(input, signal), signal),
+      updateUser: (id, input, signal) => guarded(() => api.updateUser(id, input, signal), signal),
+      resetPassword: (id, input, signal) => guarded(() => api.resetPassword(id, input, signal), signal),
+    };
+  }, [api, refreshAuthority, unauthorized]);
   useEffect(() => {
     if (!session?.authenticated || session.expires_at === null) return;
     const timer = window.setTimeout(unauthorized, Math.max(0, session.expires_at * 1000 - Date.now()));
@@ -150,19 +207,21 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   }
   const closeAccount = useCallback(() => setAccountOpen(false), []);
   const user = session?.authenticated ? session.user : null;
+  const canManageUsers = !!user?.capabilities.includes('view') && !!user?.capabilities.includes('manage_users');
+  const showingUsers = page === 'users' && canManageUsers;
   return <div className="manager-app" data-theme={theme}>
     {!session ? <main className="session-pending" aria-busy={!sessionError}>{sessionError ? <><p role="alert">{sessionError}</p><button onClick={() => { if (logoutFailed.current) void logout(); else void revalidate(); }}>Thử lại</button></> : <p>Đang xác minh phiên…</p>}</main> : !user ? <LoginPage onLogin={(input) => void login(input)} busy={authBusy} error={loginError} /> : <>
       <aside className="manager-sidebar"><div className="manager-brand"><img src={logo} alt="" /><div><strong>AEGIS</strong><small>VERIFY · MANAGER</small></div></div>
-        <p className="eyebrow nav-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng Manager"><button className="selected" aria-current="page">Tổng quan</button>
+        <p className="eyebrow nav-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng Manager"><button className={!showingUsers ? 'selected' : ''} aria-current={!showingUsers ? 'page' : undefined} onClick={() => setPage('overview')}>Tổng quan</button>
           <button disabled title="Chưa khả dụng">Thiết bị <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Kịch bản <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Tác vụ <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Kết nối <small>Chưa khả dụng</small></button>
-          {user.capabilities.includes('view') && user.capabilities.includes('manage_users') && <button disabled title="Chưa khả dụng">Tài khoản &amp; quyền <small>Chưa khả dụng</small></button>}
+          {canManageUsers && <button className={showingUsers ? 'selected' : ''} aria-current={showingUsers ? 'page' : undefined} onClick={() => setPage('users')}>Tài khoản &amp; quyền</button>}
         </nav></aside>
-      <div className="manager-workspace"><header className="manager-header"><div className="header-identity"><div className="manager-brand"><img src={logo} alt="AEGIS" /><div><strong>AEGIS</strong><small>MANAGER</small></div></div><span className="breadcrumb">Không gian làm việc / Tổng quan</span></div>
+      <div className="manager-workspace"><header className="manager-header"><div className="header-identity"><div className="manager-brand"><img src={logo} alt="AEGIS" /><div><strong>AEGIS</strong><small>MANAGER</small></div></div><span className="breadcrumb">Không gian làm việc / {showingUsers ? 'Tài khoản & quyền' : 'Tổng quan'}</span></div>
         <div className="header-actions"><button className="theme-toggle" aria-label={`Chuyển giao diện ${theme === 'dark' ? 'sáng' : 'tối'}`} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀' : '☾'}</button><AccountMenu user={user} onAccount={() => setAccountOpen(true)} onLogout={() => void logout()} /></div>
-      </header><main className="manager-content"><div className="page-heading"><p className="eyebrow">MANAGER</p><h1>Tổng quan</h1><p>Dữ liệu đã ghi nhận trong hệ thống quản lý.</p></div>
+      </header><main className="manager-content">{showingUsers ? <UsersPage key={user.id} api={accountsApi} onAuthorityChanged={refreshAuthority} /> : <><div className="page-heading"><p className="eyebrow">MANAGER</p><h1>Tổng quan</h1><p>Dữ liệu đã ghi nhận trong hệ thống quản lý.</p></div>
         {!user.capabilities.includes('view') ? <p className="manager-alert" role="alert">Bạn không có quyền xem dữ liệu. Liên hệ quản trị viên để được cấp quyền.</p> : overviewError ? <section className="panel panel-body"><p className="manager-alert" role="alert">{overviewError}</p><button onClick={() => void revalidate()}>Xác minh lại phiên</button></section> : !overview ? <p>Đang tải tổng quan…</p> : <section className="overview-counts" aria-label="Số liệu đã ghi nhận">
           <article className="panel"><p>Thiết bị đã đăng ký</p><strong>{overview.registered_devices}</strong><small>Số đăng ký trong cơ sở dữ liệu</small></article><article className="panel"><p>Tác vụ đã ghi nhận</p><strong>{overview.recorded_jobs}</strong><small>Số tác vụ trong cơ sở dữ liệu</small></article><article className="panel"><p>Phiên bản đã ghi nhận</p><strong>{overview.recorded_releases}</strong><small>Số phiên bản trong cơ sở dữ liệu</small></article>
-        </section>}
+        </section>}</>}
       </main></div>{accountOpen && <MyAccount key={user.id} user={user} onChangePassword={changePassword} onClose={closeAccount} />}
     </>}
   </div>;
