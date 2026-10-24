@@ -1,19 +1,23 @@
 #!/usr/bin/env bash
 # Disposable GitHub Ubuntu host only. Pairing code is a single closed stdin line.
 set -euo pipefail
-[[ ${GITHUB_ACTIONS:-} = true && ${RUNNER_OS:-} = Linux && $EUID = 0 && $(cat /proc/1/comm) = systemd ]] || { echo disposable_native_systemd_ci_required >&2; exit 1; }
+native_library=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+source "$native_library/installer-diagnostics.sh"
+helper_fail() { printf '{"stage":"helper","code":"%s"}\n' "$1" >&2; exit 1; }
+[[ ${GITHUB_ACTIONS:-} = true && ${RUNNER_OS:-} = Linux && $EUID = 0 && $(cat /proc/1/comm) = systemd ]] || helper_fail disposable_native_systemd_ci_required
 action='' package='' manager='' ca='' expected=''
 while (($#)); do
     argument=$1; shift
-    (($#)) || { echo usage_invalid >&2; exit 1; }
+    (($#)) || helper_fail usage_invalid
     case $argument in
         --action) action=$1;; --package-root) package=$1;; --manager-origin) manager=$1;; --server-ca) ca=$1;; --expected-device-id) expected=$1;;
-        *) echo usage_invalid >&2; exit 1;;
+        *) helper_fail usage_invalid;;
     esac
     shift
 done
-[[ $action = Install || $action = Restart || $action = Reinstall || $action = Status || $action = Uninstall ]] || { echo usage_invalid >&2; exit 1; }
+[[ $action = Install || $action = Restart || $action = Reinstall || $action = Status || $action = Uninstall ]] || helper_fail usage_invalid
 source "$package/install.sh"
+fail() { local code=$1; diagnostic_code "$code" || code=diagnostic_unknown; printf '{"stage":"helper","code":"%s"}\n' "$code" >&2; exit 1; }
 root=/opt/aegis-agent; state=/var/lib/aegis-agent; unit=/etc/systemd/system/aegis-agent.service; binary=$root/bin/aegis-agent
 read_status() {
     status=$(runuser -u aegis-agent -- "$binary" status --state-dir "$state") || fail status_failed
@@ -36,11 +40,11 @@ closed_installer() {
     [[ -z $manager ]] || arguments+=(--manager "$manager")
     [[ -z $ca ]] || arguments+=(--server-ca "$ca")
     set +e
-    if [[ -n $code ]]; then output=$(printf '%s\n' "$code" | bash "$package/install.sh" "${arguments[@]}" 2>&1); result=$?
-    else output=$(bash "$package/install.sh" "${arguments[@]}" </dev/null 2>&1); result=$?; fi
+    if [[ -n $code ]]; then output=$(printf '%s\n' "$code" | bash "$native_library/invoke-linux-installer-diagnostic.sh" "$package" "${arguments[@]}" 2>&1); result=$?
+    else output=$(bash "$native_library/invoke-linux-installer-diagnostic.sh" "$package" "${arguments[@]}" </dev/null 2>&1); result=$?; fi
     set -e
-    [[ ( -z $code || $output != *"$code"* ) && $output != *'PRIVATE KEY'* && $output != *'csr_pem'* ]] || fail installer_output_secret_leak
-    [[ $result = 0 ]] || fail native_installer_failed
+    diagnostic=$(captured_diagnostic "$output" "$code" installer)
+    if [[ $result != 0 || $diagnostic = *'"code":"installer_output_secret_leak"'* ]]; then printf '%s\n' "$diagnostic" >&2; exit 1; fi
 }
 if [[ $action = Install ]]; then
     [[ ! -e $root && ! -e $state && ! -e $unit ]] || fail ci_target_already_exists

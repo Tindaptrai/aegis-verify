@@ -87,6 +87,7 @@ try {
     if (!$script:activated -or [IO.File]::ReadAllText((Join-Path $oldRoot 'agent')) -ne 'old reviewed payload') { throw 'Failed upgrade did not restore prior payload' }
     if ((Get-FileHash -LiteralPath $identity).Hash -ne $before) { throw 'Failed upgrade changed pending identity' }; $passed++
     Write-Output "$passed installer contracts passed; SCM was not invoked"
+    & (Join-Path $PSScriptRoot 'Test-InstallerDiagnostics.ps1')
 } finally {
     if (Test-Path -LiteralPath $testRoot) { Remove-Item -LiteralPath $testRoot -Recurse -Force }
 }

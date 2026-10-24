@@ -53,3 +53,4 @@ for boundary in before_promotion after_promotion; do
     [[ $(sha256sum "$fixture/state/state.json" | cut -d ' ' -f1) = "$before_key" ]] || { echo "rollback changed identity at $boundary" >&2; exit 1; }
 done
 echo '10 Linux installer contracts passed; systemd was not invoked'
+bash "$(dirname -- "${BASH_SOURCE[0]}")/test-installer-diagnostics.sh"
