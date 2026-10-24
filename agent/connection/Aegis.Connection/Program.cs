@@ -18,7 +18,7 @@ internal static class Program
     {
         try
         {
-            if (args.Length == 0 || args[0] is not ("connect" or "run" or "status" or "retire")) throw new ConnectionException("usage_invalid");
+            if (args.Length == 0 || args[0] is not ("connect" or "run" or "status" or "retire" or "service")) throw new ConnectionException("usage_invalid");
             var command = args[0];
             var expected = command switch { "connect" => new[] { "--manager", "--server-ca", "--state-dir" }, "retire" => ["--state-dir", "--device-id"], _ => ["--state-dir"] };
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -26,6 +26,7 @@ internal static class Program
                 if (i + 1 >= args.Length || !expected.Contains(args[i]) || !options.TryAdd(args[i], args[i + 1])) throw new ConnectionException("usage_invalid");
             if (options.Count != expected.Length) throw new ConnectionException("usage_invalid");
             var directory = options["--state-dir"];
+            if (command == "service") return WindowsServiceHost.Run(directory);
             if (command == "run") return await HeartbeatLoop.RunAsync(directory, token);
             if (command == "status") { Console.Out.WriteLine(StateStore.Status(directory)); return 0; }
             using var store = StateStore.Acquire(directory);

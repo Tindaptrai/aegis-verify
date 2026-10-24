@@ -16,6 +16,7 @@ internal static partial class Program
         LoopTests();
         CliTests();
         DurabilityTests();
+        ServiceHostTests();
         var selected = Tests.Where(t => args.Length == 0 || t.Name.Contains(args[0], StringComparison.OrdinalIgnoreCase)).ToArray();
         int failed = 0;
         foreach (var test in selected)
