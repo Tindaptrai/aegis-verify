@@ -1,0 +1,273 @@
+# Kết nối máy Windows / Ubuntu và tự chạy khi khởi động
+
+Hướng dẫn cho presence agent `0.1.0`, giao thức `2.0`: Windows 11, Windows 10
+LTSC/Enterprise còn hỗ trợ, hoặc Windows Server 2019/2022/2025 x64 có SCM và
+PowerShell 5.1; Ubuntu 24.04 LTS x64 có systemd
+là PID 1. Manager chạy Linux theo `docs/manager/FIRST_FLOW_RUNBOOK.md` trong source
+commit ghi ở `version.json`.
+Gói tự chứa .NET runtime `10.0.13`; máy đích không cần .NET SDK.
+Các bản Windows cần còn được nhà cung cấp hỗ trợ/cập nhật trong môi trường của owner;
+đối chiếu [bảng .NET trên Windows của Microsoft](https://learn.microsoft.com/en-us/dotnet/core/install/windows#supported-versions)
+cho edition/build cụ thể. Windows 10 thông thường đã hết hỗ trợ không thuộc baseline này.
+
+Agent này đăng ký danh tính và heartbeat. **Online không có nghĩa là sẵn sàng chạy
+scenario.** Máy `paired_presence` không nhận lease/kịch bản. Legacy Windows v1 và
+pilot 009 tiếp tục dùng quy trình, CA và CurrentUser certificate riêng của chúng.
+
+## 1. Chuẩn bị Manager Linux
+
+Owner chuẩn bị các giá trị, dùng placeholder phù hợp với môi trường:
+
+| Biến | Ý nghĩa |
+|---|---|
+| `MANAGER_ORIGIN` | `https://<MANAGER_IP_OR_DNS>[:<TLS_PORT>]`, không dấu `/` cuối |
+| `MANAGER_HOST` | IP/DNS được phép trong `AEGIS_MANAGER_ALLOWED_HOSTS` |
+| `SERVER_CERT` / `SERVER_KEY` | Chứng chỉ HTTPS và private key trên nginx |
+| `SERVER_CA` | Một public PEM CA được chuyển cho endpoint qua kênh đáng tin |
+| `ENROLLMENT_CA_KEY` / `ENROLLMENT_CA_CERT` | Issuer mới, riêng biệt dưới private root |
+| `CLIENT_CA_BUNDLE` | Bundle public CA gồm cả legacy pilot CA và enrollment CA mới |
+
+Nếu dùng IP, server certificate phải có **iPAddress SAN đúng IP**; DNS SAN chứa
+chuỗi IP hoặc chỉ CN không đủ. Chuỗi phải hợp lệ về thời gian, serverAuth và trust.
+Không tải CA từ một server chưa xác minh rồi tự tin cậy nó. Không tắt TLS verification.
+Không đưa private key, certificate cá nhân, cấu hình triển khai, pairing code hoặc
+evidence thật vào repository, archive công khai hay báo cáo CI.
+
+Áp dụng migration và khởi tạo issuer bằng môi trường service hiện có. File
+`EnvironmentFile` dùng cú pháp systemd; không `source` như shell. Ví dụ owner thay
+`<MANAGER_ROOT>`, `<MANAGER_USER>`, `<MANAGER_GROUP>`, `<MANAGER_ENV_FILE>`:
+
+```bash
+sudo systemd-run --wait --pipe --collect \
+  --uid=<MANAGER_USER> --gid=<MANAGER_GROUP> \
+  --working-directory=<MANAGER_ROOT> \
+  --property=EnvironmentFile=<MANAGER_ENV_FILE> \
+  <MANAGER_ROOT>/.venv/bin/python manager/manage.py migrate
+sudo systemd-run --wait --pipe --collect \
+  --uid=<MANAGER_USER> --gid=<MANAGER_GROUP> \
+  --working-directory=<MANAGER_ROOT> \
+  --property=EnvironmentFile=<MANAGER_ENV_FILE> \
+  <MANAGER_ROOT>/.venv/bin/python manager/manage.py init_enrollment_ca
+```
+
+Đặt `AEGIS_MANAGER_ENROLLMENT_CA_KEY` / `AEGIS_MANAGER_ENROLLMENT_CA_CERT` tới hai
+đường dẫn riêng dưới `AEGIS_MANAGER_PRIVATE_ROOT` trước lệnh init. Kiểm tra tên biến
+với `manager/aegis_manager/settings.py` trong source commit của phiên bản đang dùng.
+Issuer chỉ được tạo khi cả hai file chưa tồn tại, từ chối trạng thái thiếu một file,
+key/cert không khớp hoặc quyền không an toàn. Không xóa file lỗi để tự động tạo CA mới.
+Key enrollment được bảo vệ trên Manager; không sử dụng lại key server/job/pilot.
+
+Sửa nginx theo `deploy/manager/nginx.conf.example` trong source commit: đúng origin,
+server certificate/key, `server_name`, client trust bundle và upstream loopback.
+Giữ public legacy CA trong bundle; không thay thế pilot CA/key. Bootstrap chỉ là
+`/agent/v2/enroll` không cần client certificate, có giới hạn body/rate và loại bỏ
+identity header. `/agent/v2/heartbeat` bắt buộc certificate đã xác minh; nginx ghi
+đè identity header từ TLS. Giữ nguyên mTLS `/agent/v1/` và không mở upstream ra mạng.
+Sau khi kiểm tra cấu hình và quyền file, `sudo nginx -t` rồi reload nginx và restart
+Manager theo runbook hiện có. `ALLOWED_HOSTS`, SAN và origin phải thống nhất.
+
+## 2. Xác minh gói công khai
+
+Chọn đúng archive:
+
+- `AEGIS-Agent-Connection-<VERSION>-win-x64.zip`
+- `AEGIS-Agent-Connection-<VERSION>-linux-x64.tar.gz`
+
+Nhận archive và file cùng tên thêm `.sha256` từ bản phát hành đã review. Đối chiếu
+source commit trong `version.json` và kết quả CI của **đúng commit build**. Gói gồm
+`bin/`, installer/uninstaller, Linux unit nếu áp dụng, guide, `version.json`,
+`SHA256SUMS.txt`; không chứa CA triển khai, private identity, pairing code hay config.
+Installer kiểm tra tất cả file theo manifest trước thay đổi máy. Hash xác minh tính
+toàn vẹn; owner vẫn cần nguồn phân phối đáng tin và đối chiếu CI/source.
+
+Windows PowerShell (Administrator):
+
+```powershell
+$Archive = '<ABSOLUTE_ARCHIVE_PATH>'
+$Expected = ((Get-Content -LiteralPath ($Archive + '.sha256')) -split '  ')[0]
+if ((Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash -ine $Expected) { throw 'archive_hash_mismatch' }
+Expand-Archive -LiteralPath $Archive -DestinationPath '<NEW_ABSOLUTE_PACKAGE_DIRECTORY>'
+```
+
+Ubuntu:
+
+```bash
+cd '<DOWNLOAD_DIRECTORY>'
+sha256sum --check 'AEGIS-Agent-Connection-<VERSION>-linux-x64.tar.gz.sha256'
+mkdir '<NEW_PACKAGE_DIRECTORY>'
+tar -xzf 'AEGIS-Agent-Connection-<VERSION>-linux-x64.tar.gz' -C '<NEW_PACKAGE_DIRECTORY>'
+cd '<NEW_PACKAGE_DIRECTORY>'
+sha256sum --check SHA256SUMS.txt
+```
+
+Ubuntu 24.04 cần các native dependencies sau dù gói đã chứa runtime:
+
+```bash
+sudo apt-get update
+sudo apt-get install ca-certificates libc6 libgcc-s1 libgssapi-krb5-2 libicu74 libssl3t64 libstdc++6 tzdata zlib1g
+```
+
+Danh sách theo [Microsoft .NET Ubuntu 24.04](https://learn.microsoft.com/en-us/dotnet/core/install/linux-ubuntu-install).
+Không áp dụng tên package của Ubuntu phiên bản khác.
+
+## 3. Mint mã trên giao diện
+
+Đăng nhập Manager bằng tài khoản có `view` + `manage_devices`, mở **Máy → Thêm máy**,
+nhập environment được duyệt rồi tạo mã. Mã hiển thị một lần, dùng thành công một lần,
+hết hạn sau **600 giây**. Máy đích không đăng nhập tài khoản web. Chỉ nhập mã tại
+prompt ẩn của installer/CLI; không đặt mã trong command, URL, argv, biến môi trường,
+file, clipboard tự động, log, ticket hay shell history. Đóng dialog khi xong.
+Code hết hạn/thu hồi/đã dùng hoặc issuer mất quyền đều bị từ chối với cùng lỗi.
+
+## 4. Cài Windows
+
+Mở **Windows PowerShell 5.1 với Administrator**, chuyển tới thư mục giải nén. CA
+server công khai phải ở đường dẫn tuyệt đối, nhận qua kênh đáng tin:
+
+```powershell
+$ManagerOrigin = 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>'
+$ServerCa = '<ABSOLUTE_PUBLIC_SERVER_CA_PEM>'
+.\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
+```
+
+Nhập mã khi prompt yêu cầu, không truyền mã như parameter. Installer tạo service
+`AegisAgent` lúc đầu disabled, áp ACL rồi connect. Chỉ khi identity hợp lệ mới bật
+Automatic (Delayed Start) và khởi chạy. Service dùng **`NT SERVICE\AegisAgent`**,
+không chạy LocalSystem. Binary ở `%ProgramFiles%\AEGIS Agent\bin`; private state ở
+`%ProgramData%\AEGIS\Agent`, chỉ admin/SYSTEM và service SID được truy cập phù hợp.
+Service chỉ đọc/chạy binary, được sửa state. Không tự nới ACL để chữa lỗi.
+
+```powershell
+$Agent = Join-Path $env:ProgramFiles 'AEGIS Agent\bin\aegis-agent.exe'
+$State = Join-Path $env:ProgramData 'AEGIS\Agent'
+```
+
+| Việc | Lệnh Windows PowerShell Administrator |
+|---|---|
+| Service status | `Get-Service AegisAgent` |
+| Identity status | `& $Agent status --state-dir $State` |
+| Start | `Start-Service AegisAgent` |
+| Stop | `Stop-Service AegisAgent` |
+| Restart | `Restart-Service AegisAgent` |
+| Kiểm tra account/path/autostart | `sc.exe qc AegisAgent` |
+| Kiểm tra delayed start | `(Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\AegisAgent').DelayedAutoStart` |
+| Log lifecycle | `Get-WinEvent -FilterHashtable @{LogName='System'; ProviderName='Service Control Manager'} -MaxEvents 30` |
+
+`status` hiển thị UUID, trạng thái và lần acknowledgement cuối, không xuất key/code.
+Log SCM cho biết lifecycle; đối chiếu heartbeat trong Manager. Không đọc/chia sẻ
+`state.json` khi lấy log. Trên Windows, Schannel dùng key container tạm của tài khoản
+đang chạy; kiểm thử SCM cần xác minh chính virtual account sử dụng được key đó.
+
+## 5. Cài Ubuntu
+
+Chạy trên host systemd thực, không container có PID 1 khác:
+
+```bash
+cd '<ABSOLUTE_PACKAGE_DIRECTORY>'
+sudo bash ./install.sh --manager 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>' --server-ca '<ABSOLUTE_PUBLIC_SERVER_CA_PEM>'
+```
+
+Nhập mã tại prompt ẩn. Installer dùng user/group hệ thống `aegis-agent`, shell
+`/usr/sbin/nologin`; binary root-owned ở `/opt/aegis-agent/bin`, state owned bởi
+service account ở `/var/lib/aegis-agent` (directory `0700`, file `0600`). Connect
+chạy với quyền service account. Unit `aegis-agent.service` được enable sau connect,
+Type=simple, network-online ordering và Restart=on-failure; binary không service-writable.
+
+| Việc | Lệnh Ubuntu |
+|---|---|
+| Start | `sudo systemctl start aegis-agent.service` |
+| Stop | `sudo systemctl stop aegis-agent.service` |
+| Restart | `sudo systemctl restart aegis-agent.service` |
+| Service status | `sudo systemctl status aegis-agent.service --no-pager` |
+| Kiểm tra boot enable | `systemctl is-enabled aegis-agent.service` |
+| Identity status | `sudo -u aegis-agent /opt/aegis-agent/bin/aegis-agent status --state-dir /var/lib/aegis-agent` |
+| Log | `sudo journalctl -u aegis-agent.service --since '-15 min' --no-pager` |
+
+Không chạy `connect` mỗi lần boot. Khi mạng chưa sẵn sàng, loop dùng bounded retry
+2–60 giây, heartbeat sau thành công mỗi 15 giây; Manager chuyển Offline sau 60 giây
+không nhận heartbeat hợp lệ. Khởi động lại/mất mạng phải dùng lại **cùng UUID**.
+Revoke hoặc certificate hết hạn cần owner xử lý; agent không tự đăng ký lại.
+
+## 6. Nâng cấp, gỡ cài và phục hồi
+
+Xác minh gói mới rồi chạy installer mới. Với state enrolled hợp lệ, installer dùng
+lại identity và không hỏi code. Nếu cung cấp origin/CA khác state đã pin, installer
+từ chối. Service/path/account có cấu hình khác hoặc state không an toàn cũng bị từ
+chối. Không sửa service sang LocalSystem/root hay xóa state để vượt qua kiểm tra.
+
+Gỡ service và binary, **giữ identity/config được bảo vệ**:
+
+```powershell
+.\Uninstall-Agent.ps1
+```
+
+```bash
+sudo bash ./uninstall.sh
+```
+
+Gỡ cài không revoke trên Manager. Cài lại giữ state thì vẫn cùng UUID. Lỗi start hay
+upgrade không phải lý do tạo key mới; xem fixed diagnostic và quyền tài khoản trước.
+Khi pairing thất bại, service giữ disabled và pending key/CSR được giữ lại.
+
+Nếu owner cần chạy connect trực tiếp để xử lý pending state, trước hết stop service
+và giữ nguyên thư mục/quyền đã được installer tạo. Các lệnh vẫn hỏi code ở prompt ẩn:
+
+```powershell
+Stop-Service AegisAgent
+& $Agent connect --manager $ManagerOrigin --server-ca $ServerCa --state-dir $State
+```
+
+```bash
+sudo systemctl stop aegis-agent.service
+sudo -u aegis-agent /opt/aegis-agent/bin/aegis-agent connect --manager 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>' --server-ca '<ABSOLUTE_PUBLIC_SERVER_CA_READABLE_BY_SERVICE>' --state-dir /var/lib/aegis-agent
+```
+
+Không nới quyền state để chạy lệnh này; public CA cần nằm ở đường dẫn service
+account đọc được. Sau khi connect hợp lệ, chạy lại installer để bật service theo
+cấu hình autostart đã kiểm tra.
+
+`enrollment_outcome_unknown`: response có thể mất sau khi Manager đã dùng code.
+Owner kiểm tra danh sách Máy, revoke orphan Offline nếu có, tạo mã thay thế, chạy
+lại installer/connect với cùng pending state và cùng origin/CA. Không dùng lại code
+đã tiêu thụ; không có tự động recovery bằng code cũ.
+
+Thay thế identity expired/revoked: owner revoke UUID cũ trên Manager, stop service,
+rồi retire đúng UUID hiện tại. Lệnh retire cần quyền truy cập state và lock độc quyền;
+nó copy snapshot vào `retired/<UUID>-<random>/state.json` được bảo vệ, flush file và
+đồng bộ hierarchy thư mục archive trước khi bỏ active snapshot, rồi đồng bộ thư mục
+nguồn. Lỗi có thể để lại cả archive được bảo vệ và active bytes để phục hồi; không
+tự động xóa archive:
+
+```powershell
+Stop-Service AegisAgent
+& $Agent retire --state-dir $State --device-id '<CURRENT_DEVICE_UUID>'
+.\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
+```
+
+```bash
+sudo systemctl stop aegis-agent.service
+sudo -u aegis-agent /opt/aegis-agent/bin/aegis-agent retire --state-dir /var/lib/aegis-agent --device-id '<CURRENT_DEVICE_UUID>'
+sudo bash ./install.sh --manager 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>' --server-ca '<ABSOLUTE_PUBLIC_SERVER_CA_PEM>'
+```
+
+Nhập code mới tại prompt. UUID mismatch/lock đang giữ/archive không an toàn sẽ bị
+từ chối; giữ nguyên trạng thái để điều tra. Đổi CA/origin là thao tác thay thế có
+owner review, không sửa trực tiếp private JSON.
+
+## 7. Checklist lab của owner trước triển khai
+
+- Review source commit, CI thực của đúng commit, archive hash và manifest công khai.
+- Xác minh TLS SAN/trust/expiry, ALLOWED_HOSTS và bundle giữ được legacy pilot 009.
+- Cài trên Windows/Ubuntu đích, xác minh service account và quyền state/binary.
+- Ghi UUID và heartbeat, reboot disposable endpoint được duyệt; **không đăng nhập**,
+  quan sát Manager nhận heartbeat cùng UUID. Kiểm tra sau delayed startup/mạng chậm.
+- Ngắt mạng rồi phục hồi, quan sát Offline → Online cùng UUID, không có enrollment mới.
+- Revoke; xác minh không heartbeat cập nhật, status yêu cầu xử lý và không tự re-enroll.
+- Thử code expiry/reuse/demotion; xác minh từ chối, không lộ code trong logs/history.
+- Kiểm tra certificate expiry/replacement, retire bảo toàn identity cũ, UUID mới sau connect.
+- Kiểm tra stop/restart/upgrade/uninstall giữ identity và user thường không đọc key,
+  service không sửa binary, Windows virtual account thực sự dùng được Schannel key.
+
+CI native start/stop/configuration là bằng chứng cho các gate đó; **không chứng minh
+reboot trước login**. Chỉ đánh dấu reboot/network/expiry lab gate đã chạy khi có
+quan sát thực và owner review. Human review + lab validation bắt buộc trước merge.

@@ -6,6 +6,9 @@ register an identity and send heartbeats; it has no scenario execution path.
 This identity is independent of the legacy Windows v1 runner and its
 CurrentUser/My certificate provisioning.
 
+Vietnamese package installation, service commands, recovery and owner lab gates:
+[Agent connection runbook](../../docs/manager/AGENT_CONNECTION_RUNBOOK.md).
+
 Build and run the synthetic harness from the repository root:
 
 ```powershell
@@ -102,10 +105,12 @@ then stops the service and explicitly retires the matching local UUID:
 & $AgentExecutable connect --manager $ManagerOrigin --server-ca $ServerCaPath --state-dir $StateDirectory
 ```
 
-Retirement requires the mutation lock and exact UUID. It atomically moves the
-complete snapshot into a newly protected `retired/<UUID>-<random>/state.json`.
-It neither deletes the identity nor contacts Manager. Archive creation/move failure
-leaves the active identity recoverable. A later successful connect creates a new
+Retirement requires the mutation lock and exact UUID. It copies the complete
+snapshot into protected `retired/<UUID>-<random>/state.json`, flushes the file and
+synchronizes the archive directory hierarchy before unlinking the active snapshot,
+then synchronizes the source directory. Failure may leave both a protected archive
+and recoverable active bytes; it never automatically erases a protected archive.
+It does not contact Manager. A later successful connect creates a new
 key and identity; retain the protected archive for owner reconciliation.
 
 Exit codes: `0` success or requested run cancellation; `2` invalid command syntax;

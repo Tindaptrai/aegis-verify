@@ -1,5 +1,8 @@
 # Vận hành first flow Manager → một Windows VM
 
+Kết nối presence bằng mã một lần và service Windows/Ubuntu: xem
+[AGENT_CONNECTION_RUNBOOK.md](AGENT_CONNECTION_RUNBOOK.md).
+
 Mốc này dùng agent foreground, đăng ký chứng thư thủ công và Django admin. Chưa có service/MSI Windows hay nghiệm thu pilot/live. Contract: [FIRST_FLOW_PROTOCOL.md](FIRST_FLOW_PROTOCOL.md).
 
 ## 1. Gate trước khi bật VM
