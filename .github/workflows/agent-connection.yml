@@ -67,6 +67,28 @@ jobs:
         run: |
           test "$(cat /proc/1/comm)" = systemd
           test "$(uname -m)" = x86_64
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          parents=(/opt /var /var/lib /etc /etc/systemd /etc/systemd/system)
+          for parent in "${parents[@]}"; do
+            test -d "$parent"
+            test ! -L "$parent"
+            owner=$(stat -c %u -- "$parent")
+            mode=$(stat -c %a -- "$parent")
+            printf 'ci_parent_before uid=%s mode=%s path=%s\n' "$owner" "$mode" "$parent"
+            test "$owner" = 0
+          done
+          # This exact hosted image build makes /opt world writable:
+          # https://github.com/actions/runner-images/blob/7e7dc1bcc0ef464e5e315a2b4c33609590c6cffe/images/ubuntu/scripts/build/configure-system.sh#L15
+          # Harden only the disposable runner's /opt itself; keep installer guards.
+          sudo chmod go-w -- /opt
+          for parent in "${parents[@]}"; do
+            owner=$(stat -c %u -- "$parent")
+            mode=$(stat -c %a -- "$parent")
+            printf 'ci_parent_after uid=%s mode=%s path=%s\n' "$owner" "$mode" "$parent"
+            test "$owner" = 0
+            (( (8#$mode & 0022) == 0 ))
+          done
           sudo apt-get update
           sudo apt-get install -y ca-certificates libc6 libgcc-s1 libgssapi-krb5-2 libicu74 libssl3t64 libstdc++6 tzdata zlib1g
       - name: Test core, builders and installer contracts
