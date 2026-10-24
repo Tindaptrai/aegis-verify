@@ -35,19 +35,23 @@ evidence thật vào repository, archive công khai hay báo cáo CI.
 
 Áp dụng migration và khởi tạo issuer bằng môi trường service hiện có. File
 `EnvironmentFile` dùng cú pháp systemd; không `source` như shell. Ví dụ owner thay
-`<MANAGER_ROOT>`, `<MANAGER_USER>`, `<MANAGER_GROUP>`, `<MANAGER_ENV_FILE>`:
+`<MANAGER_ROOT>`, `<MANAGER_PYTHON>`, `<MANAGER_USER>`, `<MANAGER_GROUP>`,
+`<MANAGER_ENV_FILE>` bằng đường dẫn tuyệt đối và account tương ứng. Với layout
+đang dùng trong `FIRST_FLOW_RUNBOOK.md`, source root là `/opt/aegis/current`, còn
+interpreter hiện có là `/opt/aegis/venv/bin/python`. Dùng interpreter của service
+đã triển khai; không tạo hoặc giả định `.venv` dưới source root khi nâng cấp:
 
 ```bash
 sudo systemd-run --wait --pipe --collect \
   --uid=<MANAGER_USER> --gid=<MANAGER_GROUP> \
   --working-directory=<MANAGER_ROOT> \
   --property=EnvironmentFile=<MANAGER_ENV_FILE> \
-  <MANAGER_ROOT>/.venv/bin/python manager/manage.py migrate
+  <MANAGER_PYTHON> manager/manage.py migrate
 sudo systemd-run --wait --pipe --collect \
   --uid=<MANAGER_USER> --gid=<MANAGER_GROUP> \
   --working-directory=<MANAGER_ROOT> \
   --property=EnvironmentFile=<MANAGER_ENV_FILE> \
-  <MANAGER_ROOT>/.venv/bin/python manager/manage.py init_enrollment_ca
+  <MANAGER_PYTHON> manager/manage.py init_enrollment_ca
 ```
 
 Đặt `AEGIS_MANAGER_ENROLLMENT_CA_KEY` / `AEGIS_MANAGER_ENROLLMENT_CA_CERT` tới hai

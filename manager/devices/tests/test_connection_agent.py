@@ -23,12 +23,15 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.test import Client, TransactionTestCase, override_settings
 from django.utils import timezone
 
+from accounts.models import AccountMutationLock
 from control.models import Device
 from devices.contracts import device_dto
 from devices.issuer import initialize_issuer
+from devices.models import PairingCode
 from devices.services import create_pairing_code, revoke_device
 
 
@@ -88,6 +91,24 @@ def synthetic_tls(root):
         private_file(root / filename, data)
 
 
+def connection_test_owner():
+    # TransactionTestCase flush removes migration data between test methods.
+    AccountMutationLock.objects.get_or_create(pk=1)
+    return get_user_model().objects.create_superuser("synthetic-tls-owner", password="synthetic-test-only")
+
+
+class ConnectionFixtureTests(TransactionTestCase):
+    def test_pairing_fixture_can_start_after_a_previous_transaction_test_flush(self):
+        # TransactionTestCase flushes rows after each method; data migrations do
+        # not rerun, so this must work independently of the initial seeded row.
+        call_command("flush", interactive=False, verbosity=0)
+        self.assertFalse(AccountMutationLock.objects.exists())
+        owner = connection_test_owner()
+        minted = create_pairing_code(actor=owner, environment_id="synthetic.after-flush")
+        self.assertEqual(PairingCode.objects.get(pk=minted["id"]).issued_by_id, owner.pk)
+        self.assertEqual(AccountMutationLock.objects.count(), 1)
+
+
 @skipUnless(os.environ.get("AEGIS_CONNECTION_TEST_EXE"), "Published connection CLI required; native CI sets AEGIS_CONNECTION_TEST_EXE")
 class PublishedConnectionTests(TransactionTestCase):
     def setUp(self):
@@ -101,7 +122,7 @@ class PublishedConnectionTests(TransactionTestCase):
             ENROLLMENT_CA_CERT=str(self.root / "issuer.pem"), ALLOWED_HOSTS=["testserver"])
         self.setting.enable()
         self.addCleanup(self.setting.disable)
-        self.owner = get_user_model().objects.create_superuser("synthetic-tls-owner", password="synthetic-test-only")
+        self.owner = connection_test_owner()
         initialize_issuer()
         synthetic_tls(self.root)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
