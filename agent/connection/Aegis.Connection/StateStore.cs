@@ -22,33 +22,36 @@ public sealed class StateStore : IDisposable
 {
     private readonly string directory;
     private readonly FileStream? processLock;
+    private readonly IDirectoryDurability durability;
     private bool disposed;
     private string StatePath => Path.Combine(directory, "state.json");
-    private StateStore(string directory, FileStream? processLock) { this.directory = directory; this.processLock = processLock; }
+    private StateStore(string directory, FileStream? processLock, IDirectoryDurability durability) { this.directory = directory; this.processLock = processLock; this.durability = durability; }
     public static string Status(string directory)
     {
         if (!Path.IsPathFullyQualified(directory)) throw new ConnectionException("state_invalid");
         PrivatePaths.NoLinks(directory);
         if (File.Exists(directory)) throw new ConnectionException("state_invalid");
         if (!Directory.Exists(directory)) return EmptyStatus;
-        using var reader = new StateStore(Path.GetFullPath(directory), null);
+        using var reader = new StateStore(Path.GetFullPath(directory), null, new DirectoryDurability());
         return reader.StatusJson();
     }
     private static readonly string EmptyStatus = JsonSerializer.Serialize(new { device_id = (string?)null, environment_id = (string?)null, generation = (int?)null, certificate_expires_at = (string?)null, manager_origin = (string?)null, last_acknowledged_at = (string?)null, state = "unconfigured" });
-    public static StateStore Acquire(string directory)
+    public static StateStore Acquire(string directory) => Acquire(directory, new DirectoryDurability());
+    internal static StateStore Acquire(string directory, IDirectoryDurability durability)
     {
         FileStream? held = null;
         try
         {
             if (!Path.IsPathFullyQualified(directory)) throw new ConnectionException("state_invalid");
             directory = Path.GetFullPath(directory); PrivatePaths.CreateDirectory(directory);
+            DirectoryDurability.Hierarchy(directory, durability);
             var lockPath = Path.Combine(directory, "process.lock");
             if (!File.Exists(lockPath)) { try { using var created = PrivatePaths.CreateFile(lockPath); } catch (IOException) when (File.Exists(lockPath)) { } }
             PrivatePaths.Verify(lockPath, false);
             try { held = new FileStream(lockPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None); }
             catch (IOException) { throw new ConnectionException("state_locked"); }
             PrivatePaths.Verify(lockPath, false);
-            var store = new StateStore(directory, held); store.Read(); return store;
+            var store = new StateStore(directory, held, durability); store.Read(); return store;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException or CryptographicException) { held?.Dispose(); throw new ConnectionException("state_invalid"); }
         catch { held?.Dispose(); throw; }
@@ -78,6 +81,10 @@ public sealed class StateStore : IDisposable
             if (existing != null)
             {
                 if (existing.ManagerOrigin != uri.GetLeftPart(UriPartial.Authority) || existing.ServerCaPem != ca.ExportCertificatePem()) throw new ConnectionException("pending_configuration_mismatch");
+                // A previous publication can have reached rename but failed its directory
+                // barrier. Do not redeem a replacement code until this same key is durable.
+                using (var file = new FileStream(StatePath, FileMode.Open, FileAccess.ReadWrite, FileShare.Read)) file.Flush(true);
+                durability.Synchronize(directory);
                 return existing;
             }
             if (RuntimeInformation.OSArchitecture != Architecture.X64 || !(OperatingSystem.IsWindows() || OperatingSystem.IsLinux())) throw new ConnectionException("configuration_invalid");
@@ -87,6 +94,7 @@ public sealed class StateStore : IDisposable
             Save(state); return state;
         }
         catch (CryptographicException) { throw new ConnectionException("configuration_invalid"); }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { throw new ConnectionException("state_invalid"); }
     }
     public void Promote(EnrollmentResponse response)
     {
@@ -120,7 +128,22 @@ public sealed class StateStore : IDisposable
             var archiveRoot = Path.Combine(directory, "retired"); PrivatePaths.CreateDirectory(archiveRoot);
             var archiveDirectory = Path.Combine(archiveRoot, deviceId + "-" + Guid.NewGuid().ToString("N")); PrivatePaths.CreateDirectory(archiveDirectory);
             var archive = Path.Combine(archiveDirectory, "state.json");
-            PrivatePaths.Verify(StatePath, false); File.Move(StatePath, archive, false); return archive;
+            PrivatePaths.Verify(StatePath, false);
+            // Preserve the active identity until a complete archive and its entire
+            // namespace are durable. Cross-directory rename alone cannot provide this
+            // guarantee when a later fsync fails or power is lost between barriers.
+            using (var source = new FileStream(StatePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var destination = PrivatePaths.CreateFile(archive))
+            {
+                if (source.Length is <= 0 or > 65536) throw new ConnectionException("state_invalid");
+                var bytes = new byte[(int)source.Length]; source.ReadExactly(bytes);
+                destination.Write(bytes); destination.Flush(true);
+            }
+            DirectoryDurability.Hierarchy(archiveDirectory, durability);
+            File.Delete(StatePath);
+            // If this final barrier fails, the already durable archive remains intact.
+            durability.Synchronize(directory);
+            return archive;
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { throw new ConnectionException("state_invalid"); }
     }
@@ -164,6 +187,7 @@ public sealed class StateStore : IDisposable
             if (bytes.Length > 65536) throw new ConnectionException("state_invalid");
             using (var file = PrivatePaths.CreateFile(temporary)) { file.Write(bytes); file.Flush(true); }
             File.Move(temporary, StatePath, true);
+            durability.Synchronize(directory);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { throw new ConnectionException("state_invalid"); }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
