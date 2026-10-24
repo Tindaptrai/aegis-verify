@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import ssl
 import subprocess
 import tempfile
@@ -148,6 +149,58 @@ def assert_native_result(action, result, *, code=None):
         diagnostic = native_diagnostic(result.stderr)
         suffix = " [" + diagnostic + "]" if diagnostic is not None else ""
         raise AssertionError("Native " + safe_action + " failed" + suffix + "; output withheld")
+
+
+def native_process_environment(platform, environment):
+    # pwsh only adjusts PSModulePath when it launches Windows PowerShell directly.
+    # Python inherits Core's paths; let the Windows child rebuild its native paths.
+    return {key: value for key, value in environment.items()
+            if platform != "nt" or key.casefold() != "psmodulepath"}
+
+
+class NativeProcessEnvironmentTests(SimpleTestCase):
+    def test_windows_preserves_ci_guards_and_other_environment_case_insensitively(self):
+        for name in ("PSModulePath", "PSMODULEPATH", "psmodulepath"):
+            inherited = {name: "synthetic Core modules", "GITHUB_ACTIONS": "true",
+                         "RUNNER_OS": "Windows", "PATH": "synthetic tools", "OTHER": "unchanged"}
+            self.assertEqual(native_process_environment("nt", inherited),
+                             {"GITHUB_ACTIONS": "true", "RUNNER_OS": "Windows",
+                              "PATH": "synthetic tools", "OTHER": "unchanged"})
+            self.assertEqual(inherited[name], "synthetic Core modules")
+
+    def test_linux_preserves_module_path_and_all_other_environment(self):
+        inherited = {"PSMODULEPATH": "synthetic Core modules", "GITHUB_ACTIONS": "true", "RUNNER_OS": "Linux"}
+        self.assertEqual(native_process_environment("posix", inherited), inherited)
+
+    @skipUnless(os.name == "nt", "Windows PowerShell module resolution requires Windows")
+    def test_python_child_loads_windows_modules_despite_inherited_powershell_core_path(self):
+        core = shutil.which("pwsh")
+        self.assertIsNotNone(core, "PowerShell Core is required to reproduce the CI process boundary")
+        discovery = subprocess.run([core, "-NoProfile", "-Command", "$PSHOME"],
+                                   capture_output=True, text=True, timeout=15)
+        self.assertEqual(discovery.returncode, 0, "PowerShell Core discovery failed; output withheld")
+        core_modules = Path(discovery.stdout.strip()) / "Modules"
+        self.assertTrue(core_modules.is_dir(), "PowerShell Core modules unavailable")
+        inherited = dict(os.environ)
+        inherited["PSMODULEPATH"] = str(core_modules) + os.pathsep + inherited.get("PSMODULEPATH", "")
+        windows_shell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
+        probe = r"""
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+foreach ($name in @('Get-FileHash', 'Get-Acl', 'Get-CimInstance')) {
+    $command = Get-Command $name -ErrorAction Stop
+    $moduleRoot = $command.Module.ModuleBase
+    if ($moduleRoot -ine $PSHOME -and !$moduleRoot.StartsWith(($PSHOME + '\'), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'unexpected_module_origin'
+    }
+    [Console]::Out.WriteLine($name)
+}
+"""
+        result = subprocess.run([windows_shell, "-NoProfile", "-Command", probe],
+                                env=native_process_environment("nt", inherited),
+                                capture_output=True, text=True, timeout=15)
+        self.assertEqual(result.returncode, 0, "Windows child could not load its native modules; output withheld")
+        self.assertEqual(result.stdout.splitlines(), ["Get-FileHash", "Get-Acl", "Get-CimInstance"])
 
 
 class NativeDiagnosticsTests(SimpleTestCase):
@@ -321,6 +374,7 @@ class PublishedConnectionTests(TransactionTestCase):
             if identity:
                 command += ["--expected-device-id", identity]
         result = subprocess.run(command, input="" if code is None else code + "\n",
+                                env=native_process_environment(os.name, os.environ),
                                 capture_output=True, text=True, timeout=120)
         assert_native_result(action, result, code=code)
         data = json.loads(result.stdout)
