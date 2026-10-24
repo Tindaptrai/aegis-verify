@@ -49,7 +49,13 @@ function Invoke-ClosedInstaller([string]$Code) {
     if ($ServerCa) { $start.Arguments += ' -ServerCa "' + $ServerCa + '"' }
     $start.UseShellExecute=$false; $start.CreateNoWindow=$true
     $start.RedirectStandardInput=$true; $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
-    $process = [Diagnostics.Process]::Start($start)
+    # Framework creates/flushes StandardInput using Console.InputEncoding during
+    # Start; its UTF8 preamble would become invalid bytes before the pairing code.
+    $inputEncoding=[Console]::InputEncoding
+    try {
+        [Console]::InputEncoding=New-Object Text.UTF8Encoding($false)
+        $process = [Diagnostics.Process]::Start($start)
+    } finally { [Console]::InputEncoding=$inputEncoding }
     $stdout=$process.StandardOutput.ReadToEndAsync(); $stderr=$process.StandardError.ReadToEndAsync()
     if ($Code) { $process.StandardInput.WriteLine($Code) }
     $process.StandardInput.Close()
