@@ -130,14 +130,78 @@ function Assert-AgentServiceConfiguration($Service,[string]$Binary,[string]$Stat
 function Assert-AgentServiceAcl([string]$Sddl) {
     $descriptor = New-Object Security.AccessControl.CommonSecurityDescriptor($false,$false,$Sddl)
     $trusted = @('S-1-5-18','S-1-5-32-544')
+    if (!$descriptor.Owner -or $trusted -notcontains $descriptor.Owner.Value) { throw 'service_owner_invalid' }
     foreach ($ace in $descriptor.DiscretionaryAcl) {
         if ($ace.AceQualifier -eq 'AccessAllowed' -and $trusted -notcontains $ace.SecurityIdentifier.Value -and ($ace.AccessMask -band 0x500D0002)) { throw 'service_permissions_invalid' }
     }
 }
+function Initialize-AgentServiceSecurity {
+    if ('Aegis.Agent.ServiceSecurity' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+namespace Aegis.Agent {
+    public static class ServiceSecurity {
+        [DllImport("advapi32.dll", ExactSpelling=true, CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr OpenSCManagerW(string machine, string database, uint access);
+        [DllImport("advapi32.dll", ExactSpelling=true, CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr OpenServiceW(IntPtr manager, string name, uint access);
+        [DllImport("advapi32.dll", ExactSpelling=true, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryServiceObjectSecurity(IntPtr service, uint information, byte[] descriptor, uint length, out uint needed);
+        [DllImport("advapi32.dll", ExactSpelling=true, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool SetServiceObjectSecurity(IntPtr service, uint information, byte[] descriptor);
+        [DllImport("advapi32.dll", ExactSpelling=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool CloseServiceHandle(IntPtr handle);
+        public static string Read() {
+            IntPtr manager=IntPtr.Zero, service=IntPtr.Zero;
+            try {
+                manager=OpenSCManagerW(null,null,1); // SC_MANAGER_CONNECT
+                if (manager==IntPtr.Zero) throw new InvalidOperationException("service_security_query_failed");
+                service=OpenServiceW(manager,"AegisAgent",0x20000); // READ_CONTROL
+                if (service==IntPtr.Zero) throw new InvalidOperationException("service_security_query_failed");
+                uint needed;
+                // Request OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION explicitly.
+                bool queried=QueryServiceObjectSecurity(service,5,null,0,out needed);
+                if (queried || Marshal.GetLastWin32Error()!=122 || needed==0 || needed>8192)
+                    throw new InvalidOperationException("service_security_query_failed");
+                byte[] buffer=new byte[needed];
+                if (!QueryServiceObjectSecurity(service,5,buffer,(uint)buffer.Length,out needed))
+                    throw new InvalidOperationException("service_security_query_failed");
+                return new RawSecurityDescriptor(buffer,0).GetSddlForm(AccessControlSections.Owner | AccessControlSections.Access);
+            } finally {
+                if (service!=IntPtr.Zero) CloseServiceHandle(service);
+                if (manager!=IntPtr.Zero) CloseServiceHandle(manager);
+            }
+        }
+        public static void SetAdministrativeOwner() {
+            IntPtr manager=IntPtr.Zero, service=IntPtr.Zero;
+            try {
+                manager=OpenSCManagerW(null,null,1);
+                if (manager==IntPtr.Zero) throw new InvalidOperationException("service_owner_setup_failed");
+                service=OpenServiceW(manager,"AegisAgent",0x80000); // WRITE_OWNER
+                if (service==IntPtr.Zero) throw new InvalidOperationException("service_owner_setup_failed");
+                RawSecurityDescriptor descriptor=new RawSecurityDescriptor("O:BA");
+                byte[] buffer=new byte[descriptor.BinaryLength]; descriptor.GetBinaryForm(buffer,0);
+                if (!SetServiceObjectSecurity(service,1,buffer)) throw new InvalidOperationException("service_owner_setup_failed");
+            } finally {
+                if (service!=IntPtr.Zero) CloseServiceHandle(service);
+                if (manager!=IntPtr.Zero) CloseServiceHandle(manager);
+            }
+        }
+    }
+}
+'@
+}
+function Get-AgentNativeServiceSecurity {
+    Initialize-AgentServiceSecurity
+    return [Aegis.Agent.ServiceSecurity]::Read()
+}
 function Assert-AgentNativeServiceAcl {
-    $sddl = & "$env:SystemRoot\System32\sc.exe" sdshow AegisAgent
-    if ($LASTEXITCODE -ne 0) { throw 'service_permissions_invalid' }
-    Assert-AgentServiceAcl (($sddl | Where-Object { $_ -match '^[OGDS]:' }) -join '')
+    Assert-AgentServiceAcl (Get-AgentNativeServiceSecurity)
 }
 function ConvertTo-AgentNativeArgument([string]$Argument) {
     # Windows CRT argv rules, including embedded quotes and trailing backslashes.
@@ -249,6 +313,9 @@ function Install-AegisAgent([string]$PackageRoot,[string]$Origin,[string]$CaPath
         if (!$existing) {
             $command = '"' + $binary + '" service --state-dir "' + $state + '"'
             Invoke-AgentSc @('create','AegisAgent','binPath=',$command,'start=','disabled','obj=','NT SERVICE\AegisAgent')
+            Initialize-AgentServiceSecurity
+            [Aegis.Agent.ServiceSecurity]::SetAdministrativeOwner()
+            Assert-AgentNativeServiceAcl
         }
         Invoke-AgentSc @('sidtype','AegisAgent','unrestricted')
         Set-AgentServiceTreeAcl $root $sid 'Binary'

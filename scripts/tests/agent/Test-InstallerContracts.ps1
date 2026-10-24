@@ -51,9 +51,11 @@ try {
     $passed++
     Assert-Rejected { Assert-AgentServiceConfiguration ([pscustomobject]@{StartName='LocalSystem';PathName=$expected}) $binary $state } 'wrong account'
     Assert-Rejected { Assert-AgentServiceConfiguration ([pscustomobject]@{StartName='NT SERVICE\AegisAgent';PathName='C:\foreign.exe'}) $binary $state } 'foreign service path'
-    Assert-AgentServiceAcl 'D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;CCLCSWLOCRRC;;;AU)'
+    Assert-Rejected { Assert-AgentServiceAcl 'O:S-1-5-21-100-200-300-400D:(A;;GA;;;SY)(A;;GA;;;BA)' } 'untrusted owner despite restricted service DACL'
+    Assert-Rejected { Assert-AgentServiceAcl 'D:(A;;GA;;;SY)(A;;GA;;;BA)' } 'omitted service owner'
+    Assert-AgentServiceAcl 'O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;CCLCSWLOCRRC;;;AU)'
     $passed++
-    Assert-Rejected { Assert-AgentServiceAcl 'D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;DC;;;WD)' } 'world change-config service grant'
+    Assert-Rejected { Assert-AgentServiceAcl 'O:SYD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;DC;;;WD)' } 'world change-config service grant'
     $private = Join-Path $testRoot 'private'
     New-Item -ItemType Directory -Path $private | Out-Null
     Set-AgentDirectoryAcl $private $null 'State'

@@ -85,6 +85,14 @@ validate_account() {
     elif getent group aegis-agent >/dev/null; then fail account_configuration_conflict
     fi
 }
+restore_agent_files() {
+    local root=$1 backup=$2 unit=$3 unit_backup=$4 promoted=$5 backed_up=$6
+    if (( backed_up )); then
+        if (( promoted )); then rm -rf -- "$root" || return $?; fi
+        mv -- "$backup" "$root" || return $?
+    fi
+    if [[ -n $unit_backup ]]; then install -m 644 "$unit_backup" "$unit" || return $?; fi
+}
 install_agent() {
     [[ $EUID = 0 ]] || fail root_required
     [[ $(uname -m) = x86_64 && $(cat /proc/1/comm) = systemd ]] || fail native_systemd_required
@@ -129,8 +137,9 @@ install_agent() {
         if (( ! success )); then
             systemctl stop aegis-agent.service >/dev/null 2>&1 || true
             systemctl disable aegis-agent.service >/dev/null 2>&1 || true
-            if (( promoted && backed_up )); then rm -rf -- "$root"; mv -- "$backup" "$root"; backed_up=0; fi
-            if [[ -n $unit_backup ]]; then install -o root -g root -m 644 "$unit_backup" "$unit"; systemctl daemon-reload || true; fi
+            restore_agent_files "$root" "$backup" "$unit" "$unit_backup" "$promoted" "$backed_up" || return $?
+            backed_up=0
+            if [[ -n $unit_backup ]]; then systemctl daemon-reload || true; fi
         fi
         [[ -z $ca_temp || ! -f $ca_temp ]] || rm -f -- "$ca_temp"
         [[ ! -e $stage ]] || rm -rf -- "$stage"
@@ -145,12 +154,10 @@ install_agent() {
     find "$stage" -type f -exec chmod 644 {} +
     chmod 755 "$stage/bin/aegis-agent"
     # No service/state mutation occurs before all artifact and existing-install checks.
-    if [[ -e $unit ]]; then cp -- "$unit" "$stage/unit.previous"; unit_backup=$stage/unit.previous; systemctl stop aegis-agent.service; systemctl disable aegis-agent.service; fi
+    if [[ -e $unit ]]; then cp -p -- "$unit" "$backup.unit"; unit_backup=$backup.unit; systemctl stop aegis-agent.service; systemctl disable aegis-agent.service; fi
     if ! getent passwd aegis-agent >/dev/null; then useradd --system --user-group --home-dir "$state" --shell /usr/sbin/nologin aegis-agent; fi
     if [[ ! -e $state ]]; then install -d -o aegis-agent -g aegis-agent -m 700 "$state"; fi
     if [[ -e $root ]]; then mv -- "$root" "$backup"; backed_up=1; fi
-    # Keep a prior unit backup outside the promoted tree's public payload.
-    if [[ -n $unit_backup ]]; then unit_backup=$backup.unit; cp -- "$stage/unit.previous" "$unit_backup"; rm -- "$stage/unit.previous"; fi
     mv -- "$stage" "$root"; promoted=1
     install -o root -g root -m 644 "$root/aegis-agent.service" "$unit"
     systemctl daemon-reload

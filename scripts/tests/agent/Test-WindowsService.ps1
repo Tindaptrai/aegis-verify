@@ -55,6 +55,59 @@ function Invoke-ClosedInstaller([string]$Code) {
     if (($Code -and $output.Contains($Code)) -or $output.Contains('PRIVATE KEY') -or $output.Contains('csr_pem')) { throw 'installer_output_secret_leak' }
     if ($process.ExitCode -ne 0) { throw 'native_installer_failed' }
 }
+function Assert-NativeOwnerConflict {
+    # Only the disposable CI phase may alter the service owner. Production only
+    # sets a fixed administrative owner immediately after creating a new service.
+    if (!('Aegis.Agent.Tests.ServiceOwner' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+using System.Security.AccessControl;
+namespace Aegis.Agent.Tests {
+    public static class ServiceOwner {
+        [DllImport("advapi32.dll", ExactSpelling=true, CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr OpenSCManagerW(string machine,string database,uint access);
+        [DllImport("advapi32.dll", ExactSpelling=true, CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr OpenServiceW(IntPtr manager,string name,uint access);
+        [DllImport("advapi32.dll", ExactSpelling=true, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)] private static extern bool SetServiceObjectSecurity(IntPtr service,uint information,byte[] descriptor);
+        [DllImport("advapi32.dll", ExactSpelling=true)]
+        [return: MarshalAs(UnmanagedType.Bool)] private static extern bool CloseServiceHandle(IntPtr handle);
+        public static void Set(string owner) {
+            IntPtr manager=IntPtr.Zero,service=IntPtr.Zero;
+            try {
+                manager=OpenSCManagerW(null,null,1);
+                if (manager==IntPtr.Zero) throw new InvalidOperationException("ci_owner_setup_failed");
+                service=OpenServiceW(manager,"AegisAgent",0x80000);
+                if (service==IntPtr.Zero) throw new InvalidOperationException("ci_owner_setup_failed");
+                RawSecurityDescriptor descriptor=new RawSecurityDescriptor("O:"+owner);
+                byte[] bytes=new byte[descriptor.BinaryLength]; descriptor.GetBinaryForm(bytes,0);
+                if (!SetServiceObjectSecurity(service,1,bytes)) throw new InvalidOperationException("ci_owner_setup_failed");
+            } finally {
+                if (service!=IntPtr.Zero) CloseServiceHandle(service);
+                if (manager!=IntPtr.Zero) CloseServiceHandle(manager);
+            }
+        }
+    }
+}
+'@
+    }
+    $original = New-Object Security.AccessControl.CommonSecurityDescriptor($false,$false,(Get-AgentNativeServiceSecurity))
+    $owner = $original.Owner.Value
+    $before = (Get-FileHash -LiteralPath $stateFile -Algorithm SHA256).Hash
+    $beforeCommand = (Get-CimInstance Win32_Service -Filter "Name='AegisAgent'").PathName
+    try {
+        [Aegis.Agent.Tests.ServiceOwner]::Set([Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+        $refused=$false
+        try { Install-AegisAgent $PackageRoot $null $null } catch { if ($_.Exception.Message -eq 'service_owner_invalid') { $refused=$true } else { throw } }
+        if (!$refused) { throw 'untrusted_service_owner_installer_accepted' }
+        $refused=$false
+        try { & (Join-Path $PackageRoot 'Uninstall-Agent.ps1') | Out-Null } catch { if ($_.Exception.Message -eq 'service_owner_invalid') { $refused=$true } else { throw } }
+        if (!$refused) { throw 'untrusted_service_owner_uninstaller_accepted' }
+        if ((Get-FileHash -LiteralPath $stateFile -Algorithm SHA256).Hash -cne $before -or (Get-CimInstance Win32_Service -Filter "Name='AegisAgent'").PathName -cne $beforeCommand) { throw 'owner_conflict_changed_installation' }
+    } finally { [Aegis.Agent.Tests.ServiceOwner]::Set($owner) }
+    Assert-AgentNativeServiceAcl
+}
 if ($Action -eq 'Install') {
     if ((Get-Service AegisAgent -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $binaryRoot) -or (Test-Path -LiteralPath $stateDirectory)) { throw 'ci_target_already_exists' }
     if (!$ManagerOrigin -or !$ServerCa) { throw 'manager_and_server_ca_required' }
@@ -72,7 +125,7 @@ if ($Action -eq 'Install') {
         Stop-AgentService
         if ($watch.Elapsed.TotalSeconds -ge 20) { throw 'service_stop_deadline_exceeded' }
         if ($Action -eq 'Restart') { Start-Service AegisAgent; Wait-AgentRunning }
-        else { Invoke-ClosedInstaller $null }
+        else { Assert-NativeOwnerConflict; Invoke-ClosedInstaller $null }
         Assert-NativeConfiguration
         $status=Read-NativeStatus
         if ($status.device_id -cne $id -or (Get-NativeKeyHash) -cne $keyHash) { throw 'restart_or_reinstall_changed_identity' }
