@@ -33,10 +33,15 @@ enrollment_outcome_unknown
 enrollment_pending
 enrollment_requires_action
 exception_argument
+exception_commandnotfound
 exception_cryptographic
 exception_invalidoperation
 exception_io
+exception_itemnotfound
+exception_method
 exception_methodinvocation
+exception_parameterbinding
+exception_propertynotfound
 exception_runtime
 exception_unauthorizedaccess
 exception_win32

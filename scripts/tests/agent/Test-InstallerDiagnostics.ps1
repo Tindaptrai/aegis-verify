@@ -24,13 +24,21 @@ try { throw (New-Object IO.IOException('sensitive source value')) } catch {
     $result=Get-AgentErrorDiagnostic $_ 'installer'
     if ($result.code -notmatch '^hresult_-?[0-9]+$' -or ($result | ConvertTo-Json -Compress).Contains('sensitive')) { throw 'Exception diagnostic leaked source values' }
 }
+foreach ($kind in @('ParameterBindingException','MethodException','ItemNotFoundException','CommandNotFoundException','PropertyNotFoundException')) {
+    try { throw (New-Object ('Management.Automation.' + $kind)('sensitive argument value')) } catch {
+        $category=@{ParameterBindingException='exception_parameterbinding';MethodException='exception_method';ItemNotFoundException='exception_itemnotfound';CommandNotFoundException='exception_commandnotfound';PropertyNotFoundException='exception_propertynotfound'}[$kind]
+        $result=Get-AgentErrorDiagnostic $_ 'preflight'
+        if ($result.code -cne $category -or ($result | ConvertTo-Json -Compress).Contains('sensitive')) { throw 'Unknown PowerShell preflight failure category' }
+    }
+}
 $testPackage=Join-Path ([IO.Path]::GetTempPath()) ('aegis-diagnostic-' + [Guid]::NewGuid().ToString('N'))
 try {
     New-Item -ItemType Directory -Path $testPackage | Out-Null
-    foreach ($leak in @($false,$true)) {
+    foreach ($scenario in @('fixed','leak','double')) {
         $body='param([string]$Manager,[string]$ServerCa) function Install-AegisAgent { $value=[Console]::In.ReadLine(); '
-        if ($leak) { $body+='[Console]::Error.WriteLine($value); ' }
-        $body+="throw 'state_invalid' }"
+        if ($scenario -eq 'leak') { $body+='[Console]::Error.WriteLine($value); ' }
+        if ($scenario -eq 'double') { $body+="try { throw 'state_invalid' } catch { throw 'service_operation_failed' } }" }
+        else { $body+="throw 'state_invalid' }" }
         [IO.File]::WriteAllText((Join-Path $testPackage 'Install-Agent.ps1'),$body)
         $start=New-Object Diagnostics.ProcessStartInfo
         $start.FileName="$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
@@ -41,9 +49,11 @@ try {
         $stdout=$child.StandardOutput.ReadToEndAsync(); $stderr=$child.StandardError.ReadToEndAsync()
         $child.StandardInput.WriteLine($code); $child.StandardInput.Close()
         if (!$child.WaitForExit(10000)) { $child.Kill(); throw 'Diagnostic wrapper child timeout' }
-        $diagnostic=Get-AgentCapturedDiagnostic ($stdout.GetAwaiter().GetResult() + $stderr.GetAwaiter().GetResult()) $code 'installer'
-        $expected=if($leak){'installer_output_secret_leak'}else{'state_invalid'}
+        $outText=$stdout.GetAwaiter().GetResult(); $errText=$stderr.GetAwaiter().GetResult()
+        $diagnostic=Get-AgentCapturedDiagnostic ($outText + $errText) $code 'installer'
+        $expected=if($scenario -eq 'leak'){'installer_output_secret_leak'}else{'state_invalid'}
         if ($child.ExitCode -eq 0 -or $diagnostic.code -cne $expected) { throw 'Diagnostic child transport did not preserve safe failure classification' }
+        if ($scenario -ne 'leak' -and ($outText.Trim() -ne '' -or $errText.Trim() -cne '{"stage":"installer","code":"state_invalid"}')) { throw 'Diagnostic child exposed raw failure text' }
     }
 } finally { if(Test-Path -LiteralPath $testPackage){Remove-Item -LiteralPath $testPackage -Recurse -Force} }
-Write-Output '13 safe Windows diagnostic contracts passed; no SCM call made'
+Write-Output '19 safe Windows diagnostic contracts passed; no SCM call made'
