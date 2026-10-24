@@ -1,4 +1,26 @@
 {
+  "notices": {
+    "win-x64": {
+      "package": "microsoft.netcore.app.runtime.win-x64",
+      "version": "10.0.13",
+      "runtime": "win-x64",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.netcore.app.runtime.win-x64/10.0.13/microsoft.netcore.app.runtime.win-x64.10.0.13.nupkg",
+      "files": {
+        "LICENSE.TXT": "d7a68596ab69b06f51ca278a6545148e4269a9381c26d597c13df5d88e08cf5b",
+        "THIRD-PARTY-NOTICES.TXT": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21"
+      }
+    },
+    "linux-x64": {
+      "package": "microsoft.netcore.app.runtime.linux-x64",
+      "version": "10.0.13",
+      "runtime": "linux-x64",
+      "source": "https://api.nuget.org/v3-flatcontainer/microsoft.netcore.app.runtime.linux-x64/10.0.13/microsoft.netcore.app.runtime.linux-x64.10.0.13.nupkg",
+      "files": {
+        "LICENSE.TXT": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+        "THIRD-PARTY-NOTICES.TXT": "66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54"
+      }
+    }
+  },
   "files": {
     "linux-x64": [
       "aegis-agent",

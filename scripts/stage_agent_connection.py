@@ -52,6 +52,17 @@ def payload(source, build, runtime, version, commit):
     config = json.loads(files["bin/aegis-agent.runtimeconfig.json"])
     if config.get("runtimeOptions", {}).get("includedFrameworks") != [{"name": "Microsoft.NETCore.App", "version": "10.0.13"}]:
         raise ValueError()
+    notices = inventory["notices"][runtime]
+    notice_names = {"LICENSE.TXT", "THIRD-PARTY-NOTICES.TXT"}
+    notice_root = checked_path(source / "deploy/agent/runtime-notices" / runtime)
+    if set(notices["files"]) != notice_names or set(path.name for path in notice_root.iterdir()) != notice_names:
+        raise ValueError()
+    for name, digest in notices["files"].items():
+        data = read_public(notice_root / name)
+        if sha256(data).hexdigest() != digest:
+            raise ValueError()
+        files["bin/" + name] = data
+    files["bin/DOTNET-RUNTIME-NOTICES.json"] = (json.dumps(notices, indent=2, sort_keys=True) + "\n").encode()
     platform = "windows" if runtime == "win-x64" else "linux"
     scripts = ("Install-Agent.ps1", "Uninstall-Agent.ps1") if platform == "windows" else ("install.sh", "uninstall.sh", "aegis-agent.service")
     for name in scripts:

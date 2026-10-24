@@ -81,6 +81,9 @@ Nhận archive và file cùng tên thêm `.sha256` từ bản phát hành đã r
 source commit trong `version.json` và kết quả CI của **đúng commit build**. Gói gồm
 `bin/`, installer/uninstaller, Linux unit nếu áp dụng, guide, `version.json`,
 `SHA256SUMS.txt`; không chứa CA triển khai, private identity, pairing code hay config.
+`bin/LICENSE.TXT`, `bin/THIRD-PARTY-NOTICES.TXT` và
+`bin/DOTNET-RUNTIME-NOTICES.json` giữ nguyên notice của runtime đúng RID/version,
+nguồn package và SHA-256; chúng được manifest kiểm tra và giữ cùng runtime khi cài.
 Installer kiểm tra tất cả file theo manifest trước thay đổi máy. Hash xác minh tính
 toàn vẹn; owner vẫn cần nguồn phân phối đáng tin và đối chiếu CI/source.
 
@@ -128,10 +131,31 @@ Code hết hạn/thu hồi/đã dùng hoặc issuer mất quyền đều bị t�
 Mở **Windows PowerShell 5.1 với Administrator**, chuyển tới thư mục giải nén. CA
 server công khai phải ở đường dẫn tuyệt đối, nhận qua kênh đáng tin:
 
+Trước mọi lần chạy script (cài, nâng cấp, gỡ hoặc phục hồi trong shell mới), hoàn
+tất mục 2: nhận gói/hash từ nguồn đã review, đối chiếu source/CI, xác minh archive
+rồi giải nén vào thư mục mới. Đọc/review hai script trong gói đã xác minh. Quyền
+Administrator không tự cho phép chạy script: mặc định Windows client là
+`Restricted`; `RemoteSigned` còn chặn script unsigned mang dấu tải từ Internet.
+
+Kiểm tra policy trước khi chạy. `MachinePolicy`/`UserPolicy` do **Group Policy**
+áp đặt có ưu tiên cao hơn lựa chọn process; nếu chính sách tổ chức chặn script,
+dừng và dùng quy trình/script signing được tổ chức phê duyệt, không cố vượt policy:
+
+```powershell
+Get-ExecutionPolicy -List
+```
+
+Các lệnh dưới gọi đúng Windows PowerShell 5.1 bằng đường dẫn hệ thống, với
+`-NoProfile -ExecutionPolicy Bypass -File` cho **một process con** chạy script vừa
+review. Lựa chọn này xử lý cả Restricted mặc định và dấu Internet của script
+unsigned khi Group Policy cho phép; nó hết hiệu lực khi process kết thúc, không
+lưu policy vào registry/user/machine. Chỉ dùng với gói đã xác minh ở trên, không
+dùng cho script khác. Xem [Microsoft về execution policy và ưu tiên scope](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1).
+
 ```powershell
 $ManagerOrigin = 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>'
 $ServerCa = '<ABSOLUTE_PUBLIC_SERVER_CA_PEM>'
-.\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
 ```
 
 Nhập mã khi prompt yêu cầu, không truyền mã như parameter. Installer tạo service
@@ -199,10 +223,21 @@ lại identity và không hỏi code. Nếu cung cấp origin/CA khác state đ�
 từ chối. Service/path/account có cấu hình khác hoặc state không an toàn cũng bị từ
 chối. Không sửa service sang LocalSystem/root hay xóa state để vượt qua kiểm tra.
 
+Windows: trong mỗi shell Administrator mới, xác minh gói mới theo mục 2 và policy
+theo mục 4, chuyển tới thư mục gói đã review. Nâng cấp/cài lại state enrolled:
+
+```powershell
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\Install-Agent.ps1
+```
+
+Lệnh này dùng origin/CA đã pin và không cần mint code mới cho identity còn hợp lệ.
+Để gỡ, dùng uninstaller trong gói đã xác minh và cùng prerequisite mục 2/4,
+kể cả khi vừa mở shell Administrator mới.
+
 Gỡ service và binary, **giữ identity/config được bảo vệ**:
 
 ```powershell
-.\Uninstall-Agent.ps1
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\Uninstall-Agent.ps1
 ```
 
 ```bash
@@ -214,9 +249,15 @@ upgrade không phải lý do tạo key mới; xem fixed diagnostic và quyền t
 Khi pairing thất bại, service giữ disabled và pending key/CSR được giữ lại.
 
 Nếu owner cần chạy connect trực tiếp để xử lý pending state, trước hết stop service
-và giữ nguyên thư mục/quyền đã được installer tạo. Các lệnh vẫn hỏi code ở prompt ẩn:
+và giữ nguyên thư mục/quyền đã được installer tạo. Trong shell Administrator mới,
+đặt lại biến như dưới; trước khi chạy lại installer, hoàn tất prerequisite mục 2/4.
+Các lệnh vẫn hỏi code ở prompt ẩn:
 
 ```powershell
+$Agent = Join-Path $env:ProgramFiles 'AEGIS Agent\bin\aegis-agent.exe'
+$State = Join-Path $env:ProgramData 'AEGIS\Agent'
+$ManagerOrigin = 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>'
+$ServerCa = '<ABSOLUTE_PUBLIC_SERVER_CA_PEM>'
 Stop-Service AegisAgent
 & $Agent connect --manager $ManagerOrigin --server-ca $ServerCa --state-dir $State
 ```
@@ -242,10 +283,18 @@ nó copy snapshot vào `retired/<UUID>-<random>/state.json` được bảo vệ,
 nguồn. Lỗi có thể để lại cả archive được bảo vệ và active bytes để phục hồi; không
 tự động xóa archive:
 
+Windows recovery trong shell Administrator mới: hoàn tất mục 2/4 với gói đã review,
+chuyển tới thư mục gói; đặt lại các biến sau trước stop/retire/install. Code mới
+chỉ được nhập tại prompt ẩn sau khi owner revoke UUID cũ:
+
 ```powershell
+$Agent = Join-Path $env:ProgramFiles 'AEGIS Agent\bin\aegis-agent.exe'
+$State = Join-Path $env:ProgramData 'AEGIS\Agent'
+$ManagerOrigin = 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>'
+$ServerCa = '<ABSOLUTE_PUBLIC_SERVER_CA_PEM>'
 Stop-Service AegisAgent
 & $Agent retire --state-dir $State --device-id '<CURRENT_DEVICE_UUID>'
-.\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
 ```
 
 ```bash
