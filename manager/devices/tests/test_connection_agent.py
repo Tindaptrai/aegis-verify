@@ -10,6 +10,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import re
 import ssl
 import subprocess
 import tempfile
@@ -24,7 +25,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
-from django.test import Client, TransactionTestCase, override_settings
+from django.test import Client, SimpleTestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import AccountMutationLock
@@ -95,6 +96,107 @@ def connection_test_owner():
     # TransactionTestCase flush removes migration data between test methods.
     AccountMutationLock.objects.get_or_create(pk=1)
     return get_user_model().objects.create_superuser("synthetic-tls-owner", password="synthetic-test-only")
+
+
+NATIVE_DIAGNOSTIC_STAGES = frozenset(("preflight", "installer", "configuration", "status", "restart", "uninstall", "owner_conflict", "helper"))
+# This reviewed static vocabulary is also read by the disposable native helpers;
+# never learn labels from captured output or arbitrary exception messages.
+NATIVE_DIAGNOSTIC_CODES = frozenset((Path(__file__).resolve().parents[3] /
+    "scripts/tests/agent/native-diagnostic-codes.txt").read_text(encoding="ascii").splitlines())
+
+
+def native_diagnostic(stderr):
+    if len(stderr) > 512:
+        return None
+
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+
+    try:
+        data = json.loads(stderr, object_pairs_hook=unique_object)
+        if type(data) is not dict or set(data) != {"stage", "code"}:
+            return None
+        stage, code = data["stage"], data["code"]
+        if type(stage) is not str or stage not in NATIVE_DIAGNOSTIC_STAGES or type(code) is not str:
+            return None
+        known = code in NATIVE_DIAGNOSTIC_CODES
+        if not known:
+            match = re.fullmatch(r"(win32|hresult)_(-?(?:0|[1-9][0-9]*))", code)
+            if match:
+                value = int(match[2])
+                known = str(value) == match[2] and ((match[1] == "win32" and 0 <= value <= 65535)
+                    or (match[1] == "hresult" and -(2 ** 31) <= value < 2 ** 31))
+        return stage + ":" + code if known else None
+    except (ValueError, TypeError, RecursionError):
+        return None
+
+
+def assert_native_result(action, result, *, code=None):
+    # Do this Boolean check before any assertion or diagnostic classification so
+    # nonzero exits cannot bypass the input leak guard or echo captured values.
+    if code is not None and (code in result.stdout or code in result.stderr):
+        raise AssertionError("Native helper exposed synthetic input; output withheld")
+    if len(result.stdout) >= 4096:
+        raise AssertionError("Native output exceeded public result cap")
+    if result.returncode != 0:
+        safe_action = action if action in ("Install", "Restart", "Reinstall", "Status", "Uninstall") else "unknown"
+        diagnostic = native_diagnostic(result.stderr)
+        suffix = " [" + diagnostic + "]" if diagnostic is not None else ""
+        raise AssertionError("Native " + safe_action + " failed" + suffix + "; output withheld")
+
+
+class NativeDiagnosticsTests(SimpleTestCase):
+    def result(self, stderr, stdout="", returncode=1):
+        return subprocess.CompletedProcess(["synthetic-helper"], returncode, stdout, stderr)
+
+    def test_recognized_closed_diagnostic_surfaces_only_fixed_stage_and_code(self):
+        result = self.result('{"stage":"installer","code":"state_invalid"}\n',
+                             stdout="synthetic private stdout /private/path")
+        with self.assertRaises(AssertionError) as caught:
+            assert_native_result("Install", result)
+        self.assertEqual(str(caught.exception), "Native Install failed [installer:state_invalid]; output withheld")
+
+    def test_untrusted_output_is_withheld_including_unknown_extra_and_duplicate_json(self):
+        outputs = ["", "synthetic private key /private/path", "state_invalid",
+            '{"stage":"installer","code":"unknown_private_value"}',
+            '{"stage":"private_path","code":"state_invalid"}',
+            '{"stage":"installer","code":"state_invalid","private":"synthetic secret"}',
+            '{"stage":"installer","code":"state_invalid","code":"synthetic secret"}',
+            '{"stage":"installer","code":"state_invalid"}\nsynthetic stack trace',
+            '{"stage":"installer","code":1}', 'x' * 513,
+            '{"stage":"installer","code":"win32_65536"}',
+            '{"stage":"installer","code":"win32_-1"}',
+            '{"stage":"installer","code":"hresult_2147483648"}',
+            '{"stage":"installer","code":"hresult_-2147483649"}',
+            '{"stage":"installer","code":"exception_synthetic_secret"}']
+        for index, stderr in enumerate(outputs):
+            with self.subTest(index=index), self.assertRaises(AssertionError) as caught:
+                assert_native_result("Install", self.result(stderr, stdout="synthetic private stdout"))
+            self.assertEqual(str(caught.exception), "Native Install failed; output withheld")
+
+    def test_bounded_native_numbers_and_known_exception_type_are_safe_diagnostics(self):
+        for code in ("win32_5", "hresult_-2147024891", "exception_unauthorizedaccess"):
+            with self.subTest(code=code), self.assertRaises(AssertionError) as caught:
+                assert_native_result("Install", self.result(json.dumps({"stage": "installer", "code": code})))
+            self.assertEqual(str(caught.exception), "Native Install failed [installer:" + code + "]; output withheld")
+
+    def test_pairing_leak_is_detected_before_exit_status_or_diagnostic_classification(self):
+        code = "a" * 64
+        for returncode in (0, 1):
+            for stream in ("stdout", "stderr"):
+                stdout, stderr = "", '{"stage":"installer","code":"state_invalid"}'
+                if stream == "stdout":
+                    stdout = code
+                else:
+                    stderr = code
+                with self.subTest(exit=returncode, stream=stream), self.assertRaises(AssertionError) as caught:
+                    assert_native_result("Install", self.result(stderr, stdout, returncode), code=code)
+                self.assertEqual(str(caught.exception), "Native helper exposed synthetic input; output withheld")
 
 
 class ConnectionFixtureTests(TransactionTestCase):
@@ -220,10 +322,7 @@ class PublishedConnectionTests(TransactionTestCase):
                 command += ["--expected-device-id", identity]
         result = subprocess.run(command, input="" if code is None else code + "\n",
                                 capture_output=True, text=True, timeout=120)
-        self.assertEqual(result.returncode, 0, "Native " + action + " failed; output withheld")
-        self.assertLess(len(result.stdout), 4096, "Native output exceeded public result cap")
-        if code is not None:
-            self.assertTrue(code not in result.stdout + result.stderr, "Native helper exposed synthetic input; output withheld")
+        assert_native_result(action, result, code=code)
         data = json.loads(result.stdout)
         self.assertEqual(set(data), {"action", "device_id", "state", "service_status", "identity_preserved"})
         self.assertEqual(data["action"], action)
