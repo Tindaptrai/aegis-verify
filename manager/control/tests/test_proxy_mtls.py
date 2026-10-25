@@ -303,6 +303,8 @@ class NginxMutualTlsTests(LiveServerTestCase):
         build_sample = runpy.run_path(str(
             Path(__file__).resolve().parents[3] / "scripts/create_catalog_sample.py"))["build_sample"]
 
+        # LiveServerTestCase flushes data-migration singleton rows between tests.
+        AccountMutationLock.objects.get_or_create(pk=1)
         owner = get_user_model().objects.create_superuser(
             "synthetic-catalog-owner", password="synthetic-catalog-password")
         client = Client(enforce_csrf_checks=True)

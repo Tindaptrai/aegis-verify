@@ -23,7 +23,7 @@ export type CatalogValidationCode = typeof catalogValidationCodes[number];
 const keys = 'id,scenario_id,name,version,platform,runner,timeout_seconds,sha256,status,created_at,created_by,published_at,published_by';
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const closed = (value: unknown, fields: string): value is Record<string, unknown> => record(value) && Object.keys(value).sort().join(',') === fields.split(',').sort().join(',');
-const text = (value: unknown, max = 512) => typeof value === 'string' && value.length > 0 && value.length <= max;
+const text = (value: unknown, max = 512) => typeof value === 'string' && value.length > 0 && Array.from(value).length <= max;
 const nullable = (value: unknown, check: (value: unknown) => boolean) => value === null || check(value);
 const hash = (value: unknown) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const integer = (value: unknown, min: number, max = Number.MAX_SAFE_INTEGER) => Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= max;

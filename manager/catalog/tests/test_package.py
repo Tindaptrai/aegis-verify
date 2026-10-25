@@ -11,6 +11,10 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
+from aegis_verify.scenario_loader import parse_scenario_yaml
+from aegis_verify.validation.contracts import EvaluationProfile
+from aegis_verify.validation.results import profile_fingerprint, scenario_fingerprint
+
 from .helpers import forged_size, inventory, json_bytes, package_zip, sample_members
 
 try:
@@ -85,6 +89,26 @@ class PackageTests(unittest.TestCase):
         members = sample_members()
         members["scenario.yaml"] = members["scenario.yaml"].replace(b"Catalog authoring sample", b"A" * 513)
         self.reject(package_zip(inventory(members)), "invalid_scenario")
+
+    def test_name_bound_counts_supplementary_unicode_code_points(self):
+        for count in [300, 512, 513]:
+            with self.subTest(code_points=count):
+                name = chr(0x1f680) * count
+                members = sample_members()
+                members["scenario.yaml"] = members["scenario.yaml"].replace(b"Catalog authoring sample", name.encode("utf-8"))
+                manifest = parse_scenario_yaml(members["scenario.yaml"].decode("utf-8"), source_name="scenario.yaml")
+                profile_data = json.loads(members["profile.json"])
+                profile_data["scenario_fingerprint"] = scenario_fingerprint(manifest)
+                profile = EvaluationProfile.model_validate(profile_data)
+                members["profile.json"] = json_bytes(profile.model_dump(mode="json"))
+                metadata = json.loads(members["package.json"])
+                metadata["profile_fingerprint"] = profile_fingerprint(profile)
+                members["package.json"] = json_bytes(metadata)
+                raw = package_zip(inventory(members))
+                if count <= 512:
+                    self.assertEqual(self.validate(raw).metadata["name"], name)
+                else:
+                    self.reject(raw, "invalid_scenario")
 
     def test_duplicate_json_keys_and_utf8_are_rejected(self):
         for name in ["package.json", "profile.json"]:

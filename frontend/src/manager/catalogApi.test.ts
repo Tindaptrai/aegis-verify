@@ -1,9 +1,38 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createManagerApi } from './api';
-import { catalogDetail, catalogHash, catalogId, catalogList } from './catalog-test-fixtures';
+import { catalogDetail, catalogHash, catalogId, catalogItem, catalogList } from './catalog-test-fixtures';
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 
 describe('Catalog browser API contract', () => {
+  it.each([300, 512])('accepts a %s-code-point supplementary name on import, detail and list', async (count) => {
+    const name = '\u{1f680}'.repeat(count);
+    const detail = { ...catalogDetail, name };
+    const list = { ...catalogList, results: [{ ...catalogItem, name }] };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json(detail, 201))
+      .mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json(list));
+    const api = createManagerApi(fetcher);
+    await expect(api.importCatalog(new File(['synthetic'], 'scenario.zip'))).resolves.toEqual(detail);
+    await expect(api.catalogPackage(catalogId)).resolves.toEqual(detail);
+    await expect(api.listCatalog()).resolves.toEqual(list);
+  });
+  it('rejects a 513-code-point supplementary name on import, detail and list', async () => {
+    const name = '\u{1f680}'.repeat(513);
+    const detail = { ...catalogDetail, name };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json(detail, 201))
+      .mockResolvedValueOnce(json(detail)).mockResolvedValueOnce(json({ ...catalogList, results: [{ ...catalogItem, name }] }));
+    const api = createManagerApi(fetcher);
+    for (const action of [() => api.importCatalog(new File(['synthetic'], 'scenario.zip')), () => api.catalogPackage(catalogId), () => api.listCatalog()]) {
+      await expect(action()).rejects.toMatchObject({ name: 'ManagerApiError' });
+    }
+  });
+  it('bounds file previews by UTF-8 bytes for supplementary text', async () => {
+    const file = { path: 'README.md', text: '\u{1f680}'.repeat(256 * 1024) };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json(file))
+      .mockResolvedValueOnce(json({ ...file, text: file.text + '\u{1f680}' }));
+    const api = createManagerApi(fetcher);
+    await expect(api.catalogFile(catalogId, file.path)).resolves.toEqual(file);
+    await expect(api.catalogFile(catalogId, file.path)).rejects.toMatchObject({ name: 'ManagerApiError' });
+  });
   it('maps list, private detail/text and hash-bound lifecycle with cookie credentials and CSRF', async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(json({ authenticated: false, csrf_token: 'synthetic-csrf', user: null, expires_at: null }))
       .mockResolvedValueOnce(json(catalogList)).mockResolvedValueOnce(json(catalogDetail))
