@@ -32,7 +32,8 @@ export function ExecutionPage({ api, canRun, canManage }: { api: ManagerApi; can
   const [editing, setEditing] = useState<ExecutionDeviceDTO | null>(null); const [job, setJob] = useState<JobDTO | null>(null); const [busy, setBusy] = useState(false); const [now, setNow] = useState(Date.now());
   const [pollRevision, setPollRevision] = useState(0); const jobRead = useRef<AbortController | null>(null);
   const mounted = useRef(false); const mutation = useRef<AbortController | null>(null); const reads = useRef<AbortController | null>(null); const deniedRef = useRef(false);
-  function invalidatePreview() { mutation.current?.abort(); mutation.current = null; setBusy(false); setPreview(null); setApprovalKey(''); setEditing(null); }
+  const approvalPending = useRef<AbortController | null>(null);
+  function invalidatePreview() { mutation.current?.abort(); mutation.current = null; approvalPending.current = null; setBusy(false); setPreview(null); setApprovalKey(''); setEditing(null); }
   function fail(failure: unknown) {
     if (failure instanceof ManagerApiError && [401, 403].includes(failure.status)) { deniedRef.current = true; setDenied(true); reads.current?.abort(); invalidatePreview(); setInventory(null); setMetadata({}); setJob(null); }
     setError(message(failure));
@@ -61,17 +62,20 @@ export function ExecutionPage({ api, canRun, canManage }: { api: ManagerApi; can
   const jobHoldsAdmission = job !== null && !['evaluated', 'empty', 'reconciled'].includes(job.collection_state);
   const allowed = !jobHoldsAdmission && !!target && eligible(target) && !!provider && (label !== 'Rehearsal' || provider.allow_rehearsal);
   useEffect(() => {
-    if (!preview) return;
+    // Admission itself makes readiness busy. Keep the matching approval response
+    // alive; explicit target/config/authority changes still call invalidatePreview.
+    if (!preview || approvalPending.current) return;
     const s = preview.summary;
     if (!allowed || s.device_id !== selected || s.binding_revision !== meta?.binding_revision || s.release_id !== meta?.release_id || s.release_sha256 !== meta?.release_sha256 || s.wazuh_connection_id !== meta?.wazuh_connection_id || s.wazuh_agent_id !== meta?.wazuh_agent_id || s.parameters.run_label !== label) invalidatePreview();
-  }, [allowed, selected, meta, label, preview]);
-  async function write<T>(action: (signal: AbortSignal) => Promise<T>, success: (result: T) => void) {
+  }, [allowed, selected, meta, label, preview, busy]);
+  async function write<T>(action: (signal: AbortSignal) => Promise<T>, success: (result: T) => void, kind: 'approval' | 'other' = 'other') {
     if (!mounted.current || deniedRef.current || mutation.current) return;
     const controller = new AbortController(); mutation.current = controller; setBusy(true); setError('');
+    if (kind === 'approval') approvalPending.current = controller;
     const current = () => mounted.current && !controller.signal.aborted && mutation.current === controller;
     try { const result = await action(controller.signal); if (current()) success(result); }
     catch (failure) { if (current()) { if (failure instanceof ManagerApiError && failure.status === 409) { setPreview(null); setApprovalKey(''); setEditing(null); } fail(failure); } }
-    finally { if (current()) { mutation.current = null; setBusy(false); } }
+    finally { if (approvalPending.current === controller) approvalPending.current = null; if (current()) { mutation.current = null; setBusy(false); } }
   }
   function requestPreview() {
     if (!allowed || !canRun || !target || !meta?.binding_revision || !provider) return;
@@ -82,7 +86,7 @@ export function ExecutionPage({ api, canRun, canManage }: { api: ManagerApi; can
       setPreview(result); setApprovalKey(crypto.randomUUID());
     });
   }
-  function approve(input: ApproveInput) { if (!preview || !canRun || !allowed || Date.parse(preview.expires_at) - Date.now() < 30000) return; void write((signal) => api.approveExecution(input, signal), (result) => { if (summaryIdentity(result.summary) !== summaryIdentity(preview.summary)) { setError('Không thể xác nhận tác vụ. Cần kiểm tra trạng thái server.'); return; } setJob(result); setPreview(null); setApprovalKey(''); }); }
+  function approve(input: ApproveInput) { if (!preview || !canRun || !allowed || Date.parse(preview.expires_at) - Date.now() < 30000) return; void write((signal) => api.approveExecution(input, signal), (result) => { if (summaryIdentity(result.summary) !== summaryIdentity(preview.summary)) { setError('Không thể xác nhận tác vụ. Cần kiểm tra trạng thái server.'); return; } setJob(result); setPreview(null); setApprovalKey(''); }, 'approval'); }
   useEffect(() => {
     if (!job || denied) return; const controller = new AbortController(); jobRead.current = controller; let timer: number | undefined; const jobId = job.job_id; const frozenSummary = summaryIdentity(job.summary);
     async function poll() { try { const result = await api.executionJob(jobId, controller.signal); if (!controller.signal.aborted) { if (result.job_id !== jobId || summaryIdentity(result.summary) !== frozenSummary) throw new Error('Unexpected job'); setJob(result); } } catch (failure) { if (!controller.signal.aborted) fail(failure); } finally { if (!controller.signal.aborted && !deniedRef.current) timer = window.setTimeout(() => void poll(), 5000); } }

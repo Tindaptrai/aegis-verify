@@ -120,4 +120,47 @@ describe('single Windows execution approval', () => {
   it('a successful receipt with pending collection does not offer another approval', async () => {
     const api = executionFixture(); render(<ExecutionPage api={api} canRun canManage />); await openPreview(); fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và chạy' })); await screen.findByRole('heading', { name: 'Trạng thái tác vụ' }); expect(screen.getByRole('button', { name: 'Xem trước' })).toBeDisabled();
   });
+  it('retains and polls an accepted approval when readiness becomes busy before POST settles', async () => {
+    vi.useFakeTimers();
+    try {
+      const api = executionFixture(); const accepted = { ...job, job_id: '44444444-4444-4444-8444-444444444444', execution_state: 'queued' as const };
+      let finish!: (value: typeof accepted) => void;
+      api.approveExecution = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      api.executionDevice = vi.fn().mockResolvedValueOnce(readiness).mockResolvedValue({ ...readiness, ready: false, blocking_codes: ['busy'] });
+      api.executionJob = vi.fn(async () => accepted);
+      await act(async () => { render(<ExecutionPage api={api} canRun canManage />); });
+      await act(async () => { fireEvent.click(screen.getByRole('radio')); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Xem trước' })); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và chạy' })); });
+      const [input, signal] = vi.mocked(api.approveExecution).mock.calls[0]!;
+      await act(async () => { await vi.advanceTimersByTimeAsync(15000); });
+      expect(screen.getByText('Đang bận')).toBeVisible();
+      expect(signal?.aborted).toBe(false);
+      expect(vi.mocked(api.approveExecution).mock.calls[0]![0]).toEqual(input);
+      await act(async () => finish(accepted));
+      expect(screen.getByRole('heading', { name: 'Trạng thái tác vụ' })).toBeVisible();
+      expect(screen.getByText(accepted.job_id)).toBeVisible();
+      expect(screen.getByText('Đang xếp hàng')).toBeVisible();
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(api.executionJob).toHaveBeenCalledWith(accepted.job_id, expect.any(AbortSignal));
+      expect(api.approveExecution).toHaveBeenCalledTimes(1);
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['parameters', 'target', 'unmount'] as const)('explicit %s changes still abort pending approval and ignore its late accepted job', async (change) => {
+    const api = executionFixture(); let finish!: (value: typeof job) => void;
+    api.approveExecution = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    api.listDevices = vi.fn(async () => ({ results: [device, { ...device, id: '22222222-2222-4222-8222-222222222222', hostname: 'Synthetic second' }], count: 2, page: 1, page_size: 50 as const }));
+    const view = render(<ExecutionPage api={api} canRun canManage />);
+    fireEvent.click(await screen.findByRole('radio', { name: 'Synthetic Windows' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Xem trước' })); await screen.findByRole('dialog');
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và chạy' }));
+    if (change === 'parameters') fireEvent.change(screen.getByLabelText('Nhãn lượt chạy'), { target: { value: 'C' } });
+    else if (change === 'target') fireEvent.click(screen.getByRole('radio', { name: 'Synthetic second' }));
+    else view.unmount();
+    expect(vi.mocked(api.approveExecution).mock.calls[0]![1]?.aborted).toBe(true);
+    await act(async () => finish(job));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Trạng thái tác vụ' })).not.toBeInTheDocument();
+  });
 });
