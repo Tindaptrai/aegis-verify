@@ -10,8 +10,10 @@ internal static partial class Program
     private static readonly List<(string Name, Func<Task> Run)> Tests = [];
     private static async Task<int> Main(string[] args)
     {
+        if (args.Length == 2 && args[0] == "--execution-vector") return ExecutionVector(args[1]);
         StateTests();
         ProtocolTests();
+        ExecutionProtocolTests();
         TransportTests();
         NetworkTests();
         LoopTests();

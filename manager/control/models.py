@@ -50,7 +50,40 @@ class RunnerRelease(models.Model):
     evaluation_bindings = models.JSONField(default=list)
 
 
+EXECUTION_FROZEN_FIELDS = ('binding_id', 'approval_snapshot_id', 'preview_id', 'envelope_bytes', 'signed_payload_bytes',
+    'job_sha256', 'start_request_id', 'start_request_bytes', 'start_request_sha256', 'start_ack_bytes',
+    'terminal_receipt_id', 'terminal_receipt_bytes', 'receipt_ack_bytes')
+
+
+class JobQuerySet(models.QuerySet):
+    def bulk_create(self, objs, **kwargs):
+        if kwargs.get('update_conflicts'):
+            objs = list(objs)
+            if (any(obj.protocol_family == 'windows_execution_v2' for obj in objs) or
+                    self.filter(pk__in=[obj.pk for obj in objs], protocol_family='windows_execution_v2').exists()):
+                raise ValueError('Execution job authority is immutable')
+        return super().bulk_create(objs, **kwargs)
+
+    def bulk_update(self, objs, fields, batch_size=None):
+        if set(fields) & (set(EXECUTION_FROZEN_FIELDS) | {'protocol_family'}):
+            if self.filter(pk__in=[obj.pk for obj in objs], protocol_family='windows_execution_v2').exists():
+                raise ValueError('Execution job authority is immutable')
+        return super().bulk_update(objs, fields, batch_size)
+
+    def update(self, **kwargs):
+        normalized = {self.model._meta.get_field(k).attname: v for k, v in kwargs.items()}
+        guarded = set(normalized) & (set(EXECUTION_FROZEN_FIELDS) | {'protocol_family'})
+        if guarded:
+            for row in self.values('protocol_family', *EXECUTION_FROZEN_FIELDS):
+                for name in guarded:
+                    previous = row[name]
+                    if (name == 'protocol_family' or row['protocol_family'] == 'windows_execution_v2' and previous is not None) and previous != normalized[name]:
+                        raise ValueError('Execution job authority is immutable')
+        return super().update(**kwargs)
+
+
 class Job(models.Model):
+    objects = JobQuerySet.as_manager()
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     device = models.ForeignKey(Device, on_delete=models.PROTECT)
     release = models.ForeignKey(RunnerRelease, on_delete=models.PROTECT)
@@ -73,6 +106,29 @@ class Job(models.Model):
     collection_end = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     started_authorized_at = models.DateTimeField(null=True)
+    protocol_family = models.CharField(max_length=32, choices=[('legacy_v1', 'legacy_v1'), ('windows_execution_v2', 'windows_execution_v2')], default='legacy_v1')
+    binding = models.ForeignKey('control.DeviceExecutionBinding', on_delete=models.PROTECT, null=True)
+    approval_snapshot = models.OneToOneField('control.JobApprovalSnapshot', on_delete=models.PROTECT, null=True)
+    preview = models.OneToOneField('control.ExecutionPreview', on_delete=models.PROTECT, null=True)
+    envelope_bytes = models.BinaryField(null=True)
+    signed_payload_bytes = models.BinaryField(null=True)
+    job_sha256 = models.CharField(max_length=64, null=True)
+    start_request_id = models.UUIDField(null=True)
+    start_request_bytes = models.BinaryField(null=True)
+    start_request_sha256 = models.CharField(max_length=64, null=True)
+    start_ack_bytes = models.BinaryField(null=True)
+    terminal_receipt_id = models.UUIDField(null=True, unique=True)
+    terminal_receipt_bytes = models.BinaryField(null=True)
+    receipt_ack_bytes = models.BinaryField(null=True)
+    finished_at = models.DateTimeField(null=True)
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            previous = type(self).objects.filter(pk=self.pk).values('protocol_family', *EXECUTION_FROZEN_FIELDS).get()
+            for name in ('protocol_family', *EXECUTION_FROZEN_FIELDS):
+                if (name == 'protocol_family' or previous['protocol_family'] == 'windows_execution_v2' and previous[name] is not None) and previous[name] != getattr(self, name):
+                    raise ValueError('Execution job authority is immutable')
+        return super().save(*args, **kwargs)
 
 
 class AuditQuerySet(models.QuerySet):
@@ -97,3 +153,9 @@ class AuditEntry(models.Model):
 
 class DispatchLock(models.Model):
     id = models.PositiveSmallIntegerField(primary_key=True, default=1)
+
+
+# Explicit registration keeps existing v1 models and their services intact.
+from .execution_models import (DeviceExecutionBinding, RegisteredExecutionConnection,
+    ExecutionTargetOwnership, ExecutionOwnershipAudit, BindingAdmissionAudit, ExecutionPreview,
+    ExecutionIdempotency, JobApprovalSnapshot, LocalExecutionReadiness, CollectionWorkerLease)

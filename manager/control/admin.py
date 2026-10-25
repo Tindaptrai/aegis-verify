@@ -45,7 +45,10 @@ class ReleaseAdmin(OwnerAdmin):
 class JobAdmin(OwnerAdmin):
     list_display = ("id", "device", "execution_state", "collection_state", "error_code")
     actions = ("approve", "cancel", "reconcile")
-    readonly_fields = ("id", "execution_state", "collection_state", "report", "error_code", "payload_sha256", "envelope", "receipt", "receipt_bytes", "approval_id", "approved_generation", "approved_wazuh_agent_id", "evaluation_bindings", "created_at", "started_authorized_at")
+    readonly_fields = ("id", "execution_state", "collection_state", "report", "error_code", "payload_sha256", "envelope", "receipt", "receipt_bytes", "approval_id", "approved_generation", "approved_wazuh_agent_id", "evaluation_bindings", "created_at", "started_authorized_at",
+        "protocol_family", "binding", "approval_snapshot", "preview", "envelope_bytes", "signed_payload_bytes", "job_sha256",
+        "start_request_id", "start_request_bytes", "start_request_sha256", "start_ack_bytes", "terminal_receipt_id",
+        "terminal_receipt_bytes", "receipt_ack_bytes", "finished_at")
     def get_readonly_fields(self, request, obj=None):
         if obj and obj.execution_state != "draft": return tuple(f.name for f in self.model._meta.fields)
         return self.readonly_fields
@@ -72,3 +75,20 @@ class AuditAdmin(OwnerAdmin):
     def has_add_permission(self, request): return False
     def has_change_permission(self, request, obj=None): return False
     readonly_fields = ("created_at", "actor", "action", "job")
+
+
+from .execution_models import (DeviceExecutionBinding, RegisteredExecutionConnection, JobApprovalSnapshot,
+    ExecutionPreview, ExecutionIdempotency, ExecutionTargetOwnership, ExecutionOwnershipAudit,
+    BindingAdmissionAudit, LocalExecutionReadiness, CollectionWorkerLease)
+
+
+class ExecutionAuthorityAdmin(OwnerAdmin):
+    def has_add_permission(self, request): return False
+    def has_change_permission(self, request, obj=None): return False
+    def get_readonly_fields(self, request, obj=None): return tuple(f.name for f in self.model._meta.fields)
+
+
+for authority in (DeviceExecutionBinding, RegisteredExecutionConnection, JobApprovalSnapshot,
+                  ExecutionPreview, ExecutionIdempotency, ExecutionTargetOwnership, ExecutionOwnershipAudit,
+                  BindingAdmissionAudit, LocalExecutionReadiness, CollectionWorkerLease):
+    admin.site.register(authority, ExecutionAuthorityAdmin)
