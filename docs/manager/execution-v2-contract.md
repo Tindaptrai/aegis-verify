@@ -215,3 +215,86 @@ only generated public verification material and invokes production Verify. It
 never executes payloads or reads private signing keys. Build the connection tests
 first; AEGIS_CONNECTION_TEST_EXE may select a published harness binary. Generated
 test keys/certificates remain temporary and are never committed.
+
+## Local readiness and private worker integration
+
+The supported execution build is exactly paired Windows x64 agent `0.3.0`.
+The version is only a capability gate: current enabled binding, verified identity,
+matching installed grant/profile/actual artifact hashes, reviewed mapping and
+ownership, fresh local presence/report and private worker/source health are all
+required. Linux remains presence-only. Execution rejects legacy environment
+syntax containing dots without changing the enrolled environment. Public DTOs
+show at most eight distinct blocking codes; further failures become visible as
+earlier failures are resolved. A readiness acknowledgment accepts a report, not
+its claim of Ready. Local reports/presence and worker leases expire beyond30s;
+successful source probes expire beyond60s, including during slow source I/O.
+
+Connection registration is a local service operation requiring fresh
+`manage_connections`, AccountMutationLock then DispatchLock, and global idle:
+`register_execution_connection(actor, *, connection_id=None, expected_revision,
+config_path, output_root)`. Initial ID/revision are both null; updates require an
+explicit existing ID and expected current revision. Revisions are append-only.
+Migration0008 adds private `output_root_path`; historical blank paths fail closed
+until an explicitly reviewed new revision. Resolution uses exact ID/revision and
+rechecks protected config bytes and the validated output-root fingerprint
+`SHA256(os.path.normcase(str(root)).encode())`. Neither path nor hash is public.
+
+The worker's optional `--execution-connection <uuid> --execution-revision <int>`
+selects registration identity; it cannot be combined with `--config`.
+`--output-root` must match the registered private root. While holding the existing
+OS worker lock, independent keepalive and source loops run; keepalive refreshes
+every5s and never advances source success time. All current enabled reviewed
+binding scopes for that exact revision must pass one <=50s bounded source round.
+The probe uses the existing verified HTTPS transport, a non-scroll size0 search,
+and rejects failed/incomplete/timed-out shards. Zero hits can be healthy. No
+binding scope, unknown status, drift or failed round blocks execution. Restart
+does not reclaim durable `collecting` state. The explicit v2 collection call is
+`process_one(connection, root, settle_seconds=..., execution_connection=registered)`;
+until the Task5 dispatcher implements that kwarg the configured v2 worker stops
+closed. Legacy positional collection calls retain their existing behavior.
+
+Local loading uses explicit
+`ExecutionProfile.Load(profilePath, grantPath, signingPublicKeyPath, identity)`;
+there is no sibling/path/key discovery or key from a wire response. Active assets
+must be immutable to the service identity and ordinary users. Writable identity
+ACL helpers do not establish executable-cache trust. `LoadSigningKey(path,grant)`
+returns a caller-owned RSA handle only after checking that same protected file and
+SHA256(SPKI DER) pin. `Check(grant)` reads actual artifacts and the per-device
+study/kit; `CheckBeforeLaunch(job,grant,clock,nowMonotonic)` repeats checks and
+requires the entire time interval inside `[not_before,expires_at)`.
+
+This built-in provider accepts only raw SCN-001 0.1.0 Git-blob scenario bytes:
+887 LF bytes, SHA256
+`4f00335ddd0e39979d90852122642b945faa03ba50d7e9189fe282662bad84a9`.
+The actual bytes must match both this supported hash and the reviewed grant.
+The current Windows checkout may be CRLF because the scenario has no EOL
+attribute; provision the canonical Git blob rather than silently converting at
+runtime. No scenario ground truth is edited. Existing Python `verify_study`
+validates YAML/fingerprint and profile semantics during reviewed per-device
+provisioning. Managed preflight checks the fixed supported raw scenario, closed
+study/kit records, native/canonical paths, exact ASCII/LF payload, all kit asset
+pins and the reviewed assertion predicates/correlation; health does not verify
+remote rule application.
+
+Native preflight reads only service status and the two enabled Operational
+channels with prior Sysmon1/PowerShell4104, under `NT SERVICE\AegisAgent`, and
+checks Windows/x64/PowerShell5.1. It changes no service, ACL, channel or policy.
+Effective execution-policy proof is deliberately unknown in Task3's native
+facts implementation, so it returns `local_not_ready`. Task4 must complete the
+contained native policy proof seam; no uncontained helper or permissive fallback
+is supplied, and this intermediate build cannot honestly advertise local Ready.
+
+`ExecutionClock` is thread-safe. `MonotonicNow` is a TimeSpan from a private
+Stopwatch origin; the same clock instance supplies exchange timestamps and launch
+checks. `Observe(serverTime,sentUtc,sentMonotonic,receivedMonotonic)` is only for a
+decoded authenticated acknowledgment. The second-precision server interval and
+measured round trip bound absolute offset; uncertainty then grows by the *full*
+elapsed monotonic duration plus the largest observed UTC/monotonic discrepancy.
+No oscillator drift assumption is made. Bound >5s, age >15s, negative/out-of-order
+monotonic input or clock jumps fail closed; a jump cannot be forgotten without a
+new authenticated observation. `TryGetBounds(now,out ExecutionTimeBounds)` and
+`IsCertain(now)` use the same interval. Certainty is intentionally short, so
+Task4 must refresh immediately before lease/start/native creation when needed
+and republish readiness after the initial clock acknowledgment. No NTP changes
+or physical metrology claims are implied. Readiness/probe/receipt creates no
+events, completeness declaration, evidence conclusion or assurance upgrade.

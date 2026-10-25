@@ -50,6 +50,7 @@ class RegisteredExecutionConnection(ImmutableRecord):
     config_path = models.TextField()
     config_sha256 = models.CharField(max_length=64)
     output_root_fingerprint = models.CharField(max_length=64)
+    output_root_path = models.TextField(blank=True, default='')
     reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     reviewed_at = models.DateTimeField(default=timezone.now)
     class Meta:

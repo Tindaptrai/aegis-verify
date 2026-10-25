@@ -14,6 +14,7 @@ internal static partial class Program
         StateTests();
         ProtocolTests();
         ExecutionProtocolTests();
+        ExecutionPreflightTests();
         TransportTests();
         NetworkTests();
         LoopTests();

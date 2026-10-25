@@ -74,11 +74,17 @@ class ExecutionApiTests(ExecutionCase):
 
     def test_verified_readiness_fails_closed_and_wrong_certificate_never_looks_up_job(self):
         headers=self.certificate_headers()
-        request=asdict(self.poll)|dict(installation_profile_sha256='c'*64,artifact_set_sha256=self.binding.artifact_set_sha256,
+        request=asdict(self.poll)|dict(installation_profile_sha256='d'*64,artifact_set_sha256=self.binding.artifact_set_sha256,
             ready=True,blocking_codes=[])
         client=Client()
         response=client.post('/agent/v2/execution/readiness',canonical_bytes(request),content_type='application/json',**headers)
-        self.assertEqual((response.status_code,response.json()),(503,{'error':{'code':'temporarily_unavailable'}}))
+        self.assertEqual(response.status_code,200)
+        self.assertTrue(response.json()['accepted'])
+        # Intake acknowledgment is not Ready: the reported profile drifts from
+        # the binding and this synthetic fixture has no healthy private worker.
+        result=self.service.execution_readiness(str(self.device.pk),now=self.now)
+        self.assertFalse(result.ready)
+        self.assertIn('profile_mismatch',result.blocking_codes)
         request=asdict(self.poll)|dict(start_request_id=str(self.device.pk),job_sha256='a'*64)
         from control.models import Device
         Device.objects.filter(pk=self.device.pk).update(certificate_sha256='d'*64)

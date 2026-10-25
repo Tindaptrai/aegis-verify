@@ -85,7 +85,10 @@ class HttpsTransport:
 
     def request(self, method, path, body):
         initial = f'/{self._config.index}/_search?scroll=1m'
-        if (method, path) not in {('POST', initial), ('POST', '/_search/scroll'), ('DELETE', '/_search/scroll')}:
+        health = f'/{self._config.index}/_search'
+        if (method, path) not in {('POST', initial), ('POST', health), ('POST', '/_search/scroll'), ('DELETE', '/_search/scroll')}:
+            raise LiveError('unsupported_request')
+        if path == health and (type(body) is not dict or body.get('size') != 0):
             raise LiveError('unsupported_request')
         auth = base64.b64encode(f'{self._config.username}:{self._config.password}'.encode()).decode()
         request = Request(self._config.endpoint.rstrip('/') + path,
@@ -121,6 +124,39 @@ def _json(raw):
         return decode_document(raw)
     except WazuhParseError:
         raise LiveError('invalid_response') from None
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    healthy: bool
+    code: str
+
+    def __post_init__(self):
+        if type(self.healthy) is not bool or self.code != ('healthy' if self.healthy else 'source_unavailable'):
+            raise ValueError('invalid_probe_result')
+
+
+def probe(config: Config, *, transport=None) -> ProbeResult:
+    """One bounded authenticated index query; no scroll, files, events or verdict."""
+    try:
+        if type(config) is not Config:
+            return ProbeResult(False, 'source_unavailable')
+        transport = transport or HttpsTransport(config)
+        body = {'size': 0, 'timeout': '5s', 'track_total_hits': False,
+                'query': {'bool': {'filter': [
+                    {'term': {'agent.id': config.agent_id}},
+                    {'range': {'timestamp': {'gte': config.start, 'lt': config.end}}}]}}}
+        doc = _json(transport.request('POST', f'/{config.index}/_search', body))
+        shards = doc.get('_shards')
+        if (doc.get('timed_out') is not False or doc.get('terminated_early', False) is not False
+                or type(shards) is not dict
+                or any(type(shards.get(k)) is not int for k in ('failed', 'successful', 'total'))
+                or shards['failed'] != 0 or shards['total'] <= 0 or shards['successful'] != shards['total']
+                or type(doc.get('hits')) is not dict or doc['hits'].get('hits') != []):
+            return ProbeResult(False, 'source_unavailable')
+        return ProbeResult(True, 'healthy')
+    except (LiveError, ValueError, TypeError, AttributeError, OSError):
+        return ProbeResult(False, 'source_unavailable')
 
 
 def _write(path, raw):
