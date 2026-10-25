@@ -29,6 +29,22 @@ public static class ExecutionPreflight
     public const string ReviewedScenarioSha256="4f00335ddd0e39979d90852122642b945faa03ba50d7e9189fe282662bad84a9";
     private static readonly byte[] Payload = Encoding.ASCII.GetBytes("$facts = @{ Host = $env:COMPUTERNAME; User = $env:USERNAME; Pid = $PID }\nWrite-Output 'AEGIS_SAFE_DEMO_V1'\nWrite-Output ('AEGIS_PID=' + $facts.Pid)\n");
     public static LocalReadiness Check(ExecutionGrant grant) => Check(grant,new NativeExecutionFacts());
+    internal static ExecutionConfigurationStatus CheckConfiguration(ExecutionGrant grant, IExecutionFacts facts)
+    {
+        var codes = ImmutableArray.CreateBuilder<string>();
+        if (!facts.Supported) codes.Add("unsupported_platform");
+        try
+        {
+            ExecutionProfile.ValidateGrant(grant);
+            using var certificate = X509Certificate2.CreateFromPem(grant.Identity.CertificatePem!);
+            if (facts.ExecutionBuildVersion != "0.3.0" || grant.Profile.ExpectedComputerName != facts.ComputerName ||
+                DateTimeOffset.UtcNow < certificate.NotBefore.ToUniversalTime() || DateTimeOffset.UtcNow >= certificate.NotAfter.ToUniversalTime()) codes.Add("local_not_ready");
+        }
+        catch (Exception e) when (SafeFailure(e)) { codes.Add("profile_mismatch"); }
+        try { CheckArtifacts(grant, facts); facts.ValidateRunParent(grant.Profile.RunDirectory); }
+        catch (Exception e) when (SafeFailure(e)) { codes.Add("artifact_mismatch"); }
+        return new(1, codes.Count == 0, "not_evaluated", codes.Distinct().ToImmutableArray());
+    }
     internal static LocalReadiness Check(ExecutionGrant grant, IExecutionFacts facts)
     {
         var codes = ImmutableArray.CreateBuilder<string>();
@@ -65,10 +81,13 @@ public static class ExecutionPreflight
     public static LocalReadiness CheckBeforeLaunch(SignedJob job, ExecutionGrant grant, ExecutionClock clock, TimeSpan nowMonotonic)
         => CheckBeforeLaunch(job,grant,clock,nowMonotonic,new NativeExecutionFacts());
     internal static LocalReadiness CheckBeforeLaunch(SignedJob job, ExecutionGrant grant, ExecutionClock clock, TimeSpan nowMonotonic, IExecutionFacts facts)
+        => CheckBeforeLaunch(job, grant, clock, () => nowMonotonic, facts);
+    internal static LocalReadiness CheckBeforeLaunch(SignedJob job, ExecutionGrant grant, ExecutionClock clock, Func<TimeSpan> nowMonotonic, IExecutionFacts facts)
     {
         var result = Check(grant,facts);
         var codes = result.BlockingCodes.ToBuilder();
-        if (!clock.TryGetBounds(nowMonotonic,out var bounds)) codes.Add("clock_uncertain");
+        // Sample after potentially slow artifact/policy checks, never before them.
+        if (!clock.TryGetBounds(nowMonotonic(),out var bounds)) codes.Add("clock_uncertain");
         else
         {
             try
@@ -210,7 +229,7 @@ public static class ExecutionPreflight
     }
 }
 
-internal sealed class NativeExecutionFacts : IExecutionFacts
+internal sealed class NativeExecutionFacts(Func<ExecutionGrant, bool>? policyProof = null) : IExecutionFacts
 {
     public bool Supported => OperatingSystem.IsWindowsVersionAtLeast(10) && RuntimeInformation.OSArchitecture==Architecture.X64 && Environment.Is64BitProcess;
     public string ExecutionBuildVersion => Protocol.AgentVersion;
@@ -236,19 +255,22 @@ internal sealed class NativeExecutionFacts : IExecutionFacts
     }
     // Task 4's contained native kernel must supply effective policy proof. No
     // uncontained helper, installer token, policy override or permissive fallback.
-    public bool PolicyAllows(ExecutionGrant grant) => false;
+    public bool PolicyAllows(ExecutionGrant grant) => ServiceIdentity && policyProof?.Invoke(grant) == true;
     public bool TelemetryReadable()
     {
         if(!OperatingSystem.IsWindows() || !ServiceIdentity)return false;
         using(var engine=Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SOFTWARE\Microsoft\PowerShell\3\PowerShellEngine",false))
             if(engine?.GetValue("PowerShellVersion") is not string version || !version.StartsWith("5.1.",StringComparison.Ordinal) || !File.Exists(PowerShellPath))return false;
         PrivatePaths.NoLinks(PowerShellPath);
+        if(!(ServiceRunning("Sysmon") || ServiceRunning("Sysmon64")) || !ServiceRunning("WazuhSvc"))return false;
+        return ReadChannel("Microsoft-Windows-Sysmon/Operational",1) && ReadChannel("Microsoft-Windows-PowerShell/Operational",4104);
+    }
+    // Internal native fixture seam: production callers above retain real vendor names.
+    internal static bool ServiceRunning(string name)
+    {
+        if(!OperatingSystem.IsWindows())return false;
         var manager=OpenSCManagerW(null,null,1); if(manager==0)return false;
-        try
-        {
-            if(!(Running(manager,"Sysmon") || Running(manager,"Sysmon64")) || !Running(manager,"WazuhSvc"))return false;
-            return ReadChannel("Microsoft-Windows-Sysmon/Operational",1) && ReadChannel("Microsoft-Windows-PowerShell/Operational",4104);
-        }
+        try { return Running(manager,name); }
         finally { CloseServiceHandle(manager); }
     }
     private static bool Running(nint manager,string name)
@@ -257,8 +279,9 @@ internal sealed class NativeExecutionFacts : IExecutionFacts
         try { return QueryServiceStatus(service,out var status) && status.CurrentState==4; }
         finally { CloseServiceHandle(service); }
     }
-    private static bool ReadChannel(string channel,int eventId)
+    internal static bool ReadChannel(string channel,int eventId)
     {
+        if(!OperatingSystem.IsWindows())return false;
         var config=EvtOpenChannelConfig(0,channel,0); if(config==0)return false;
         try
         {

@@ -149,9 +149,10 @@ internal static partial class Program
         public bool Telemetry {get;set;}=true;
         public bool Policy {get;set;}=true;
         public Dictionary<string,byte[]> Files {get;}=new(StringComparer.Ordinal);
+        public Action? BeforeRead { get; set; }
         public bool TelemetryReadable() => Telemetry;
         public bool PolicyAllows(ExecutionGrant grant) => Policy;
-        public byte[] ReadImmutable(string path) => Files.TryGetValue(path,out var raw) ? (byte[])raw.Clone() : throw new ConnectionException("execution_invalid");
+        public byte[] ReadImmutable(string path) { BeforeRead?.Invoke(); return Files.TryGetValue(path,out var raw) ? (byte[])raw.Clone() : throw new ConnectionException("execution_invalid"); }
         public void ValidateRunParent(string path) { }
     }
     private static (ExecutionGrant,SyntheticExecutionFacts) PreflightFixture(bool supportedScenario=true)

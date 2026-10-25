@@ -37,6 +37,12 @@ public sealed class StateStore : IDisposable
     }
     private static readonly string EmptyStatus = JsonSerializer.Serialize(new { device_id = (string?)null, environment_id = (string?)null, generation = (int?)null, certificate_expires_at = (string?)null, manager_origin = (string?)null, last_acknowledged_at = (string?)null, state = "unconfigured" });
     public static StateStore Acquire(string directory) => Acquire(directory, new DirectoryDurability());
+    internal static IdentityState ReadExisting(string directory)
+    {
+        if (!Path.IsPathFullyQualified(directory)) throw new ConnectionException("state_invalid");
+        using var reader = new StateStore(Path.GetFullPath(directory), null, new DirectoryDurability());
+        return reader.Read() ?? throw new ConnectionException("identity_missing");
+    }
     internal static StateStore Acquire(string directory, IDirectoryDurability durability)
     {
         FileStream? held = null;
