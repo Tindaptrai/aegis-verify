@@ -188,6 +188,26 @@ class NginxMutualTlsTests(LiveServerTestCase):
                  quote(self.client_cert.public_bytes(serialization.Encoding.PEM).decode(), safe="")}
         self.assertEqual(self._request(headers=spoof), 403)
 
+    def test_execution_exact_routes_require_verified_certificate(self):
+        spoof={'X-Aegis-Client-Verify':'SUCCESS','X-Aegis-Client-Cert':quote(self.client_cert.public_bytes(serialization.Encoding.PEM).decode(),safe='')}
+        routes=('/agent/v2/execution/readiness','/agent/v2/execution/poll',
+                '/agent/v2/execution/receipt','/agent/v2/execution/jobs/a1111111-1111-4111-8111-111111111111/start')
+        for path in routes:
+            with self.subTest(path=path):
+                from control.execution_contracts import PROTOCOL
+                identity='a1111111-1111-4111-8111-111111111111'
+                body=dict(protocol=PROTOCOL,device_id=identity,generation=1,binding_id=identity,binding_revision=1)
+                if path.endswith('readiness'):
+                    body.update(installation_profile_sha256='a'*64,artifact_set_sha256='b'*64,ready=True,blocking_codes=[])
+                elif path.endswith('receipt'):
+                    body.update(receipt_id=identity,job_id=identity,job_sha256='c'*64,state='execution_unknown',started_at=None,
+                        finished_at='2026-10-25T00:00:00Z',exit_code=None,cleanup_succeeded=False)
+                elif path.endswith('start'):
+                    body.update(start_request_id=identity,job_sha256='c'*64)
+                self.assertEqual(self._request(path=path,body=body,headers=spoof),403)
+                self.assertEqual(self._request(self.other_path,self.other_key_path,path=path,body=body,headers=spoof),403)
+                self.assertEqual(self._request(self.client_path,self.client_key_path,path=path+'/',body=body),404)
+
     def test_valid_ca_but_unenrolled_certificate_is_denied(self):
         self.assertEqual(self._request(self.other_path, self.other_key_path), 403)
 

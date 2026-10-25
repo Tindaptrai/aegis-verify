@@ -10,6 +10,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .identity import authenticate_device
 from .jobs import claim_job, lock_dispatch, audit, HEX
 from .models import Job, Device, AuditEntry
+from .execution_ownership import lock_device_ownership, guard_execution_owner
 
 
 def pairs(items):
@@ -50,9 +51,11 @@ def endpoint(request, job_id=None, operation="poll"):
             return JsonResponse(job.envelope) if job else HttpResponse(status=204)
         with transaction.atomic():
             lock_dispatch()
+            lock_device_ownership(device.pk)
             device = Device.objects.select_for_update().get(pk=device.pk)
             if device.revoked or device.archived_at is not None: raise PermissionError()
-            try: job = Job.objects.select_for_update().select_related("release").get(pk=job_id,device=device)
+            if operation == 'start': guard_execution_owner(device)
+            try: job = Job.objects.select_for_update().select_related("release").get(pk=job_id,device=device,protocol_family='legacy_v1')
             except Job.DoesNotExist: raise PermissionError() from None
             if job.approved_generation != device.generation: raise PermissionError()
             if operation == "start":

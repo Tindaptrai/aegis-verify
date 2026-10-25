@@ -224,3 +224,33 @@ class CollectionWorkerLease(models.Model):
     health_code = models.CharField(max_length=32)
     source_probe_status = models.CharField(max_length=32, default='unknown')
     source_probe_succeeded_at = models.DateTimeField(null=True)
+
+
+class ExecutionOwnerDecision(ImmutableRecord):
+    """Owner-reviewed operational references; never detection evidence claims."""
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    action = models.CharField(max_length=32)
+    ownership = models.ForeignKey(ExecutionTargetOwnership, on_delete=models.PROTECT, null=True)
+    ownership_revision = models.PositiveIntegerField(null=True)
+    job = models.ForeignKey('control.Job', on_delete=models.PROTECT, null=True)
+    reason = models.CharField(max_length=500)
+    evidence_refs = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def validate_authority(self):
+        import unicodedata
+        def bounded(value, limit):
+            return (type(value) is str and 1 <= len(value) <= limit and value.strip()
+                    and not any(unicodedata.category(char).startswith('C') for char in value))
+        if not bounded(self.reason, 500) or type(self.evidence_refs) is not list or not 1 <= len(self.evidence_refs) <= 32:
+            raise ValueError('Invalid owner decision')
+        if not all(bounded(ref, 256) for ref in self.evidence_refs):
+            raise ValueError('Invalid owner decision')
+        if self.action == 'reconciliation':
+            if self.job_id is None or self.ownership_id is not None or self.ownership_revision is not None:
+                raise ValueError('Invalid owner decision')
+        elif self.action in ('initial_ownership', 'ownership_transfer'):
+            if self.job_id is not None or self.ownership_id is None or type(self.ownership_revision) is not int or not 1 <= self.ownership_revision <= 2147483647:
+                raise ValueError('Invalid owner decision')
+        else:
+            raise ValueError('Invalid owner decision')

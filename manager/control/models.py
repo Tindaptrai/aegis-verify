@@ -163,4 +163,4 @@ class DispatchLock(models.Model):
 # Explicit registration keeps existing v1 models and their services intact.
 from .execution_models import (DeviceExecutionBinding, RegisteredExecutionConnection,
     ExecutionTargetOwnership, ExecutionOwnershipAudit, BindingAdmissionAudit, ExecutionPreview,
-    ExecutionIdempotency, JobApprovalSnapshot, LocalExecutionReadiness, CollectionWorkerLease)
+    ExecutionIdempotency, JobApprovalSnapshot, LocalExecutionReadiness, CollectionWorkerLease, ExecutionOwnerDecision)

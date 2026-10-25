@@ -11,11 +11,24 @@ from django.utils import timezone
 
 from control.admin import DeviceAdmin
 from control.models import Device, Job, RunnerRelease
+from control.models import AuditEntry
 from devices.models import EnrollmentAudit, PairingCode
 from .helpers import PairingCase, component
 
 
 class ArchiveTests(PairingCase):
+    def test_v2_cancelled_lease_requires_owner_reconciliation_before_archive(self):
+        from devices.archive import archive_block_reason
+        device=Device.objects.create(environment_id='synthetic',certificate_sha256='b'*64,connection_kind='paired_presence')
+        release=RunnerRelease.objects.create()
+        now=timezone.now()
+        job=Job.objects.create(device=device,release=release,protocol_family='windows_execution_v2',execution_state='cancelled',
+            not_before=now,expires_at=now,collection_start=now,collection_end=now)
+        AuditEntry.objects.create(job=job,action='leased',actor=str(device.pk))
+        self.assertEqual(archive_block_reason(device),'device_busy')
+        job.collection_state='reconciled'; job.save(update_fields=['collection_state'])
+        self.assertIsNone(archive_block_reason(device))
+
     def enrolled(self):
         self.initialize()
         return component(self, "services").enroll_device(self.enrollment())
@@ -214,7 +227,9 @@ class ArchiveTests(PairingCase):
         archive_device(actor=self.admin, device_id=device.pk)
         expected = Device.objects.values().get(pk=device.pk)
         stale.hostname = "synthetic edited label"
-        DeviceAdmin(Device, AdminSite()).save_model(RequestFactory().post("/"), stale, None, True)
+        request=RequestFactory().post('/')
+        request.user=self.owner
+        DeviceAdmin(Device, AdminSite()).save_model(request, stale, None, True)
         device.refresh_from_db()
         self.assertEqual(device.last_heartbeat_at, final_heartbeat)
         self.assertEqual(device.archived_at, expected["archived_at"])

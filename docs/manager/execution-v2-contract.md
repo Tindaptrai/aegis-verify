@@ -44,6 +44,11 @@ collection starts no later than not-before, ends at least timeout seconds after
 expiry, and spans no more than 900 seconds. Preview services must derive the exact
 approved T0 windows rather than accepting client times.
 
+The human `JobDTO` response alone permits up to 4,194,304 bytes, including its
+opaque canonical report. Its depth, finite-number and closed execution-field
+rules remain unchanged. This response allowance does not widen any human or
+machine request, decoded signed payload, envelope, or other execution record.
+
 Receipt states are `succeeded,failed,execution_unknown`. Nullable start and int32
 exit code preserve unobserved values; cleanup is a strict bool. Observed start
 cannot follow finish. Succeeded requires observed start, exit zero and cleanup
@@ -127,7 +132,8 @@ for initial revision (service enforces current revision). `cleanup_policy` is
 `run_binding=unknown`, `collection_assurance=unknown` are constants. Private
 connection path/config digest and private file paths never enter PublicSummary.
 Evaluation state is `not_evaluated,evaluated`; the report remains the unchanged
-canonical JSON object or null, recursively frozen on decode. Collection states
+canonical JSON object or null, recursively frozen on decode within the separate
+4 MiB JobDTO response limit. Collection states
 remain pending/collecting/evaluated/empty/failed/reconciled. Receipt and health
 never manufacture detection evidence or declare collection complete.
 

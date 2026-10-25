@@ -48,6 +48,23 @@ def snapshot_data():
 
 
 class ExecutionContractTests(SimpleTestCase):
+    def test_human_job_report_has_separate_4mib_limit_without_widening_requests(self):
+        from control.execution_contracts import decode_contract, public_summary, canonical_bytes, parse_execution_request
+        snapshot=decode_contract('JobApprovalSnapshotData',raw(snapshot_data()))
+        data=dict(job_id=UUID,summary=asdict(public_summary(snapshot)),execution_state='succeeded',
+            collection_state='evaluated',evaluation_state='evaluated',created_at=WINDOWS['not_before'],
+            started_authorized_at=None,finished_at=None,error_code=None,
+            report={'synthetic_transport_padding':'x'*131072})
+        encoded=raw(data)
+        parsed=decode_contract('JobDTO',encoded)
+        self.assertEqual(json.loads(canonical_bytes(parsed)),data)
+        at_limit=encoded+b' '*(4194304-len(encoded))
+        self.assertEqual(decode_contract('JobDTO',at_limit),parsed)
+        with self.assertRaises(ValueError): decode_contract('JobDTO',at_limit+b' ')
+        request=raw(dict(preview_id=UUID,preview_sha256=DIGEST,idempotency_key=UUID))
+        with self.assertRaises(ValueError): parse_execution_request('approve',request+b' '*(65537-len(request)))
+        with self.assertRaises(ValueError): decode_contract('SignedJob',raw(job_data())+b' '*65536)
+
     def test_snapshot_collection_window_covers_release_timeout_before_freeze_or_projection(self):
         from dataclasses import replace
         from control.execution_contracts import decode_contract, snapshot_bytes, public_summary, canonical_bytes

@@ -15,6 +15,7 @@ KEY_ID = 'manager-execution-v2'
 PROVIDER_ID = 'reviewed-scn001-windows/1'
 REQUEST_LIMIT = 65536
 ENVELOPE_LIMIT = 98304
+JOB_RESPONSE_LIMIT = 4 * 1024 * 1024
 LOCAL_CODES = frozenset(('profile_mismatch', 'artifact_mismatch', 'clock_uncertain', 'local_not_ready', 'unsupported_platform'))
 BLOCKING_CODES = LOCAL_CODES | frozenset(('upgrade_required', 'binding_missing', 'binding_disabled', 'identity_unavailable',
     'environment_invalid', 'mapping_missing', 'ownership_conflict', 'local_stale', 'worker_unavailable',
@@ -541,7 +542,8 @@ CONTRACTS = {cls.__name__: cls for cls in tuple(globals().values()) if isinstanc
 
 
 def decode_contract(kind: str, raw: bytes):
-    try: return _convert(CONTRACTS[kind], load_json(raw, ENVELOPE_LIMIT if kind == 'Envelope' else REQUEST_LIMIT))
+    limit = JOB_RESPONSE_LIMIT if kind == 'JobDTO' else ENVELOPE_LIMIT if kind == 'Envelope' else REQUEST_LIMIT
+    try: return _convert(CONTRACTS[kind], load_json(raw, limit))
     except (KeyError, TypeError, AttributeError, ValueError): raise ValueError('invalid_request') from None
 
 

@@ -73,6 +73,23 @@ server {
         proxy_redirect off;
     }
 
+    # Only exact closed execution paths receive verified identity headers.
+    location ~ "^/agent/v2/execution/(readiness|poll|receipt|jobs/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/start)$" {
+        if ($ssl_client_verify != SUCCESS) { return 403; }
+        client_max_body_size 64k;
+        proxy_pass http://localhost:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Aegis-Client-Verify $ssl_client_verify;
+        proxy_set_header X-Aegis-Client-Cert $ssl_client_escaped_cert;
+        proxy_set_header X-Aegis-Peer-IP "";
+        proxy_redirect off;
+    }
+    # The regex above wins over this prefix for exact supported paths only.
+    location /agent/v2/execution/ { return 404; }
+
     # optional at server level permits browser login without an agent cert;
     # this location requires nginx chain verification before proxying.
     location ^~ /agent/v1/ {
