@@ -1,6 +1,7 @@
 # Thiết kế quản lý máy: xóa khỏi danh sách và cập nhật IP
 
-**Ngày:** 25/10/2026. **Trạng thái:** bản đề xuất để owner duyệt; chưa cho phép triển khai.
+**Ngày:** 25/10/2026. **Trạng thái:** owner duyệt và yêu cầu triển khai trong chat
+ngày 25/10/2026; issue #157. Nâng cấp VM và merge vẫn cần human/lab review.
 
 **Nền mã đối chiếu:** `26ea93388500d850d092003e64dd12a356efdc00`.
 **Phạm vi tài liệu:** thiết kế chức năng và tiêu chí nghiệm thu. Chưa sửa sản phẩm,
@@ -411,5 +412,5 @@ migration/drop trường chứa lịch sử mới phát sinh.
   phải được nâng trước khi ghép nối mới bằng package mới.
 - Tiếp tục dùng quyền manage_devices; backend kiểm tra lại khi ghi dữ liệu.
 
-**Điểm dừng:** chờ owner duyệt hoặc sửa thiết kế. Sau đó mới viết implementation
-plan; duyệt thiết kế không tự cho phép triển khai lên các VM.
+**Điểm dừng vận hành:** owner đã cho phép triển khai mã theo thiết kế này. Thực
+hiện implementation plan của issue #157; không tự nâng cấp các VM hoặc merge.
