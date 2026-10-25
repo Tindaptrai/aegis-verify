@@ -90,6 +90,20 @@ def _pinned(path, digest):
     return raw
 
 
+def validate_collection_spec(spec):
+    """Validate pinned inputs before a v2 claim, without a verdict/source request."""
+    from aegis_verify.scenario_loader import parse_scenario_yaml
+    from aegis_verify.validation._inputs import validate_inputs
+    context = _scope(spec)
+    scenario_raw = _pinned(spec.scenario_path, spec.scenario_sha256)
+    profile_raw = _pinned(spec.profile_path, spec.profile_sha256)
+    scenario = parse_scenario_yaml(scenario_raw.decode('utf-8'), source_name='<approved-scenario>')
+    profile = EvaluationProfile.model_validate(decode_config(profile_raw, stage='profile'))
+    if profile.scenario_id != 'SCN-001': raise ValueError
+    # Input validation only; an empty tuple is not collected evidence or a verdict.
+    validate_inputs(scenario, (), profile, context)
+
+
 def _json_bytes(value):
     return json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(',', ':')).encode('utf-8')
 

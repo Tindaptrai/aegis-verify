@@ -127,13 +127,15 @@ def _approved_payload(job):
     return payload
 
 
-def process_one(connection, output_root, *, now=None, settle_seconds=30, transport=None):
-    """Handle at most one approved collection; never reclaim a durable claim."""
+def process_one(connection, output_root, *, now=None, settle_seconds=30, transport=None,
+                execution_connection=None):
+    """Collect one job in explicit v1 or registered-v2 mode; never reclaim a claim."""
     if type(settle_seconds) is not int or not 0 <= settle_seconds <= 300:
         raise ValueError('invalid_settle_seconds')
     root = validate_output_root(output_root)
     now = now or timezone.now()
     invalid = False
+    spec = None
     with transaction.atomic():
         lock_dispatch()
         if Job.objects.filter(collection_state__in=('collecting','failed')).exists():
@@ -141,6 +143,36 @@ def process_one(connection, output_root, *, now=None, settle_seconds=30, transpo
         job = None
         for candidate in Job.objects.select_for_update().select_related('release').filter(
                 execution_state='succeeded',collection_state='pending').order_by('created_at'):
+            if candidate.protocol_family == 'windows_execution_v2':
+                if execution_connection is None:
+                    continue
+                # Routing uses only immutable historical association. Never infer a
+                # connection identity from credentials or mutate another source's job.
+                binding = candidate.binding
+                if binding is not None and (binding.connection_id,binding.connection_revision) != (
+                        execution_connection.connection_id,execution_connection.revision):
+                    continue
+                try:
+                    from .execution_collection import approved_execution_collection, validate_execution_worker
+                    candidate_spec, registered = approved_execution_collection(candidate)
+                    validate_execution_worker(registered,execution_connection,connection,root)
+                    ready = _stamp(candidate_spec.end) + timedelta(seconds=30) <= now
+                except Exception:
+                    candidate.collection_state,candidate.error_code,candidate.report = 'failed','invalid_approved_job',None
+                    candidate.save(update_fields=['collection_state','error_code','report'])
+                    audit(candidate,'collection_rejected',_root_actor(root))
+                    return True
+                if ready:
+                    job, spec = candidate, candidate_spec
+                    break
+                continue
+            if candidate.protocol_family != 'legacy_v1':
+                candidate.collection_state,candidate.error_code,candidate.report = 'failed','invalid_approved_job',None
+                candidate.save(update_fields=['collection_state','error_code','report'])
+                audit(candidate,'collection_rejected',_root_actor(root))
+                return True
+            if execution_connection is not None:
+                continue
             try:
                 payload = _approved_payload(candidate)
                 ready = _stamp(payload['collection_end']) + timedelta(seconds=settle_seconds) <= now
@@ -159,12 +191,13 @@ def process_one(connection, output_root, *, now=None, settle_seconds=30, transpo
     try:
         if invalid:
             raise ValueError
-        release_pins(job.release)
-        spec = CollectionSpec(job_id=str(job.id),environment_id=payload['environment_id'],
-            wazuh_agent_id=job.approved_wazuh_agent_id,start=payload['collection_start'],
-            end=payload['collection_end'],bindings=tuple(job.evaluation_bindings),
-            scenario_path=Path(job.release.scenario_path),profile_path=Path(job.release.profile_path),
-            scenario_sha256=payload['scenario_sha256'],profile_sha256=payload['profile_sha256'])
+        if spec is None:
+            release_pins(job.release)
+            spec = CollectionSpec(job_id=str(job.id),environment_id=payload['environment_id'],
+                wazuh_agent_id=job.approved_wazuh_agent_id,start=payload['collection_start'],
+                end=payload['collection_end'],bindings=tuple(job.evaluation_bindings),
+                scenario_path=Path(job.release.scenario_path),profile_path=Path(job.release.profile_path),
+                scenario_sha256=payload['scenario_sha256'],profile_sha256=payload['profile_sha256'])
     except Exception:
         state, report, error = 'failed', None, 'invalid_approved_job'
     else:
