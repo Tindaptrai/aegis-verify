@@ -256,12 +256,29 @@ function Invoke-AgentBinaryPromotion([string]$Stage,[string]$Root,[scriptblock]$
         throw
     }
 }
+function Open-AgentStateSnapshot([string]$Path) {
+    Assert-AgentNoLinks $Path
+    # An upgrade validates configuration before stopping the service. A reader
+    # must allow atomic state publication while retaining its old snapshot.
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+    try {
+        if ($stream.Length -le 0 -or $stream.Length -gt 65536) { throw 'state_invalid' }
+        return $stream
+    } catch { $stream.Dispose(); throw }
+}
 function Assert-AgentPinnedConfiguration([string]$State,[string]$Origin,[string]$CaPath) {
     $path = Join-Path $State 'state.json'
     if (!(Test-Path -LiteralPath $path)) { return }
     # The CLI validates the complete bounded snapshot before this comparison.
-    if ((Get-Item -LiteralPath $path).Length -gt 65536) { throw 'state_invalid' }
-    $config = [IO.File]::ReadAllText($path) | ConvertFrom-Json
+    $stream = Open-AgentStateSnapshot $path
+    $reader = $null
+    try {
+        $reader = New-Object IO.StreamReader($stream)
+        $config = $reader.ReadToEnd() | ConvertFrom-Json
+    } finally {
+        if ($reader) { $reader.Dispose() }
+        $stream.Dispose()
+    }
     if ($Origin -and $Origin -cne $config.manager_origin) { throw 'configuration_mismatch' }
     if ($CaPath) {
         Assert-AgentNoLinks $CaPath

@@ -1,6 +1,7 @@
 # Kết nối máy Windows / Ubuntu và tự chạy khi khởi động
 
-Hướng dẫn cho presence agent `0.1.0`, giao thức `2.0`: Windows 11, Windows 10
+Hướng dẫn cho presence agent `0.2.0`: enrollment và legacy heartbeat `2.0`,
+network heartbeat `2.1`. Windows 11, Windows 10
 LTSC/Enterprise còn hỗ trợ, hoặc Windows Server 2019/2022/2025 x64 có SCM và
 PowerShell 5.1; Ubuntu 24.04 LTS x64 có systemd
 là PID 1. Manager chạy Linux theo `docs/manager/FIRST_FLOW_RUNBOOK.md` trong source

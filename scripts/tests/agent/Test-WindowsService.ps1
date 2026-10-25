@@ -24,7 +24,17 @@ function Read-NativeStatus {
     return $value
 }
 function Get-NativeKeyHash {
-    $snapshot = [IO.File]::ReadAllText($stateFile) | ConvertFrom-Json
+    # The service can publish an acknowledgement while this helper checks its
+    # identity. Share deletion so this reader cannot break atomic replacement.
+    $stream = Open-AgentStateSnapshot $stateFile
+    $reader = $null
+    try {
+        $reader = New-Object IO.StreamReader($stream)
+        $snapshot = $reader.ReadToEnd() | ConvertFrom-Json
+    } finally {
+        if ($reader) { $reader.Dispose() }
+        $stream.Dispose()
+    }
     $bytes = [Text.Encoding]::UTF8.GetBytes($snapshot.private_key_pem)
     $hash = [Security.Cryptography.SHA256]::Create()
     try { return [Convert]::ToBase64String($hash.ComputeHash($bytes)) }

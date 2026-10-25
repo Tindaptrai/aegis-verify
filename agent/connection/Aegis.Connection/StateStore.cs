@@ -186,7 +186,12 @@ public sealed class StateStore : IDisposable
             var bytes = JsonSerializer.SerializeToUtf8Bytes(state, Protocol.Json);
             if (bytes.Length > 65536) throw new ConnectionException("state_invalid");
             using (var file = PrivatePaths.CreateFile(temporary)) { file.Write(bytes); file.Flush(true); }
-            File.Move(temporary, StatePath, true);
+            // Windows MoveFileEx replacement can fail with access denied even
+            // when an active status reader grants FILE_SHARE_DELETE. ReplaceFile
+            // preserves atomic publication and the verified destination ACL while
+            // allowing that reader to finish its complete previous snapshot.
+            if (OperatingSystem.IsWindows() && File.Exists(StatePath)) File.Replace(temporary, StatePath, null);
+            else File.Move(temporary, StatePath, true);
             durability.Synchronize(directory);
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { throw new ConnectionException("state_invalid"); }

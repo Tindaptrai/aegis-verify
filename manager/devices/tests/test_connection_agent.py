@@ -61,6 +61,8 @@ class QuietTlsAdapter(BaseHTTPRequestHandler):
         # verified certificate enters the production request identity boundary.
         response = Client().post(self.path, data=self.rfile.read(size), content_type="application/json",
                                  REMOTE_ADDR="127.0.0.1", **headers)
+        if self.path in ("/agent/v2/heartbeat", "/agent/v2/network-heartbeat"):
+            self.server.heartbeat_responses.append(response.status_code)
         self.send_response(response.status_code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(response.content)))
@@ -155,6 +157,19 @@ def assert_native_result(action, result, *, code=None):
         raise AssertionError("Native " + safe_action + " failed" + suffix + "; output withheld")
 
 
+def native_denial_diagnostic(observation, responses):
+    # Only fixed public states and aggregate HTTP counts may enter CI failures.
+    state = observation.get("state")
+    service = observation.get("service_status")
+    if state not in ("enrolled", "identity_denied", "identity_expired", "response_invalid"):
+        state = "withheld"
+    if service not in ("Running", "Stopped", "StartPending", "StopPending", "active", "inactive", "failed", "activating", "absent"):
+        service = "withheld"
+    success, denied = responses.count(200), responses.count(403)
+    return (f"state={state} service={service} heartbeat_200={success} heartbeat_403={denied} "
+            f"other_responses={len(responses) - success - denied}")
+
+
 def native_process_environment(platform, environment):
     # pwsh only adjusts PSModulePath when it launches Windows PowerShell directly.
     # Python inherits Core's paths; let the Windows child rebuild its native paths.
@@ -208,6 +223,14 @@ foreach ($name in @('Get-FileHash', 'Get-Acl', 'Get-CimInstance')) {
 
 
 class NativeDiagnosticsTests(SimpleTestCase):
+    def test_archive_timeout_diagnostic_reports_only_fixed_states_and_response_counts(self):
+        self.assertEqual(native_denial_diagnostic({"state": "enrolled", "service_status": "Stopped"}, [200, 403, 403]),
+                         "state=enrolled service=Stopped heartbeat_200=1 heartbeat_403=2 other_responses=0")
+
+    def test_archive_timeout_diagnostic_withholds_untrusted_values(self):
+        self.assertEqual(native_denial_diagnostic({"state": "private identity", "service_status": "private path"}, [400]),
+                         "state=withheld service=withheld heartbeat_200=0 heartbeat_403=0 other_responses=1")
+
     def result(self, stderr, stdout="", returncode=1):
         return subprocess.CompletedProcess(["synthetic-helper"], returncode, stdout, stderr)
 
@@ -293,6 +316,7 @@ class PublishedConnectionTests(TransactionTestCase):
         context.verify_mode = ssl.CERT_OPTIONAL
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), QuietTlsAdapter)
         self.server.routes = []
+        self.server.heartbeat_responses = []
         self.server.network_supported = True
         self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
@@ -322,7 +346,7 @@ class PublishedConnectionTests(TransactionTestCase):
             if predicate():
                 return
             time.sleep(0.1)
-        self.fail(description)
+        self.fail(description() if callable(description) else description)
 
     def start_loop(self):
         process = subprocess.Popen([str(self.executable), "run", "--state-dir", str(self.state)],
@@ -505,10 +529,17 @@ class PublishedConnectionTests(TransactionTestCase):
                                 "Native " + action + " failed to reconnect with same identity")
                 self.assertEqual(Device.objects.count(), 1)
                 self.assert_network_snapshot(Device.objects.get(pk=identity))
+            response_start = len(self.server.heartbeat_responses)
             archive_device(actor=self.owner, device_id=identity)
             snapshot = self.final_snapshot(Device.objects.get(pk=identity))
-            self.wait_until(lambda: self.native_phase("Status", identity=identity)["state"] == "identity_denied",
-                            "Native service did not observe Manager archival")
+            last_status = {}
+
+            def denied():
+                last_status.update(self.native_phase("Status", identity=identity))
+                return last_status["state"] == "identity_denied"
+
+            self.wait_until(denied, lambda: "Native service did not observe Manager archival; "
+                            + native_denial_diagnostic(last_status, self.server.heartbeat_responses[response_start:]))
             archived = Device.objects.get(pk=identity)
             self.assertIsNotNone(archived.archived_at)
             self.assertEqual(self.final_snapshot(archived), snapshot)
