@@ -54,10 +54,10 @@ def catalog_root():
         if root.is_relative_to(checkout):
             raise OSError
         _private_directory(root)
-        public = getattr(settings, 'STATIC_ROOT', None)
-        if public and root.is_relative_to(Path(public).resolve()):
-            raise OSError
         directory = root / 'catalog'
+        public = getattr(settings, 'STATIC_ROOT', None)
+        if public and directory.resolve().is_relative_to(Path(public).resolve()):
+            raise OSError
         directory.mkdir(mode=0o700, exist_ok=True)
         if _unsafe_link(directory) or not directory.is_dir():
             raise OSError
@@ -101,6 +101,10 @@ def verify(row):
     try:
         with location(row.storage_reference).open('rb') as stream:
             raw = read_upload(stream)
+    except CatalogError as error:
+        if error.code == 'package_too_large':
+            raise CatalogError('content_conflict', 409) from None
+        raise
     except OSError:
         raise CatalogError('storage_unavailable', 503) from None
     if sha256(raw).hexdigest() != row.sha256:
