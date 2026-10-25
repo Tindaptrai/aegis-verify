@@ -79,6 +79,11 @@ def _central_directory(raw):
     end = raw.rfind(b"PK\x05\x06", max(0, len(raw) - 65557))
     if end < 0 or end + 22 > len(raw):
         _fail("invalid_zip")
+    # ZipFile follows this locator even without classic ZIP64 sentinel values.
+    # Reject it before allocation so it cannot select an uncounted directory
+    # hidden inside a member comment. Catalog's budgets never require ZIP64.
+    if end >= 20 and raw[end - 20:end - 16] == b"PK\x06\x07":
+        _fail("invalid_zip")
     disk, start_disk, disk_count, count, size, offset, comment = struct.unpack_from("<4H2LH", raw, end + 4)
     if disk or start_disk or disk_count != count or end + 22 + comment != len(raw) or offset + size != end:
         _fail("invalid_zip")
@@ -245,6 +250,6 @@ def validate_package(stream: BinaryIO) -> ValidatedPackage:
         return _validate(_read_stream(stream))
     except CatalogError:
         raise
-    except (OSError, ValueError, TypeError, AttributeError, OverflowError, RecursionError,
+    except (OSError, ValueError, TypeError, AttributeError, OverflowError, RecursionError, NotImplementedError,
             zipfile.BadZipFile, zipfile.LargeZipFile, struct.error, zlib.error):
         raise CatalogError("invalid_zip", codes=["invalid_zip"]) from None

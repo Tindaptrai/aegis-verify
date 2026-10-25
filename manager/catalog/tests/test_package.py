@@ -214,3 +214,37 @@ class PackageTests(unittest.TestCase):
         members = sample_members()
         raw = package_zip(members).replace(b"Authoring sample only.", b"Sensitive-script-body")
         self.reject(raw, "invalid_zip")
+
+    def test_zip64_directory_hidden_in_member_comment_is_rejected_before_allocation(self):
+        members = sample_members()
+        members.update({f"payload/extra-{index:03}.txt": b"text" for index in range(196)})
+        raw = package_zip(inventory(members))
+        end = raw.rindex(b"PK\x05\x06")
+        count = struct.unpack_from("<H", raw, end + 10)[0]
+        size, offset = struct.unpack_from("<2L", raw, end + 12)
+        directory = raw[offset:offset + size]
+        name_size, extra_size = struct.unpack_from("<2H", directory, 28)
+        # Outer preflight sees one record. Its comment holds a different directory
+        # selected by Python's ZIP64 locator immediately before the classic EOCD.
+        outer = bytearray(directory[:46 + name_size + extra_size])
+        struct.pack_into("<H", outer, 32, len(directory) + 76)
+        inner_offset = offset + len(outer)
+        zip64_offset = inner_offset + len(directory)
+        zip64 = struct.pack("<4sQ2H2L4Q", b"PK\x06\x06", 44, 45, 45, 0, 0,
+                            count, count, len(directory), inner_offset)
+        locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, zip64_offset, 1)
+        outer.extend(directory + zip64 + locator)
+        forged = raw[:offset] + outer + struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 1, 1,
+                                                  len(outer), offset, 0)
+        with zipfile.ZipFile(io.BytesIO(forged)) as archive:
+            self.assertEqual(len(archive.infolist()), 201)
+        self.reject(forged, "invalid_zip")
+        module = importlib.import_module("catalog.package")
+        with patch.object(module.zipfile, "ZipFile", side_effect=AssertionError("ZIP64 reached allocation")):
+            self.reject(forged, "invalid_zip")
+
+    def test_unsupported_extract_version_returns_bounded_error(self):
+        raw = bytearray(package_zip())
+        directory = raw.index(b"PK\x01\x02")
+        struct.pack_into("<H", raw, directory + 6, 99)
+        self.reject(bytes(raw), "invalid_zip")
