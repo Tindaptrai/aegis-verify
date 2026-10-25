@@ -198,14 +198,25 @@ class ArchiveTests(PairingCase):
 
     def test_stale_admin_form_cannot_restore_archive_or_overwrite_snapshot(self):
         from devices.archive import archive_device
-        device = Device.objects.create(environment_id="synthetic", certificate_sha256="a"*64, connection_kind="paired_presence")
+        enrolled = self.enrolled()
+        device = Device.objects.get(pk=enrolled["device_id"])
         stale = Device.objects.get(pk=device.pk)
+        self.assertIsNone(stale.last_heartbeat_at)
+        heartbeat = self.client.post("/agent/v2/heartbeat",
+            {"protocol": "2.0", "device_id": str(device.pk), "generation": 1},
+            content_type="application/json", HTTP_X_FORWARDED_PROTO="https",
+            HTTP_X_AEGIS_CLIENT_VERIFY="SUCCESS",
+            HTTP_X_AEGIS_CLIENT_CERT=quote(enrolled["certificate_pem"], safe=""))
+        self.assertEqual(heartbeat.status_code, 200)
+        final_heartbeat = Device.objects.get(pk=device.pk).last_heartbeat_at
+        self.assertIsNotNone(final_heartbeat)
         Device.objects.filter(pk=device.pk).update(reported_ips=["192.0.2.10"], ip_collection_status="ok")
         archive_device(actor=self.admin, device_id=device.pk)
         expected = Device.objects.values().get(pk=device.pk)
         stale.hostname = "synthetic edited label"
         DeviceAdmin(Device, AdminSite()).save_model(RequestFactory().post("/"), stale, None, True)
         device.refresh_from_db()
+        self.assertEqual(device.last_heartbeat_at, final_heartbeat)
         self.assertEqual(device.archived_at, expected["archived_at"])
         self.assertEqual(device.archived_by_id, expected["archived_by_id"])
         self.assertTrue(device.revoked)

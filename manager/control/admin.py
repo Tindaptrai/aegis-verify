@@ -17,7 +17,7 @@ class DeviceAdmin(OwnerAdmin):
     list_display = ("id", "environment_id", "generation", "revoked")
     readonly_fields = ("archived_at", "archived_by_id", "reported_ips", "ip_collection_status",
                        "reported_ips_truncated", "reported_ips_received_at", "observed_ip",
-                       "observed_ip_received_at", "reported_agent_version")
+                       "observed_ip_received_at", "reported_agent_version", "last_heartbeat_at")
 
     def get_readonly_fields(self, request, obj=None):
         return self.readonly_fields + (("revoked",) if obj and obj.archived_at is not None else ())
