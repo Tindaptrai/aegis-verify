@@ -141,4 +141,15 @@ describe('real Catalog navigation and review', () => {
     await act(async () => finish({ path: 'README.md', text: 'stale private readme' }));
     expect(screen.queryByText('stale private readme')).not.toBeInTheDocument();
   });
+  it('retries a failed private file preview without changing inventory selection', async () => {
+    const api = fixture();
+    api.catalogFile.mockRejectedValueOnce(new Error('private storage diagnostic')).mockResolvedValue({ path: 'README.md', text: 'recovered private README' });
+    render(<ManagerApp api={api} />); await openCatalog(); const dialog = await openDetail();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'README.md' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('Không thể hoàn tất');
+    expect(screen.queryByText('private storage diagnostic')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Tải lại nội dung' }));
+    expect(await within(dialog).findByText('recovered private README')).toBeVisible();
+    expect(api.catalogFile).toHaveBeenLastCalledWith(catalogId, 'README.md', expect.any(AbortSignal));
+  });
 });

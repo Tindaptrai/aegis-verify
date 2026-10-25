@@ -57,4 +57,10 @@ describe('Catalog browser API contract', () => {
       await expect(createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(json({ ...valid, validation }, 400))).importCatalog(new File([''], 'a.zip'))).rejects.toMatchObject({ validationCodes: [] });
     }
   });
+  it('admits the latest 100 audit entries but rejects a larger history response', async () => {
+    const entry = { action: 'published', actor: 'synthetic', at: '2026-10-25T00:00:00Z' };
+    const detail = { ...catalogDetail, audit: Array(100).fill(entry) };
+    await expect(createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(json(detail))).catalogPackage(catalogId)).resolves.toEqual(detail);
+    await expect(createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(json({ ...detail, audit: Array(101).fill(entry) }))).catalogPackage(catalogId)).rejects.toMatchObject({ name: 'ManagerApiError' });
+  });
 });

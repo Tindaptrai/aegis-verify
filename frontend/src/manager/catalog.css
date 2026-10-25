@@ -1,7 +1,13 @@
-.catalog-tools { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; }
-.catalog-tools form { display: flex; gap: .5rem; }
-.catalog-tools select { color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: .5rem; padding: .65rem; }
+.catalog-panel-header { display: grid; grid-template-columns: minmax(0, 1fr); }
+.catalog-tools { display: grid; grid-template-columns: minmax(16rem, 1fr) minmax(11rem, 14rem) auto; align-items: end; gap: .8rem; min-width: 0; }
+.catalog-tools .catalog-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; width: 100%; min-width: 0; }
+.catalog-tools .catalog-search input { width: 100%; min-width: 0; }
+.catalog-filter { min-width: 0; }
+.manager-app .catalog-filter label { margin: 0 0 .35rem; }
+.catalog-tools select { width: 100%; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: .5rem; padding: .65rem; }
 .catalog-table { min-width: 760px; }
+.catalog-table td strong, .catalog-table td small, .catalog-table .catalog-version { display: block; }
+.catalog-table td small { margin-top: .3rem; color: var(--muted); }
 .catalog-hash { display: block; overflow-wrap: anywhere; word-break: break-all; font-size: .78rem; }
 .catalog-table .catalog-hash { max-width: 22rem; }
 .catalog-drawer { width: min(760px, 100vw); }
@@ -17,4 +23,4 @@
 .catalog-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28rem; overflow: auto; padding: 1rem; border: 1px solid var(--border); border-radius: .5rem; font-size: .8rem; }
 .catalog-audit { padding-left: 1.3rem; line-height: 1.8; }
 .catalog-confirm { margin-top: 1.2rem; padding: 1rem; border: 1px solid var(--border); border-radius: .5rem; }
-@media (max-width: 700px) { .catalog-tools, .catalog-tools form { width: 100%; } .catalog-tools input { min-width: 0; flex: 1; } .catalog-metadata { grid-template-columns: 1fr; gap: .4rem; } .catalog-metadata dd { margin-bottom: .5rem; } }
+@media (max-width: 700px) { .catalog-tools { grid-template-columns: minmax(0, 1fr) auto; width: 100%; } .catalog-tools .catalog-search { grid-column: 1 / -1; } .catalog-metadata { grid-template-columns: 1fr; gap: .4rem; } .catalog-metadata dd { margin-bottom: .5rem; } }

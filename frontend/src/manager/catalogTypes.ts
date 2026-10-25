@@ -54,7 +54,7 @@ export function validCatalogPackage(value: unknown): value is CatalogPackageDTO 
     && Array.isArray(value.files) && value.files.length > 0 && value.files.length <= 200
     && value.files.every((file) => closed(file, 'path,size,sha256') && validCatalogPath(file.path) && integer(file.size, 0, 1024 * 1024) && hash(file.sha256))
     && new Set(value.files.map((file) => (file as { path: string }).path.toLowerCase())).size === value.files.length
-    && Array.isArray(value.audit) && value.audit.every((entry) => closed(entry, 'action,actor,at') && ['imported', 'published', 'unpublished'].includes(String(entry.action)) && nullable(entry.actor, text) && date(entry.at));
+    && Array.isArray(value.audit) && value.audit.length <= 100 && value.audit.every((entry) => closed(entry, 'action,actor,at') && ['imported', 'published', 'unpublished'].includes(String(entry.action)) && nullable(entry.actor, text) && date(entry.at));
 }
 export function validCatalogFile(value: unknown): value is CatalogFileDTO {
   return closed(value, 'path,text') && validCatalogPath(value.path) && typeof value.text === 'string' && new TextEncoder().encode(value.text).length <= 1024 * 1024;
