@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>aegis-agent</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <RuntimeFrameworkVersion Condition="'$(SelfContained)' == 'true'">10.0.13</RuntimeFrameworkVersion>
   </PropertyGroup>
   <ItemGroup><InternalsVisibleTo Include="Aegis.Connection.Tests" /></ItemGroup>

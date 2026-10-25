@@ -59,7 +59,7 @@ internal static partial class Program
         Test("loop real TLS interruption recovers with same mTLS identity and no code", async () =>
         {
             using var temp = new Scratch(); using var issuer = new Issuer(); using var tlsCa = new Issuer(); using var store = StateStore.Acquire(temp.Path); int requests = 0;
-            await using var endpoint = new TlsEndpoint(tlsCa, (_, body) => { Check(!body.Contains("pairing_code"), "code retried on heartbeat"); return ++requests switch { 1 => new Reply(503, "{\"error\":{\"code\":\"temporarily_unavailable\"}}"), 2 => new Reply(200, HeartbeatOk), _ => new Reply(403, "{\"error\":{\"code\":\"identity_denied\"}}") }; }, clientIssuer: issuer.Certificate);
+            await using var endpoint = new TlsEndpoint(tlsCa, (_, body) => { Check(!body.Contains("pairing_code"), "code retried on heartbeat"); return ++requests switch { 1 => new Reply(503, "{\"error\":{\"code\":\"temporarily_unavailable\"}}"), 2 => new Reply(200, NetworkOk), _ => new Reply(403, "{\"error\":{\"code\":\"identity_denied\"}}") }; }, clientIssuer: issuer.Certificate);
             var pending = store.Prepare(endpoint.Origin, tlsCa.Certificate.ExportCertificatePem()); store.Promote(issuer.Issue(pending));
             using var client = new AgentClient(store.Read()!); var waits = new List<double>();
             var exit = await HeartbeatLoop.RunAsync(store, client, (delay, _) => { waits.Add(delay.TotalSeconds); return Task.CompletedTask; }, () => DateTimeOffset.UtcNow, () => 0, CancellationToken.None);
