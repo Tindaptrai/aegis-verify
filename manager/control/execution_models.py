@@ -140,7 +140,11 @@ class ExecutionTargetOwnership(models.Model):
         constraints = [models.UniqueConstraint(fields=('connection_id', 'environment_id', 'wazuh_agent_id'), name='execution_target_resource_unique')]
     def save(self, *args, **kwargs):
         if not self._state.adding: raise ValueError('Ownership changes require audited transfer')
+        if self.pk is not None and type(self).objects.filter(pk=self.pk).exists():
+            raise ValueError('Ownership changes require audited transfer')
         self.validate_authority()
+        # A concurrent insertion of this PK must fail, never become an UPDATE.
+        kwargs['force_insert'] = True
         return super().save(*args, **kwargs)
     def validate_authority(self):
         if type(self.revision) is not int or not 1 <= self.revision <= 2147483647: raise ValueError('Invalid ownership revision')

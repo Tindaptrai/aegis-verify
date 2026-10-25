@@ -58,6 +58,11 @@ EXECUTION_FROZEN_FIELDS = ('binding_id', 'approval_snapshot_id', 'preview_id', '
 class JobQuerySet(models.QuerySet):
     def bulk_create(self, objs, **kwargs):
         if kwargs.get('update_conflicts'):
+            # ON CONFLICT bypasses save/update and may use any unique key, not
+            # just the incoming PK. Never write execution authority this way.
+            updated = {self.model._meta.get_field(name).attname for name in kwargs.get('update_fields') or ()}
+            if updated & (set(EXECUTION_FROZEN_FIELDS) | {'protocol_family'}):
+                raise ValueError('Execution job authority is immutable')
             objs = list(objs)
             if (any(obj.protocol_family == 'windows_execution_v2' for obj in objs) or
                     self.filter(pk__in=[obj.pk for obj in objs], protocol_family='windows_execution_v2').exists()):

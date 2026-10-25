@@ -6,6 +6,64 @@ from .test_execution_contracts import DIGEST, UUID, snapshot_data, raw
 
 
 class ExecutionModelTests(TestCase):
+    def test_reconstructed_ownership_cannot_replace_existing_pk_without_audit(self):
+        from control.execution_models import ExecutionTargetOwnership, ExecutionOwnershipAudit
+        for index, revision in enumerate((1, 3)):
+            target = ExecutionTargetOwnership.objects.create(connection_id=UUID, environment_id='synthetic-env',
+                wazuh_agent_id=str(index), reviewed_paired_device_id=UUID, active_executor_id=UUID, revision=revision)
+            replacement = ExecutionTargetOwnership(pk=target.pk, connection_id=UUID, environment_id='synthetic-env',
+                wazuh_agent_id=str(index), reviewed_paired_device_id='b1111111-1111-4111-8111-111111111111',
+                active_executor_id='b1111111-1111-4111-8111-111111111111', revision=1)
+            with self.subTest(revision=revision), self.assertRaises(ValueError): replacement.save()
+            target.refresh_from_db()
+            self.assertEqual(str(target.reviewed_paired_device_id), UUID)
+            self.assertEqual(str(target.active_executor_id), UUID)
+            self.assertEqual(target.revision, revision)
+            self.assertFalse(ExecutionOwnershipAudit.objects.filter(ownership=target).exists())
+
+    def test_receipt_unique_upsert_cannot_replace_v2_authority(self):
+        device = Device.objects.create(environment_id='synthetic-env', certificate_sha256=DIGEST)
+        release = RunnerRelease.objects.create(scenario_path='scenario', profile_path='profile',
+            scenario_sha256=DIGEST, profile_sha256=DIGEST, runner_sha256=DIGEST, kit_sha256=DIGEST, payload_sha256=DIGEST)
+        now = timezone.now()
+        values = dict(device=device, release=release, not_before=now, expires_at=now,
+            collection_start=now, collection_end=now, terminal_receipt_id=UUID)
+        job = Job.objects.create(**values, protocol_family='windows_execution_v2', envelope_bytes=b'original')
+        replacement = Job(**values, envelope_bytes=b'replaced')
+        self.assertNotEqual(replacement.pk, job.pk)
+        with self.assertRaises(ValueError): Job.objects.bulk_create([replacement], update_conflicts=True,
+            update_fields=['envelope_bytes'], unique_fields=['terminal_receipt_id'])
+        job.refresh_from_db()
+        self.assertEqual(bytes(job.envelope_bytes), b'original')
+        self.assertEqual(job.protocol_family, 'windows_execution_v2')
+        self.assertEqual(Job.objects.count(), 1)
+
+    def test_legacy_only_upsert_remains_available(self):
+        device = Device.objects.create(environment_id='synthetic-env', certificate_sha256=DIGEST)
+        release = RunnerRelease.objects.create(scenario_path='scenario', profile_path='profile',
+            scenario_sha256=DIGEST, profile_sha256=DIGEST, runner_sha256=DIGEST, kit_sha256=DIGEST, payload_sha256=DIGEST)
+        now = timezone.now()
+        values = dict(device=device, release=release, not_before=now, expires_at=now,
+            collection_start=now, collection_end=now)
+        job = Job.objects.create(**values, envelope={'legacy': 'original'})
+        replacement = Job(id=job.pk, **values, envelope={'legacy': 'replacement'})
+        Job.objects.bulk_create([replacement], update_conflicts=True, update_fields=['envelope'], unique_fields=['id'])
+        job.refresh_from_db()
+        self.assertEqual(job.envelope, {'legacy': 'replacement'})
+        self.assertEqual(job.protocol_family, 'legacy_v1')
+        self.assertEqual(Job.objects.count(), 1)
+
+    def test_short_snapshot_cannot_be_stored(self):
+        from control.execution_models import JobApprovalSnapshot
+        import hashlib
+        import json
+        data = snapshot_data()
+        data['windows'] = data['windows'] | {'collection_end': '2026-10-25T12:04:59Z'}
+        encoded = json.dumps(data, sort_keys=True, separators=(',', ':')).encode()
+        with self.assertRaises(ValueError): JobApprovalSnapshot.objects.create(snapshot_bytes=encoded,
+            snapshot_sha256=hashlib.sha256(encoded).hexdigest())
+        self.assertEqual(JobApprovalSnapshot.objects.count(), 0)
+
     def test_binding_release_and_connection_revisions_reject_rewrite(self):
         from django.contrib.auth import get_user_model
         from django.db import IntegrityError, transaction

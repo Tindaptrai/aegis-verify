@@ -48,6 +48,21 @@ def snapshot_data():
 
 
 class ExecutionContractTests(SimpleTestCase):
+    def test_snapshot_collection_window_covers_release_timeout_before_freeze_or_projection(self):
+        from dataclasses import replace
+        from control.execution_contracts import decode_contract, snapshot_bytes, public_summary, canonical_bytes
+        # Expiry12:02 + reviewed timeout180s requires exactly12:05 or later.
+        valid = decode_contract('JobApprovalSnapshotData', raw(snapshot_data()))
+        snapshot_bytes(valid)
+        summary = public_summary(valid)
+        self.assertEqual(summary.collection_end, '2026-10-25T12:05:00Z')
+        self.assertEqual(decode_contract('PublicSummary', canonical_bytes(summary)), summary)
+        data = snapshot_data(); data['windows'] = data['windows'] | {'collection_end': '2026-10-25T12:04:59Z'}
+        with self.assertRaises(ValueError): decode_contract('JobApprovalSnapshotData', raw(data))
+        invalid = replace(valid, windows=replace(valid.windows, collection_end='2026-10-25T12:04:59Z'))
+        with self.assertRaises(ValueError): snapshot_bytes(invalid)
+        with self.assertRaises(ValueError): public_summary(invalid)
+
     def test_release_definition_has_no_self_reference_or_job_parameters(self):
         from control.execution_contracts import decode_contract, release_definition_bytes, freeze_release, snapshot_bytes, canonical_bytes
         data = snapshot_data()

@@ -523,6 +523,9 @@ def _validate(value):
         codes = value.blocking_codes
         if len(codes) > 8 or len(codes) != len(set(codes)) or set(codes) - allowed or value.ready and codes: raise ValueError('invalid_request')
     if isinstance(value, SignedJob) and value.run_id != value.job_id: raise ValueError('invalid_request')
+    if isinstance(value, JobApprovalSnapshotData):
+        if timestamp(value.windows.collection_end) < timestamp(value.windows.expires_at) + timedelta(seconds=value.release.timeout_seconds):
+            raise ValueError('invalid_request')
     if isinstance(value, (SignedJob, ExecutionWindows, PublicSummary)):
         start, end, cstart, cend = map(timestamp, (value.not_before, value.expires_at, value.collection_start, value.collection_end))
         if not cstart <= start < end <= cend or (end - start).total_seconds() > 120 or (cend - cstart).total_seconds() > 900: raise ValueError('invalid_request')
