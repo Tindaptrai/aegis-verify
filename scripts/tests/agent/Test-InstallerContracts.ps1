@@ -1,9 +1,44 @@
 # Run without elevation: these contracts use temporary files and never call SCM.
+[CmdletBinding()]
+param([switch]$Pure)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $installer = Join-Path $repo 'deploy/agent/windows/Install-Agent.ps1'
 if (!(Test-Path -LiteralPath $installer)) { throw 'RED: Windows installer contract is not implemented' }
 . $installer
+if ($Pure) {
+    $checks = 0
+    function Check-Pure([bool]$Condition) { if (!$Condition) { throw 'pure_contract_failed' }; $script:checks++ }
+    function Reject-Pure([scriptblock]$Action) { $rejected=$false; try { & $Action | Out-Null } catch { $rejected=$true }; Check-Pure $rejected }
+    Check-Pure ($null -eq (Get-AgentExecutionPaths $null $null $null))
+    Reject-Pure { Get-AgentExecutionPaths 'C:\Reviewed\profile.json' $null $null }
+    Reject-Pure { Get-AgentExecutionPaths 'C:\Reviewed\profile.json' 'C:\Reviewed\installed-grant.json' 'C:\Reviewed\private.pem' }
+    Reject-Pure { Get-AgentExecutionPaths 'C:\Reviewed\..\profile.json' 'C:\Reviewed\installed-grant.json' 'C:\Reviewed\manager-execution-v2-public.pem' }
+    $paths = Get-AgentExecutionPaths 'C:\Reviewed\profile.json' 'C:\Reviewed\installed-grant.json' 'C:\Reviewed\manager-execution-v2-public.pem'
+    $command = Get-AgentServiceCommand 'C:\Program Files\AEGIS Agent\bin\aegis-agent.exe' 'C:\ProgramData\AEGIS\Agent' $paths
+    Check-Pure ($command -ceq '"C:\Program Files\AEGIS Agent\bin\aegis-agent.exe" service --state-dir "C:\ProgramData\AEGIS\Agent" --execution-profile "C:\Reviewed\profile.json" --execution-grant "C:\Reviewed\installed-grant.json" --execution-key "C:\Reviewed\manager-execution-v2-public.pem"')
+    $sid='S-1-5-80-1-2-3-4-5'
+    $original='O:SYG:SYD:(A;;GA;;;SY)(A;;GA;;;BA)(A;;RC;;;AU)'
+    $changed=Get-AgentReadDescriptor $original $sid 4
+    $descriptor=New-Object Security.AccessControl.RawSecurityDescriptor($changed)
+    Check-Pure ($descriptor.Owner.Value -eq 'S-1-5-18' -and $descriptor.Group.Value -eq 'S-1-5-18' -and $descriptor.DiscretionaryAcl.Count -eq 4)
+    $ace=$descriptor.DiscretionaryAcl[3]
+    Check-Pure ($ace.SecurityIdentifier.Value -eq $sid -and $ace.AccessMask -eq 4)
+    Check-Pure ((Get-AgentReadDescriptor $changed $sid 4) -ceq $changed)
+    $channel=New-Object Security.AccessControl.RawSecurityDescriptor((Get-AgentReadDescriptor $original $sid 1))
+    Check-Pure ($channel.DiscretionaryAcl[3].AccessMask -eq 1)
+    Reject-Pure { Get-AgentReadDescriptor $original $sid 0x10 }
+    Reject-Pure { Get-AgentReadDescriptor ('O:SYD:(D;;LC;;;' + $sid + ')(A;;GA;;;SY)') $sid 4 }
+    Reject-Pure { Get-AgentReadDescriptor 'O:SYD:NO_ACCESS_CONTROL' $sid 4 }
+    Check-Pure (!(Test-AgentMutationRights ([Security.AccessControl.FileSystemRights]::ReadAndExecute)))
+    foreach($right in @('Delete','ChangePermissions','TakeOwnership','DeleteSubdirectoriesAndFiles')){Check-Pure (Test-AgentMutationRights ([Security.AccessControl.FileSystemRights]::$right))}
+    $journal=[pscustomobject]@{schema_version=1;id=('a'*32);phase='prepared';had_previous=$true;was_running=$true;command='approved';start_mode='Auto';delayed=$true}
+    Assert-AgentUpgradeRecord $journal; $checks++
+    $journal.id='../foreign'; Reject-Pure { Assert-AgentUpgradeRecord $journal }; $journal.id='a'*32
+    $journal | Add-Member unexpected 'value'; Reject-Pure { Assert-AgentUpgradeRecord $journal }
+    Write-Output "$checks pure installer contracts passed; no files, ACLs or SCM changed"
+    return
+}
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('aegis-install-contract-' + [Guid]::NewGuid().ToString('N'))
 $passed = 0
 function Assert-Rejected([scriptblock]$Action, [string]$Name) {

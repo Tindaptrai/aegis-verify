@@ -10,6 +10,7 @@ internal static partial class Program
     private static readonly List<(string Name, Func<Task> Run)> Tests = [];
     private static async Task<int> Main(string[] args)
     {
+        if (args.Length > 0 && args[0].StartsWith("--provisioning-", StringComparison.Ordinal)) return ProvisioningEntry(args);
         if (args.Length > 0 && args[0] == "--execution-child") return await ExecutionChild(args);
         var nativeGate = args.Length > 0 && args[0] == "--execution-native";
         var requireNative = nativeGate && args.Length == 2 && args[1] == "--require-native";
