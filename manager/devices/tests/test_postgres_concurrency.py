@@ -160,30 +160,46 @@ class PostgreSQLPairingTests(TransactionTestCase):
         self.assertEqual(EnrollmentAudit.objects.filter(action="device_archived").count(), 1)
         self.assertEqual(EnrollmentAudit.objects.filter(action="device_revoked").count(), 1)
 
-    def archive_heartbeat(self, *, archive_first):
+    def archive_heartbeat(self, *, archive_first, network=False):
         enrolled = enroll_device(self.data)
         request = RequestFactory().post("/agent/v2/heartbeat", HTTP_X_FORWARDED_PROTO="https", HTTP_X_AEGIS_CLIENT_VERIFY="SUCCESS",
             HTTP_X_AEGIS_CLIENT_CERT=quote(enrolled["certificate_pem"], safe=""))
         data = {"protocol": "2.0", "device_id": enrolled["device_id"], "generation": 1}
+        if network:
+            data.update(protocol="2.1", network={"collection_status": "ok", "reported_ips": ["192.0.2.9"],
+                                               "truncated": False, "agent_version": "0.2.0"})
+            request.META["HTTP_X_AEGIS_PEER_IP"] = "192.0.2.8"
         archive = lambda: archive_device(actor=self.owner, device_id=enrolled["device_id"])
-        heartbeat = lambda: receive_heartbeat(request=request, data=data)
+        heartbeat = lambda: receive_heartbeat(request=request, data=data, network=network)
         results = self.ordered_race(*((archive, heartbeat) if archive_first else (heartbeat, archive)), table="control_device")
         self.assertEqual(results, ["committed", "identity_denied" if archive_first else "committed"])
         device = Device.objects.get()
         self.assertTrue(device.revoked)
         self.assertIsNotNone(device.archived_at)
         self.assertEqual(device.last_heartbeat_at is None, archive_first)
+        if network:
+            self.assertEqual(device.reported_ips, None if archive_first else ["192.0.2.9"])
+            self.assertEqual(device.observed_ip, None if archive_first else "192.0.2.8")
+        snapshot = {name: getattr(device, name) for name in ("reported_ips", "reported_ips_received_at", "observed_ip",
+                    "observed_ip_received_at", "ip_collection_status", "reported_ips_truncated", "reported_agent_version")}
         last = device.last_heartbeat_at
         with self.assertRaises(DeviceError):
             heartbeat()
         device.refresh_from_db()
         self.assertEqual(device.last_heartbeat_at, last)
+        self.assertEqual({name: getattr(device, name) for name in snapshot}, snapshot)
 
     def test_archive_wins_heartbeat_cannot_update_presence(self):
         self.archive_heartbeat(archive_first=True)
 
     def test_heartbeat_wins_then_archive_retains_final_presence(self):
         self.archive_heartbeat(archive_first=False)
+
+    def test_archive_wins_network_heartbeat_cannot_update_snapshot(self):
+        self.archive_heartbeat(archive_first=True, network=True)
+
+    def test_network_heartbeat_wins_archive_retains_final_snapshot(self):
+        self.archive_heartbeat(archive_first=False, network=True)
 
     def archive_claim(self, *, archive_first):
         from django.utils import timezone

@@ -83,7 +83,7 @@ def machine_api(view):
         try:
             return view(request)
         except (OperationalError, InterfaceError):
-            return api_error("temporarily_unavailable" if view.__name__ == "heartbeat" else "issuer_unavailable", 503)
+            return api_error("temporarily_unavailable" if view.__name__ in {"heartbeat", "network_heartbeat"} else "issuer_unavailable", 503)
     return wrapped
 
 
@@ -97,6 +97,11 @@ def enroll(request):
 @machine_api
 def heartbeat(request):
     return JsonResponse(receive_heartbeat(request=request, data=parse_json(request)))
+
+
+@machine_api
+def network_heartbeat(request):
+    return JsonResponse(receive_heartbeat(request=request, data=parse_json(request), network=True))
 
 
 @devices_api

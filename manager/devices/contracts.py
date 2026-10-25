@@ -57,7 +57,7 @@ def enrollment_input(data):
             or any(type(v) is not str for v in data.values())):
         raise DeviceError("invalid_request")
     if (data["protocol"] != "2.0" or data["os"] not in ("windows", "linux") or data["architecture"] != "x64"
-            or data["agent_version"] != "0.1.0" or not re.fullmatch(r"[0-9a-f]{64}", data["pairing_code"])
+            or data["agent_version"] not in ("0.1.0", "0.2.0") or not re.fullmatch(r"[0-9a-f]{64}", data["pairing_code"])
             or not 1 <= len(data["hostname"]) <= 255
             or any(unicodedata.category(c).startswith("C") or not c.isprintable() for c in data["hostname"])
             or not data["csr_pem"].isascii() or len(data["csr_pem"]) > 8192):

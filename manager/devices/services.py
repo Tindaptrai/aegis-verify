@@ -14,7 +14,8 @@ from accounts.permissions import require_product_permission
 from control.models import Device
 from . import issuer
 from .contracts import DeviceError, enrollment_input, environment, heartbeat_input, stamp
-from .identity import certificate_fingerprint
+from .identity import certificate_fingerprint, observed_peer_ip
+from .network import network_heartbeat_input
 from .models import PairingCode, EnrollmentAudit
 
 
@@ -102,8 +103,8 @@ def enroll_device(data):
 
 
 @transaction.atomic
-def receive_heartbeat(*, request, data):
-    data = heartbeat_input(data)
+def receive_heartbeat(*, request, data, network=False):
+    data = network_heartbeat_input(data) if network else heartbeat_input(data)
     fingerprint = certificate_fingerprint(request)
     try:
         device = Device.objects.select_for_update().get(pk=data["device_id"], certificate_sha256=fingerprint,
@@ -114,6 +115,15 @@ def receive_heartbeat(*, request, data):
     if (device.archived_at is not None or device.revoked or device.certificate_not_before is None or device.certificate_expires_at is None
             or not device.certificate_not_before <= now < device.certificate_expires_at):
         raise DeviceError("identity_denied")
-    device.last_heartbeat_at = now
-    device.save(update_fields=["last_heartbeat_at"])
-    return {"protocol": "2.0", "server_time": stamp(now), "heartbeat_seconds": 15, "offline_after_seconds": 60}
+    peer = observed_peer_ip(request)
+    report = data["network"] if network else None
+    values = {"last_heartbeat_at": now, "observed_ip": peer, "observed_ip_received_at": now if peer is not None else None,
+              "reported_ips": report["reported_ips"] if report else None,
+              "ip_collection_status": report["collection_status"] if report else "unknown",
+              "reported_ips_truncated": report["truncated"] if report else False,
+              "reported_ips_received_at": now if report else None,
+              "reported_agent_version": report["agent_version"] if report else None}
+    for name, value in values.items():
+        setattr(device, name, value)
+    device.save(update_fields=list(values))
+    return {"protocol": "2.1" if network else "2.0", "server_time": stamp(now), "heartbeat_seconds": 15, "offline_after_seconds": 60}
