@@ -114,6 +114,8 @@ class DeviceExecutionBinding(ImmutableRecord):
     @transaction.atomic
     def set_enabled(self, enabled, actor):
         if type(enabled) is not bool or not actor.pk: raise ValueError('Invalid binding admission')
+        from .execution_ownership import lock_dispatch
+        lock_dispatch()
         current = type(self).objects.select_for_update().get(pk=self.pk)
         if current.enabled != enabled:
             BindingAdmissionAudit.objects.create(binding=current, actor=actor, enabled=enabled)
@@ -225,6 +227,7 @@ class CollectionWorkerLease(models.Model):
     health_code = models.CharField(max_length=32)
     source_probe_status = models.CharField(max_length=32, default='unknown')
     source_probe_succeeded_at = models.DateTimeField(null=True)
+    source_probe_scope_sha256 = models.CharField(max_length=64, blank=True, default='')
 
 
 class ExecutionOwnerDecision(ImmutableRecord):

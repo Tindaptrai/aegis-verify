@@ -1,5 +1,6 @@
 """Private worker liveness. Source I/O never runs on the keepalive thread."""
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import timedelta
 from hashlib import sha256
 from pathlib import Path
@@ -10,20 +11,37 @@ import uuid
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from django.conf import settings
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
+from django.db.models import Max
 from django.utils import timezone
 from aegis_verify.connectors.wazuh.live import Config, ProbeResult, probe
 from aegis_verify.intake.io import read_local
 from aegis_verify.dashboard.operations_config import read_windows_acl, validate_windows_acl
 from .execution_connections import resolve_execution_connection
 from .execution_contracts import canonical_bytes, decode_contract
-from .execution_models import CollectionWorkerLease, DeviceExecutionBinding, RegisteredExecutionConnection
+from .execution_models import CollectionWorkerLease, DeviceExecutionBinding, RegisteredExecutionConnection, BindingAdmissionAudit
+from .execution_ownership import lock_dispatch
 from .jobs import release_pins
 
 
+@dataclass(frozen=True)
+class ScopedProbeResult:
+    """Private round proof, distinct from the connector's two-field result."""
+    result: ProbeResult
+    scope_sha256: str = ''
+
+    @property
+    def healthy(self): return self.result.healthy
+
+    @property
+    def code(self): return self.result.code
+
+
+@transaction.atomic
 def refresh_worker_health(instance_id, connection_revision, *, now, probe_result):
     """Refresh an existing private lease; never advances source freshness on keepalive."""
-    row = CollectionWorkerLease.objects.get(pk=instance_id)
+    if probe_result is not None: lock_dispatch()
+    row = CollectionWorkerLease.objects.select_for_update().get(pk=instance_id)
     connection = connection_revision
     if type(connection) is not RegisteredExecutionConnection or (
             row.connection_id,row.connection_revision,row.config_sha256,row.output_root_fingerprint) != (
@@ -31,15 +49,52 @@ def refresh_worker_health(instance_id, connection_revision, *, now, probe_result
         raise ValueError('worker_revision_mismatch')
     values = dict(last_seen_at=now)
     if probe_result is not None:
-        if type(probe_result) is not ProbeResult: raise ValueError('invalid_probe_result')
-        values['source_probe_status'] = probe_result.code
-        if probe_result.healthy: values['source_probe_succeeded_at'] = now
+        if type(probe_result) is ProbeResult:
+            if probe_result.healthy: raise ValueError('unscoped_probe_result')
+        elif type(probe_result) is not ScopedProbeResult:
+            raise ValueError('invalid_probe_result')
+        matched = (probe_result.healthy and bool(probe_result.scope_sha256)
+            and probe_result.scope_sha256 == current_scope_sha256(connection))
+        values['source_probe_status'] = 'healthy' if matched else 'source_unavailable'
+        if matched:
+            values['source_probe_succeeded_at'] = now
+            values['source_probe_scope_sha256'] = probe_result.scope_sha256
     CollectionWorkerLease.objects.filter(pk=instance_id).update(**values)
 
 
 def _scopes(connection):
     return list(DeviceExecutionBinding.objects.select_related('device','release').filter(
         is_current=True,enabled=True,connection_id=connection.connection_id,connection_revision=connection.revision).order_by('pk'))
+
+
+def _scope_sha256(connection, scopes):
+    if not scopes: return ''
+    reviewed=[]
+    for binding in scopes:
+        # Append-only admission audit PK is an epoch, including disable/re-enable
+        # of the same immutable binding. Keepalive never advances this proof.
+        epoch=BindingAdmissionAudit.objects.filter(binding_id=binding.pk).aggregate(value=Max('pk'))['value'] or 0
+        reviewed.append(dict(binding_id=str(binding.binding_id),revision=binding.revision,
+            device_id=str(binding.approved_device_id),generation=binding.approved_generation,
+            certificate_sha256=binding.approved_certificate_sha256,environment_id=binding.approved_environment_id,
+            provider_id=binding.provider_id,wazuh_agent_id=binding.wazuh_agent_id,
+            installation_profile_sha256=binding.installation_profile_sha256,
+            artifact_set_sha256=binding.artifact_set_sha256,release_id=binding.release_id,
+            release_sha256=binding.release_sha256,admission_epoch=epoch))
+    return sha256(canonical_bytes(dict(connection_id=str(connection.connection_id),revision=connection.revision,
+        config_sha256=connection.config_sha256,output_root_fingerprint=connection.output_root_fingerprint,scopes=reviewed))).hexdigest()
+
+
+def current_scope_sha256(connection):
+    """Caller holds DispatchLock for coherent admission and publication checks."""
+    return _scope_sha256(connection,_scopes(connection))
+
+
+@transaction.atomic
+def _scope_snapshot(connection):
+    lock_dispatch()
+    scopes=_scopes(connection)
+    return scopes,_scope_sha256(connection,scopes)
 
 
 def _authority(connection):
@@ -77,23 +132,26 @@ def _authority(connection):
 def probe_connection(connection, *, now=None, transport=None, clock=time.monotonic):
     """All current reviewed scopes must complete within one bounded round."""
     started = clock()
+    failed=ScopedProbeResult(ProbeResult(False,'source_unavailable'))
     try:
-        resolved,_,scopes = _authority(connection)
+        resolved,_,checked_scopes = _authority(connection)
+        scopes,scope_sha256 = _scope_snapshot(connection)
+        if not scope_sha256 or [b.pk for b in scopes] != [b.pk for b in checked_scopes]: return failed
         now = (now or timezone.now()).replace(microsecond=0)
         stamp = lambda dt: dt.strftime('%Y-%m-%dT%H:%M:%SZ')
         for binding in scopes:
-            if clock()-started >= 50: return ProbeResult(False,'source_unavailable')
+            if clock()-started >= 50: return failed
             cfg = Config(endpoint=resolved.endpoint,username=resolved.username,password=resolved.password,
                 ca_file=resolved.ca_file,index=resolved.index,collection_mode=resolved.collection_mode,
                 agent_id=binding.wazuh_agent_id,environment_id=binding.approved_environment_id,
                 start=stamp(now-timedelta(seconds=60)),end=stamp(now))
-            if not probe(cfg,transport=transport).healthy: return ProbeResult(False,'source_unavailable')
+            if not probe(cfg,transport=transport).healthy: return failed
         # Recheck scope set/revision after I/O; no success for a retired round.
-        if clock()-started > 50 or [b.pk for b in scopes] != [b.pk for b in _scopes(connection)]:
-            return ProbeResult(False,'source_unavailable')
-        return ProbeResult(True,'healthy')
+        if clock()-started > 50 or _scope_snapshot(connection)[1] != scope_sha256:
+            return failed
+        return ScopedProbeResult(ProbeResult(True,'healthy'),scope_sha256)
     except Exception:
-        return ProbeResult(False,'source_unavailable')
+        return failed
 
 
 class WorkerHealth:

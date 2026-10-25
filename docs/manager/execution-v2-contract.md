@@ -245,6 +245,12 @@ selects registration identity; it cannot be combined with `--config`.
 OS worker lock, independent keepalive and source loops run; keepalive refreshes
 every5s and never advances source success time. All current enabled reviewed
 binding scopes for that exact revision must pass one <=50s bounded source round.
+Successful source status privately pins a deterministic digest of that exact
+reviewed scope set, including binding revision/pins and its append-only admission
+audit epoch. Readiness compares the current digest; a new binding/profile/source
+or disable/re-enable cannot reuse earlier success. Publication rechecks the digest
+under DispatchLock in the same transaction as the lease update; keepalive never
+repairs a stale proof. Historical leases without a scope proof fail closed.
 The probe uses the existing verified HTTPS transport, a non-scroll size0 search,
 and rejects failed/incomplete/timed-out shards. Zero hits can be healthy. No
 binding scope, unknown status, drift or failed round blocks execution. Restart

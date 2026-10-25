@@ -263,7 +263,7 @@ internal sealed class NativeExecutionFacts : IExecutionFacts
         try
         {
             var buffer=Marshal.AllocHGlobal(32);
-            try { if(!EvtGetChannelConfigProperty(config,0,0,32,buffer,out _) || Marshal.ReadInt32(buffer,8)!=13 || Marshal.ReadInt32(buffer)==0)return false; }
+            try { if(!EvtGetChannelConfigProperty(config,0,0,32,buffer,out _) || !EnabledScalarBoolean(buffer))return false; }
             finally { Marshal.FreeHGlobal(buffer); }
         }
         finally { EvtClose(config); }
@@ -276,6 +276,13 @@ internal sealed class NativeExecutionFacts : IExecutionFacts
             return success;
         }
         finally { EvtClose(query); }
+    }
+    internal static bool EnabledScalarBoolean(nint buffer)
+    {
+        // x64 EVT_VARIANT: 8-byte union, DWORD Count at8, DWORD Type at12.
+        // Type13 is scalar Boolean; an array adds0x80 and is rejected exactly.
+        // Count is unused for a scalar and must not influence enabled/type.
+        return buffer!=0 && Marshal.ReadInt32(buffer,12)==13 && Marshal.ReadInt32(buffer,0)!=0;
     }
     [StructLayout(LayoutKind.Sequential)] private struct ServiceStatus { public uint ServiceType,CurrentState,ControlsAccepted,Win32ExitCode,ServiceSpecificExitCode,CheckPoint,WaitHint; }
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern nint OpenSCManagerW(string? machine,string? database,uint access);

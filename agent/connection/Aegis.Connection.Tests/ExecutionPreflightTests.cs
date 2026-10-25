@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 
 internal static partial class Program
 {
@@ -55,6 +56,24 @@ internal static partial class Program
             Check(!ExecutionProfile.GrantsMutation(System.Security.AccessControl.FileSystemRights.ReadAndExecute|System.Security.AccessControl.FileSystemRights.Synchronize),"read execute treated as mutation");
             foreach(var rights in new[]{System.Security.AccessControl.FileSystemRights.Modify,System.Security.AccessControl.FileSystemRights.Delete,System.Security.AccessControl.FileSystemRights.ChangePermissions,System.Security.AccessControl.FileSystemRights.WriteData})
                 Check(ExecutionProfile.GrantsMutation(rights),"mutation accepted");
+        });
+        Test("execution preflight event variant reads Boolean type and scalar value",()=>
+        {
+            var buffer=Marshal.AllocHGlobal(16);
+            try
+            {
+                void Write(int value,int count,int type)
+                {
+                    Marshal.WriteInt64(buffer,0,0); Marshal.WriteInt32(buffer,0,value);
+                    Marshal.WriteInt32(buffer,8,count); Marshal.WriteInt32(buffer,12,type);
+                }
+                Write(1,0,13); Check(NativeExecutionFacts.EnabledScalarBoolean(buffer),"enabled scalar rejected");
+                Write(1,37,13); Check(NativeExecutionFacts.EnabledScalarBoolean(buffer),"unused scalar Count treated as type/enabled");
+                Write(0,13,13); Check(!NativeExecutionFacts.EnabledScalarBoolean(buffer),"disabled scalar accepted");
+                Write(1,13,8); Check(!NativeExecutionFacts.EnabledScalarBoolean(buffer),"UInt32 accepted as Boolean");
+                Write(1,13,13|0x80); Check(!NativeExecutionFacts.EnabledScalarBoolean(buffer),"Boolean array accepted as scalar");
+            }
+            finally {Marshal.FreeHGlobal(buffer);}
         });
         Test("execution preflight unsupported and unknown policy fail closed", () =>
         {

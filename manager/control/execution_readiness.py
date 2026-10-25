@@ -8,6 +8,7 @@ from .execution_ownership import (lock_dispatch, lock_device_ownership, guard_ex
     require_idle, execution_job_blocks)
 from .execution_services import authenticate_execution_identity
 from .models import Device, Job
+from .worker_health import current_scope_sha256
 
 
 def stamp(now):
@@ -93,7 +94,9 @@ def execution_readiness(device_id, *, now, active_job_id=None):
         if len(workers) != 1: block('worker_unavailable'); block('source_unavailable')
         else:
             worker = workers[0]; deadlines.append(worker.last_seen_at+timedelta(seconds=30))
-            if worker.source_probe_status != 'healthy' or not fresh(worker.source_probe_succeeded_at,now,60): block('source_unavailable')
+            if (worker.source_probe_status != 'healthy' or not fresh(worker.source_probe_succeeded_at,now,60)
+                    or not worker.source_probe_scope_sha256 or worker.source_probe_scope_sha256 != current_scope_sha256(connection)):
+                block('source_unavailable')
             else: deadlines.append(worker.source_probe_succeeded_at+timedelta(seconds=60))
     exclude = None
     if active_job_id is not None:

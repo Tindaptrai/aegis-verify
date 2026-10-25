@@ -6,6 +6,7 @@ from unittest.mock import patch
 import uuid
 import threading
 import time
+import copy
 from types import SimpleNamespace
 from django.test import SimpleTestCase
 from contextlib import contextmanager
@@ -72,8 +73,9 @@ class WorkerHealthTests(ExecutionFixture, AccountsCase):
         from control.collection import WazuhConnection
         from aegis_verify.connectors.wazuh.live import ProbeResult
         connection=WazuhConnection('https://indexer.example.test','synthetic-reader','synthetic-test',None,'wazuh-alerts-*')
-        scopes=[SimpleNamespace(pk=1,wazuh_agent_id='901',approved_environment_id='synthetic-A'),
-                SimpleNamespace(pk=2,wazuh_agent_id='902',approved_environment_id='synthetic-B')]
+        first=copy.copy(self.binding); first.approved_environment_id='synthetic-A'
+        second=copy.copy(self.binding); second.pk=first.pk+1; second.wazuh_agent_id='902'; second.approved_environment_id='synthetic-B'
+        scopes=[first,second]
         seen=[]
         def probe(cfg,**kwargs):
             seen.append((cfg.agent_id,cfg.environment_id,cfg.start,cfg.end))
