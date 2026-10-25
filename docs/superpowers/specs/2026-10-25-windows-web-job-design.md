@@ -1,6 +1,7 @@
 # Chạy SCN-001 từ web trên một Windows đã ghép nối
 
-Ngày: 2026-10-25. Trạng thái: **Đề xuất — chờ owner review thiết kế**.
+Ngày: 2026-10-25. Trạng thái: **Owner đã duyệt thiết kế và yêu cầu triển khai**.
+Issue thực thi: [#161](https://github.com/Tindaptrai/aegis-verify/issues/161).
 Mốc khảo sát mã nguồn: `7c6fbe80`; tài liệu này không tuyên bố đã triển khai hay kiểm chứng lab.
 Tên `WIN-DEMO-01` trong tài liệu và mockup là dữ liệu minh họa.
 
