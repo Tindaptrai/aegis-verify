@@ -35,7 +35,7 @@
 
 ## File/Interface Map
 
-- `manager/control/models.py`, `control/migrations/0005_device_inventory.py`, `devices/migrations/0002_device_archived_audit.py`: Device metadata, archived/revoked constraint and audit action.
+- `manager/control/models.py`, `manager/control/migrations/0005_device_archived_at_device_archived_by_id_and_more.py`, `manager/devices/migrations/0002_alter_enrollmentaudit_action.py`: Device metadata, archived/revoked constraint and audit action.
 - `manager/devices/archive.py`: eligibility, atomic archive and audit. `inventory.py`: v2 DTO/query/history. Existing `views.py`/`urls.py` and root URL routing expose them.
 - `manager/devices/network.py`: normalization, network payload and peer-header validation. Existing `services.py` applies authenticated snapshots; contracts/identity layer remain bounded.
 - `agent/connection/Aegis.Connection/NetworkInventory.cs`: single-flight collector and normalization; `NetworkHeartbeat.cs` or focused AgentClient methods: 2.1 request/response/fallback.
@@ -100,7 +100,7 @@ def test_bad_network_report_does_not_refresh_presence_or_snapshot():
 
 ### Task 4: Manager UI for IP, archive inventory and identity history
 
-**Files:** Modify `frontend/src/manager/api.ts`, existing contract module (discover exact path), `DevicesPage.tsx`, `manager.css`; create focused IP/detail/history/dialog components as useful; update `DevicesPage.test.tsx`, API/contract tests and add targeted component tests.
+**Files:** Modify `frontend/src/manager/api.ts`, existing contract module (discover exact path), `DevicesPage.tsx`, `styles.css`; create focused IP/detail/history/dialog components as useful; update `DevicesPage.test.tsx`, API/contract tests and add targeted component tests.
 
 **Consumes:** Task 1 v2 DTO/archive/history routes and Task 2 network semantics. Keep auth/pairing calls on v1. API helper supports version selection without loosening response validators. **Produces:** managed/archived scopes, IP column/two visible IPs/full list, UUID-selected details/history and delete confirmation using exact spec copy.
 

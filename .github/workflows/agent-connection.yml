@@ -118,14 +118,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet publish agent/connection/Aegis.Connection -c Release -r '${{ matrix.runtime }}' --self-contained true -p:DebugSymbols=false -p:DebugType=None -o $build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/stage_agent_connection.py --source-root (Get-Location).Path --build-root $build --output-root $release --runtime '${{ matrix.runtime }}' --version 0.1.0 --commit $commit
+          python scripts/stage_agent_connection.py --source-root (Get-Location).Path --build-root $build --output-root $release --runtime '${{ matrix.runtime }}' --version 0.2.0 --commit $commit
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Path $package | Out-Null
           if ($IsWindows) {
-            Expand-Archive -LiteralPath (Join-Path $release 'AEGIS-Agent-Connection-0.1.0-win-x64.zip') -DestinationPath $package
+            Expand-Archive -LiteralPath (Join-Path $release 'AEGIS-Agent-Connection-0.2.0-win-x64.zip') -DestinationPath $package
             $executable = Join-Path $package 'bin/aegis-agent.exe'
           } else {
-            tar -xzf (Join-Path $release 'AEGIS-Agent-Connection-0.1.0-linux-x64.tar.gz') -C $package
+            tar -xzf (Join-Path $release 'AEGIS-Agent-Connection-0.2.0-linux-x64.tar.gz') -C $package
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $executable = Join-Path $package 'bin/aegis-agent'
           }
@@ -142,7 +142,7 @@ jobs:
             schema_version = '1.0'
             source_commit = $env:AEGIS_CONNECTION_SOURCE_COMMIT
             runtime = '${{ matrix.runtime }}'
-            checks = @('production-django-issuer-views', 'published-cli-ip-san-mtls', 'same-uuid-reconnect', 'manager-revoke', 'native-service-account-start-stop', 'reinstall-identity-preserved', 'uninstall-identity-preserved')
+            checks = @('production-django-issuer-views', 'published-cli-ip-san-mtls', 'same-uuid-reconnect', 'network-2.1-service-account', 'legacy-404-fallback-old-state', 'manager-revoke', 'manager-archive-final-snapshot', 'native-service-account-start-stop', 'reinstall-identity-preserved', 'uninstall-identity-preserved')
             result = 'passed'
             reboot_before_login = 'owner-lab-gate-not-executed'
             run_url = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'

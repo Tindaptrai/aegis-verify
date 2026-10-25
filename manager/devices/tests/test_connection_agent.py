@@ -30,7 +30,8 @@ from django.test import Client, SimpleTestCase, TransactionTestCase, override_se
 from django.utils import timezone
 
 from accounts.models import AccountMutationLock
-from control.models import Device
+from control.models import Device, DispatchLock
+from devices.archive import archive_device
 from devices.contracts import device_dto
 from devices.issuer import initialize_issuer
 from devices.models import PairingCode
@@ -42,7 +43,9 @@ class QuietTlsAdapter(BaseHTTPRequestHandler):
         pass
 
     def do_POST(self):
-        if self.path not in ("/agent/v2/enroll", "/agent/v2/heartbeat"):
+        self.server.routes.append(self.path)
+        if (self.path not in ("/agent/v2/enroll", "/agent/v2/heartbeat", "/agent/v2/network-heartbeat")
+                or self.path == "/agent/v2/network-heartbeat" and not self.server.network_supported):
             self.send_error(404)
             return
         size = int(self.headers.get("Content-Length", "0"))
@@ -50,7 +53,7 @@ class QuietTlsAdapter(BaseHTTPRequestHandler):
             self.send_error(400)
             return
         certificate = self.connection.getpeercert(binary_form=True)
-        headers = {"HTTP_X_FORWARDED_PROTO": "https"}
+        headers = {"HTTP_X_FORWARDED_PROTO": "https", "HTTP_X_AEGIS_PEER_IP": self.client_address[0]}
         if certificate:
             pem = ssl.DER_cert_to_PEM_cert(certificate)
             headers.update(HTTP_X_AEGIS_CLIENT_VERIFY="SUCCESS", HTTP_X_AEGIS_CLIENT_CERT=quote(pem, safe=""))
@@ -96,6 +99,7 @@ def synthetic_tls(root):
 def connection_test_owner():
     # TransactionTestCase flush removes migration data between test methods.
     AccountMutationLock.objects.get_or_create(pk=1)
+    DispatchLock.objects.get_or_create(pk=1)
     return get_user_model().objects.create_superuser("synthetic-tls-owner", password="synthetic-test-only")
 
 
@@ -258,10 +262,12 @@ class ConnectionFixtureTests(TransactionTestCase):
         # not rerun, so this must work independently of the initial seeded row.
         call_command("flush", interactive=False, verbosity=0)
         self.assertFalse(AccountMutationLock.objects.exists())
+        self.assertFalse(DispatchLock.objects.exists())
         owner = connection_test_owner()
         minted = create_pairing_code(actor=owner, environment_id="synthetic.after-flush")
         self.assertEqual(PairingCode.objects.get(pk=minted["id"]).issued_by_id, owner.pk)
         self.assertEqual(AccountMutationLock.objects.count(), 1)
+        self.assertEqual(DispatchLock.objects.count(), 1)
 
 
 @skipUnless(os.environ.get("AEGIS_CONNECTION_TEST_EXE"), "Published connection CLI required; native CI sets AEGIS_CONNECTION_TEST_EXE")
@@ -286,6 +292,8 @@ class PublishedConnectionTests(TransactionTestCase):
         context.load_verify_locations(cafile=str(self.root / "issuer.pem"))
         context.verify_mode = ssl.CERT_OPTIONAL
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), QuietTlsAdapter)
+        self.server.routes = []
+        self.server.network_supported = True
         self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -318,7 +326,8 @@ class PublishedConnectionTests(TransactionTestCase):
 
     def start_loop(self):
         process = subprocess.Popen([str(self.executable), "run", "--state-dir", str(self.state)],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                   stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        self.addCleanup(process.stderr.close)
         self.addCleanup(lambda: self.stop_loop(process))
         return process
 
@@ -327,6 +336,20 @@ class PublishedConnectionTests(TransactionTestCase):
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=20)
+
+    def assert_terminal_denial(self, process):
+        self.assertEqual(process.returncode, 3)
+        status = json.loads(self.cli("status", "--state-dir", str(self.state)))["state"]
+        diagnostic = "withheld"
+        if status != "identity_denied":
+            try:
+                error = json.loads(process.stderr.read(513)).get("error", {}).get("code")
+                if error in {"state_invalid", "state_locked", "configuration_invalid", "identity_missing",
+                             "identity_denied", "response_invalid", "identity_expired"}:
+                    diagnostic = error
+            except (ValueError, TypeError, AttributeError):
+                pass
+        self.assertEqual(status, "identity_denied", "Terminal CLI diagnostic: " + diagnostic)
 
     def test_cli_enrolls_over_ip_san_tls_reconnects_same_uuid_and_honors_revoke(self):
         code = create_pairing_code(actor=self.owner, environment_id="synthetic.tls")["code"]
@@ -350,9 +373,89 @@ class PublishedConnectionTests(TransactionTestCase):
         self.assertEqual(json.loads(self.cli("status", "--state-dir", str(self.state)))["device_id"], identity)
         revoke_device(actor=self.owner, device_id=identity)
         self.wait_until(lambda: second.poll() is not None, "Client ignored Manager identity revocation")
-        self.assertEqual(second.returncode, 3)
-        self.assertEqual(json.loads(self.cli("status", "--state-dir", str(self.state)))["state"], "identity_denied")
+        self.assert_terminal_denial(second)
         self.assertEqual(device_dto(Device.objects.get(pk=identity))["status"], "revoked")
+
+    def enrolled_identity(self, *, old_state=False):
+        code = create_pairing_code(actor=self.owner, environment_id="synthetic.network")["code"]
+        self.cli("connect", "--manager", self.origin, "--server-ca", str(self.root / "server-ca.pem"),
+                 "--state-dir", str(self.state), code=code)
+        path = self.state / "state.json"
+        state = json.loads(path.read_text())
+        if old_state:
+            # Synthetic upgrade fixture: the 0.1.0 schema is identical. Retain
+            # real issuer/TLS identity; change only its recorded creation version.
+            state["agent_version"] = "0.1.0"
+            path.write_text(json.dumps(state))
+            Device.objects.filter(pk=state["device_id"]).update(agent_version="0.1.0")
+        return state
+
+    def assert_identity_preserved(self, before):
+        after = json.loads((self.state / "state.json").read_text())
+        stable = set(before) - {"last_acknowledged_at", "failure"}
+        # Boolean comparison avoids printing private keys/certificates on failure.
+        self.assertTrue(set(before) == set(after) and all(before[key] == after[key] for key in stable),
+                        "Protected identity changed; values withheld")
+
+    def assert_network_snapshot(self, device):
+        self.assertEqual(device.reported_agent_version, "0.2.0")
+        self.assertEqual(device.ip_collection_status, "ok", "Native service OS collection failed")
+        self.assertIsInstance(device.reported_ips, list)
+        self.assertLessEqual(len(device.reported_ips), 32)
+        self.assertEqual(device.reported_ips_received_at, device.last_heartbeat_at)
+        self.assertEqual(device.observed_ip, "127.0.0.1")
+        self.assertEqual(device.observed_ip_received_at, device.last_heartbeat_at)
+        addresses = [ipaddress.ip_address(value) for value in device.reported_ips]
+        self.assertEqual(addresses, sorted(set(addresses), key=lambda value: (value.version, int(value))))
+        self.assertTrue(all(not (value.is_loopback or value.is_unspecified or value.is_multicast or value.is_link_local)
+                            for value in addresses))
+
+    @staticmethod
+    def final_snapshot(device):
+        return {field: getattr(device, field) for field in ("last_heartbeat_at", "reported_ips",
+            "ip_collection_status", "reported_ips_truncated", "reported_ips_received_at",
+            "reported_agent_version", "observed_ip", "observed_ip_received_at")}
+
+    def test_published_network_upgrade_archival_preserves_final_snapshot_and_old_identity(self):
+        before = self.enrolled_identity(old_state=True)
+        identity = before["device_id"]
+        process = self.start_loop()
+        self.wait_until(lambda: Device.objects.get(pk=identity).reported_agent_version == "0.2.0",
+                        "Published network heartbeat did not reach production Manager")
+        device = Device.objects.get(pk=identity)
+        self.assertEqual(device.agent_version, "0.1.0")
+        self.assert_network_snapshot(device)
+        archive_device(actor=self.owner, device_id=identity)
+        snapshot = self.final_snapshot(Device.objects.get(pk=identity))
+        self.wait_until(lambda: process.poll() is not None, "Client ignored archived identity denial")
+        self.assert_terminal_denial(process)
+        self.assertNotIn("/agent/v2/heartbeat", self.server.routes)
+        self.assertEqual(self.final_snapshot(Device.objects.get(pk=identity)), snapshot)
+        self.assertEqual(Device.objects.count(), 1)
+        self.assert_identity_preserved(before)
+
+    def test_published_404_legacy_fallback_preserves_old_identity_and_reprobes_after_restart(self):
+        self.server.network_supported = False
+        before = self.enrolled_identity(old_state=True)
+        identity = before["device_id"]
+        first = self.start_loop()
+        self.wait_until(lambda: self.server.routes.count("/agent/v2/heartbeat") >= 2,
+                        "Legacy fallback did not retain heartbeat cadence")
+        self.assertEqual(self.server.routes.count("/agent/v2/network-heartbeat"), 1)
+        self.stop_loop(first)
+        device = Device.objects.get(pk=identity)
+        self.assertIsNotNone(device.last_heartbeat_at)
+        self.assertIsNone(device.reported_ips)
+        self.assertIsNone(device.reported_agent_version)
+        self.assertEqual(device.observed_ip, "127.0.0.1")
+        second = self.start_loop()
+        self.wait_until(lambda: self.server.routes.count("/agent/v2/network-heartbeat") == 2,
+                        "Restart did not probe network capability again")
+        revoke_device(actor=self.owner, device_id=identity)
+        self.wait_until(lambda: second.poll() is not None, "Legacy heartbeat ignored identity denial")
+        self.assert_terminal_denial(second)
+        self.assertEqual(Device.objects.count(), 1)
+        self.assert_identity_preserved(before)
 
     def native_phase(self, action, *, identity=None, code=None):
         repository = Path(__file__).resolve().parents[3]
@@ -386,7 +489,7 @@ class PublishedConnectionTests(TransactionTestCase):
         return data
 
     @skipUnless(os.environ.get("AEGIS_CONNECTION_SERVICE_PACKAGE"), "Disposable native service CI package required")
-    def test_native_installer_service_account_reconnect_reinstall_revoke_and_preserving_uninstall(self):
+    def test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall(self):
         code = create_pairing_code(actor=self.owner, environment_id="synthetic.service")["code"]
         installed = self.native_phase("Install", code=code)
         identity = installed["device_id"]
@@ -394,16 +497,22 @@ class PublishedConnectionTests(TransactionTestCase):
         try:
             self.wait_until(lambda: Device.objects.get(pk=identity).last_heartbeat_at is not None,
                             "Native service account did not complete actual TLS heartbeat")
+            self.assert_network_snapshot(Device.objects.get(pk=identity))
             for action in ("Restart", "Reinstall"):
                 previous = Device.objects.get(pk=identity).last_heartbeat_at
                 self.native_phase(action, identity=identity)
                 self.wait_until(lambda: Device.objects.get(pk=identity).last_heartbeat_at > previous,
                                 "Native " + action + " failed to reconnect with same identity")
                 self.assertEqual(Device.objects.count(), 1)
-            revoke_device(actor=self.owner, device_id=identity)
+                self.assert_network_snapshot(Device.objects.get(pk=identity))
+            archive_device(actor=self.owner, device_id=identity)
+            snapshot = self.final_snapshot(Device.objects.get(pk=identity))
             self.wait_until(lambda: self.native_phase("Status", identity=identity)["state"] == "identity_denied",
-                            "Native service did not observe Manager revocation")
-            self.assertEqual(device_dto(Device.objects.get(pk=identity))["status"], "revoked")
+                            "Native service did not observe Manager archival")
+            archived = Device.objects.get(pk=identity)
+            self.assertIsNotNone(archived.archived_at)
+            self.assertEqual(self.final_snapshot(archived), snapshot)
+            self.assertEqual(device_dto(archived)["status"], "revoked")
         finally:
             removed = self.native_phase("Uninstall", identity=identity)
             self.assertEqual(removed["service_status"], "absent")

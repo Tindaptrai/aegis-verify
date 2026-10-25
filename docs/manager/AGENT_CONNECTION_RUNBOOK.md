@@ -65,8 +65,14 @@ Sửa nginx theo `deploy/manager/nginx.conf.example` trong source commit: đúng
 server certificate/key, `server_name`, client trust bundle và upstream loopback.
 Giữ public legacy CA trong bundle; không thay thế pilot CA/key. Bootstrap chỉ là
 `/agent/v2/enroll` không cần client certificate, có giới hạn body/rate và loại bỏ
-identity header. `/agent/v2/heartbeat` bắt buộc certificate đã xác minh; nginx ghi
-đè identity header từ TLS. Giữ nguyên mTLS `/agent/v1/` và không mở upstream ra mạng.
+identity header. Cả exact location `/agent/v2/heartbeat` (2.0) và
+`/agent/v2/network-heartbeat` (2.1, body tối đa 16 KiB) bắt buộc certificate đã xác
+minh; nginx ghi đè identity header từ TLS và `X-Aegis-Peer-IP` bằng `$remote_addr`
+ở **cả hai route**. Không lấy IP từ `X-Forwarded-For`, `Forwarded` hay header client;
+không bật real_ip để thay đổi provenance. Giữ nguyên mTLS `/agent/v1/` và không mở
+upstream ra mạng. Nếu deployment dùng listener v2 riêng, thêm exact location mới
+vào listener v2 hiện có; không chép đè toàn bộ template lên deployment. Giữ nguyên
+port/listener, certificate/key, CA bundle và CRL legacy hiện có.
 Sau khi kiểm tra cấu hình và quyền file, `sudo nginx -t` rồi reload nginx và restart
 Manager theo runbook hiện có. `ALLOWED_HOSTS`, SAN và origin phải thống nhất.
 
@@ -218,6 +224,28 @@ Revoke hoặc certificate hết hạn cần owner xử lý; agent không tự đ
 
 ## 6. Nâng cấp, gỡ cài và phục hồi
 
+Đợt 0.2.0: backup database và cấu hình private theo quy trình owner trước nâng.
+Nâng **Manager + migrations + nginx trước**, kiểm tra heartbeat 0.1.0 vẫn hoạt động,
+rồi nâng agent từng máy và kiểm tra UI mới. Không init lại issuer hay đổi PKI khi
+nâng từ 0.1.0. Ghép nối mới bằng 0.2.0 cần Manager mới; enrollment vẫn protocol 2.0.
+Network heartbeat dùng 2.1 và báo phiên bản binary đang chạy 0.2.0; phiên bản ghi
+khi ghép nối vẫn được giữ riêng. State cũ 0.1.0 giữ UUID, generation, khóa, CSR,
+certificate, origin và CA pin; không ghi IP vào protected state.
+
+Chỉ HTTP 404 tại route network cho phép fallback sang heartbeat 2.0 trong suốt
+process hiện tại; restart sẽ thử route mới lại. Fallback giữ presence nhưng không
+có IP agent khai báo. 403, lỗi TLS/trust, 429, 5xx hoặc response sai không bật
+fallback. Nếu rollback binary, 0.1.0 chỉ dùng state vốn được tạo bằng 0.1.0;
+không dùng nó để đọc state mới tạo bằng 0.2.0. Không rollback database để phục hồi
+identity đã revoked/archived, và không sửa version trong private state.
+
+IP khai báo là các địa chỉ interface Up agent thu được, tối đa 32; không suy đoán
+IP chính. IP kết nối Manager thấy là peer quan sát bởi nginx, có thể khác do NAT.
+`[]` là thu thành công nhưng không có địa chỉ hợp lệ; null/chưa ghi nhận hoặc thu
+thất bại không có nghĩa máy không có mạng. Offline hiển thị snapshot cũ cùng thời
+gian nhận. Xóa máy trên Manager archive + revoke, giữ snapshot cuối và lịch sử;
+không uninstall endpoint. Agent bị từ chối heartbeat và không tự re-enroll.
+
 Xác minh gói mới rồi chạy installer mới. Với state enrolled hợp lệ, installer dùng
 lại identity và không hỏi code. Nếu cung cấp origin/CA khác state đã pin, installer
 từ chối. Service/path/account có cấu hình khác hoặc state không an toàn cũng bị từ
@@ -315,6 +343,10 @@ owner review, không sửa trực tiếp private JSON.
 - Ghi UUID và heartbeat, reboot disposable endpoint được duyệt; **không đăng nhập**,
   quan sát Manager nhận heartbeat cùng UUID. Kiểm tra sau delayed startup/mạng chậm.
 - Ngắt mạng rồi phục hồi, quan sát Offline → Online cùng UUID, không có enrollment mới.
+- Kiểm tra nhiều card/DHCP/VPN trên endpoint được duyệt; IP khai báo và peer NAT
+  có nhãn/thời gian riêng, không gộp hoặc chọn IP chính.
+- Archive đúng UUID từ UI; máy rời danh sách quản lý, có trong Đã xóa cùng lịch sử,
+  snapshot cuối không đổi, heartbeat bị từ chối và endpoint không tự re-enroll.
 - Revoke; xác minh không heartbeat cập nhật, status yêu cầu xử lý và không tự re-enroll.
 - Thử code expiry/reuse/demotion; xác minh từ chối, không lộ code trong logs/history.
 - Kiểm tra certificate expiry/replacement, retire bảo toàn identity cũ, UUID mới sau connect.
@@ -322,5 +354,6 @@ owner review, không sửa trực tiếp private JSON.
   service không sửa binary, Windows virtual account thực sự dùng được Schannel key.
 
 CI native start/stop/configuration là bằng chứng cho các gate đó; **không chứng minh
-reboot trước login**. Chỉ đánh dấu reboot/network/expiry lab gate đã chạy khi có
+reboot trước login**. Kết quả owner lab 0.1.0 trước đây không thay cho gate 0.2.0.
+Chỉ đánh dấu reboot/network/expiry lab gate đã chạy khi có
 quan sát thực và owner review. Human review + lab validation bắt buộc trước merge.
