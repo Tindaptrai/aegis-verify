@@ -7,6 +7,52 @@ internal static partial class Program
 {
     private static void ExecutionNativeTests()
     {
+        Test("execution policy runner allowed payload origin denied invalidates cached proof and refresh", async () =>
+        {
+            var (grant, facts) = PreflightFixture();
+            var zones = new Dictionary<string, bool> { [grant.Profile.RunnerPath] = true,
+                [Path.Combine(grant.Profile.KitDirectory, "lab_update.ps1")] = true,
+                [Path.Combine(grant.Profile.KitDirectory, "maintenance_check.ps1")] = true };
+            string? policy = "RemoteSigned";
+            var proof = new ExecutionPolicyProof(facts, _ => true, (_, _) => Task.FromResult(true),
+                path => ExecutionPowerShellPolicy.Allows(path, () => policy, path => zones[path]));
+            // WLDP/SAFER and the authorized readonly runner are not payload authority.
+            Check(await proof.RefreshAsync(grant, CancellationToken.None) && proof.Allows(grant), "local explicit policy did not establish proof");
+            zones[Path.Combine(grant.Profile.KitDirectory, "lab_update.ps1")] = false;
+            Check(!proof.Allows(grant), "cached runner proof ignored payload-only origin denial");
+            Check(!await proof.RefreshAsync(grant, CancellationToken.None), "refresh accepted denied payload origin");
+            zones[Path.Combine(grant.Profile.KitDirectory, "lab_update.ps1")] = true;
+            Check(!proof.Allows(grant), "failed refresh resurrected old proof");
+            Check(await proof.RefreshAsync(grant, CancellationToken.None), "fresh local proof failed");
+            policy = "AllSigned";
+            Check(!proof.Allows(grant) && !await proof.RefreshAsync(grant, CancellationToken.None), "signature-dependent policy reused local proof");
+            policy = null;
+            Check(!await proof.RefreshAsync(grant, CancellationToken.None), "undefined policy guessed a permissive default");
+            policy = "RemoteSigned";
+            var changedDuringProbe = new ExecutionPolicyProof(facts, _ => true, (_, _) =>
+            { zones[Path.Combine(grant.Profile.KitDirectory, "maintenance_check.ps1")] = false; return Task.FromResult(true); },
+                path => ExecutionPowerShellPolicy.Allows(path, () => policy, path => zones[path]));
+            Check(!await changedDuringProbe.RefreshAsync(grant, CancellationToken.None) && !changedDuringProbe.Allows(grant), "refresh published proof despite second payload origin change");
+        });
+        Test("execution policy only explicit local authorization admits and scope precedence is conservative", () =>
+        {
+            foreach (var policy in new string?[] { null, "Undefined", "Default", "Bypass", "Restricted", "AllSigned", "unknown", "" })
+                Check(!ExecutionPowerShellPolicy.Allows("fixture", () => policy, _ => true), "unsupported policy admitted");
+            foreach (var policy in new[] { "RemoteSigned", "Unrestricted" })
+            {
+                Check(ExecutionPowerShellPolicy.Allows("fixture", () => policy, _ => true), "explicit local policy rejected");
+                Check(!ExecutionPowerShellPolicy.Allows("fixture", () => policy, _ => false), "remote or unknown origin admitted");
+            }
+            Check(ExecutionPowerShellPolicy.Select("AllSigned", "RemoteSigned", "Unrestricted", "RemoteSigned") == "AllSigned", "machine policy overridden");
+            Check(ExecutionPowerShellPolicy.Select(null, "Restricted", "Unrestricted", "RemoteSigned") == "Restricted", "user policy overridden");
+            Check(ExecutionPowerShellPolicy.Select(null, null, "AllSigned", "RemoteSigned") == "AllSigned", "current user policy overridden");
+            Check(ExecutionPowerShellPolicy.Select(null, null, null, "RemoteSigned") == "RemoteSigned", "explicit machine preference lost");
+            Check(ExecutionPowerShellPolicy.Select(null, null, null, null) == null, "default policy invented");
+            Check(ExecutionPowerShellPolicy.Select("unknown", null, null, "RemoteSigned") == "unknown", "malformed higher scope fell through");
+            Check(!ExecutionPowerShellPolicy.Allows("fixture", () => throw new IOException("synthetic denied read"), _ => true), "policy read error admitted");
+            string? changing = "RemoteSigned";
+            Check(!ExecutionPowerShellPolicy.Allows("fixture", () => changing, _ => { changing = "AllSigned"; return true; }), "changed policy during origin read admitted");
+        });
         Test("execution runner read-only policy argv never contains Execute or payload path", () =>
         {
             var (job, grant) = ExecutionFixture();
@@ -27,6 +73,32 @@ internal static partial class Program
         });
         if (!OperatingSystem.IsWindowsVersionAtLeast(10) || RuntimeInformation.ProcessArchitecture != Architecture.X64)
         { Console.WriteLine("SKIP execution native (requires Windows 10+/Server 2016+ x64)"); return; }
+        Test("execution native per-file origin rejects payload MOTW without changing bytes or metadata", () =>
+        {
+            using var temp = new Scratch(); Directory.CreateDirectory(temp.Path);
+            var runner = Path.Combine(temp.Path, "runner.ps1"); var payload = Path.Combine(temp.Path, "payload.ps1");
+            File.WriteAllText(runner, "# inert runner"); File.WriteAllText(payload, "# inert payload");
+            var bytes = File.ReadAllBytes(payload); var zone = payload + ":Zone.Identifier";
+            Check(ExecutionPowerShellPolicy.LocalOrigin(runner) && ExecutionPowerShellPolicy.LocalOrigin(payload), "local scratch origin not established");
+            File.WriteAllText(zone, "[ZoneTransfer]\r\nZoneId=3\r\n");
+            Check(ExecutionPowerShellPolicy.LocalOrigin(runner) && !ExecutionPowerShellPolicy.LocalOrigin(payload), "payload Internet origin inherited runner authorization");
+            Check(File.ReadAllBytes(payload).SequenceEqual(bytes) && File.ReadAllText(zone) == "[ZoneTransfer]\r\nZoneId=3\r\n", "origin check changed file or unblocked metadata");
+            File.WriteAllText(zone, "unrecognized-origin");
+            Check(!ExecutionPowerShellPolicy.LocalOrigin(payload), "malformed origin metadata accepted");
+        });
+        Test("execution native child excludes parent process execution policy override", async () =>
+        {
+            using var temp = new Scratch(); Directory.CreateDirectory(temp.Path);
+            var previous = Environment.GetEnvironmentVariable("PSExecutionPolicyPreference");
+            try
+            {
+                Environment.SetEnvironmentVariable("PSExecutionPolicyPreference", "synthetic-not-a-policy");
+                var result = await WindowsExecutionNative.RunAsync(Environment.ProcessPath!, ["--execution-child", "environment", Path.Combine(temp.Path, "marker")],
+                    temp.Path, TimeSpan.FromSeconds(8), _ => Task.CompletedTask, _ => { }, CancellationToken.None);
+                Check(result.Observation.ExitCode == 0 && result.Observation.CleanupSucceeded, "child inherited process policy override");
+            }
+            finally { Environment.SetEnvironmentVariable("PSExecutionPolicyPreference", previous); }
+        });
         Test("execution native delayed preflight samples current monotonic and rejects expired interval before create", async () =>
         {
             using var temp = new Scratch(); Directory.CreateDirectory(temp.Path); var marker = Path.Combine(temp.Path, "marker");
@@ -166,6 +238,7 @@ internal static partial class Program
         if (args.Length is not (3 or 4)) return 2;
         File.WriteAllText(args[2], "inert"); Console.WriteLine("inert-child"); Console.Error.WriteLine("inert-stderr");
         if (args[1] == "exit") return 0;
+        if (args[1] == "environment") return Environment.GetEnvironmentVariable("PSExecutionPolicyPreference") == null ? 0 : 4;
         if (args[1] == "sentinel") { SetEvent(nint.Parse(args[3])); return 0; }
         if (args[1] == "large") { Console.Write(new string('x', 3 * 1024 * 1024)); return 0; }
         if (args[1] is "tree" or "tree-exit")
