@@ -35,7 +35,7 @@ function DeviceDialog({ title, closeLabel, onClose, children }: { title: string;
   return <div className="drawer-backdrop" onClick={onClose}><section className="account-drawer device-dialog" role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} ref={dialog} onClick={(event) => event.stopPropagation()}><header><h2>{title}</h2><button aria-label={closeLabel} onClick={onClose}>×</button></header>{children}</section></div>;
 }
 
-export function DevicesPage({ api, canManage }: { api: ManagerApi; canManage: boolean }) {
+export function DevicesPage({ api, canManage, onExecution }: { api: ManagerApi; canManage: boolean; onExecution?: () => void }) {
   const [data, setData] = useState<DevicesDTO | null>(null);
   const [query, setQuery] = useState<{ page: number; search: string; scope: 'managed' | 'archived' }>({ page: 1, search: '', scope: 'managed' });
   const [search, setSearch] = useState('');
@@ -123,7 +123,8 @@ export function DevicesPage({ api, canManage }: { api: ManagerApi; canManage: bo
   useEffect(() => { if (!canManage) closeDialog(); }, [canManage]);
   return <>
     <div className="page-heading users-heading"><div><p className="eyebrow">KẾT NỐI</p><h1>Máy</h1><p>Máy đã đăng ký và lần liên hệ được Manager ghi nhận.</p></div>{canManage && !denied && <button className="primary" onClick={openPair} disabled={busy}>Thêm máy</button>}</div>
-    <p className="panel panel-body presence-help">Online chỉ xác nhận liên hệ gần đây, không xác nhận máy sẵn sàng chạy kịch bản. Máy ghép nối chỉ hỗ trợ hiện diện.</p>
+    <p className="panel panel-body presence-help">Online chỉ xác nhận liên hệ gần đây, không xác nhận máy sẵn sàng chạy kịch bản. Danh sách này chỉ báo hiện diện. Readiness Windows được xác minh riêng ở Tác vụ; Linux chỉ hỗ trợ hiện diện.</p>
+    {onExecution && <button onClick={onExecution}>Xem readiness và tác vụ</button>}
     <nav className="device-scopes" aria-label="Phạm vi máy">{(['managed', 'archived'] as const).map((scope) => <button key={scope} aria-pressed={query.scope === scope} disabled={denied} onClick={() => { closeDialog(); setQuery({ ...query, scope, page: 1 }); }}>{scope === 'managed' ? 'Đang quản lý' : 'Đã xóa'}</button>)}</nav>
     <section className="panel users-panel" aria-label="Danh sách máy"><header className="users-panel-header"><h2>Danh sách máy {data && <span className="count-tag">{data.count}</span>}</h2><div className="device-tools"><form role="search" onSubmit={searchDevices}><label className="visually-hidden" htmlFor="device-search">Tìm máy</label><input id="device-search" type="search" maxLength={100} placeholder="Tìm máy…" value={search} disabled={denied} onChange={(event) => setSearch(event.target.value)} /><button disabled={denied}>Tìm kiếm</button></form><button disabled={loading || denied} onClick={() => setRevision((value) => value + 1)}>Làm mới</button></div></header>
       <p className="users-feedback">Tự làm mới sau mỗi 15 giây khi yêu cầu trước đã hoàn tất.</p>

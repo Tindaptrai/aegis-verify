@@ -14,6 +14,13 @@ export function signedInApiFixture(role: 'admin' | 'operator' | 'viewer', option
   const target = { ...current.user!, ...(options?.technicalTarget ? { role: 'technical' as const, editable: false } : {}) };
   return {
     invalidate: vi.fn(),
+    executionProviders: vi.fn(async () => ({ providers: [] })),
+    executionDevice: vi.fn(async () => { throw new Error('Configure synthetic execution device'); }),
+    setExecutionBinding: vi.fn(async () => { throw new Error('Configure synthetic execution binding'); }),
+    previewExecution: vi.fn(async () => { throw new Error('Configure synthetic execution preview'); }),
+    approveExecution: vi.fn(async () => { throw new Error('Configure synthetic execution approval'); }),
+    executionJob: vi.fn(async () => { throw new Error('Configure synthetic execution job'); }),
+    cancelExecution: vi.fn(async () => { throw new Error('Configure synthetic execution cancel'); }),
     listCatalog: vi.fn(async () => ({ results: [], count: 0, page: 1, page_size: 50 as const })),
     catalogPackage: vi.fn(async () => { throw new Error('Configure synthetic catalog package'); }),
     catalogFile: vi.fn(async () => { throw new Error('Configure synthetic catalog file'); }),

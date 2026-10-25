@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import { ManagerApiError, type ManagerApi } from './api';
 import { catalogValidationCodes, type CatalogListDTO, type CatalogPackageDTO, type CatalogStatus } from './catalogTypes';
 import './catalog.css';
+import { ReviewedProviders } from './ReviewedProviders';
 
 const statusLabels = { draft: 'Bản nháp', published: 'Đã xuất bản', unpublished: 'Đã ngừng xuất bản' };
 const auditLabels = { imported: 'Nhập gói', published: 'Xuất bản', unpublished: 'Ngừng xuất bản' };
@@ -101,7 +102,7 @@ function CatalogReview({ api, id, initial, canPublish, busy, write, onAuthorityF
   </>;
 }
 
-export function CatalogPage({ api, canImport, canPublish }: { api: ManagerApi; canImport: boolean; canPublish: boolean }) {
+export function CatalogPage({ api, canImport, canPublish, onExecution }: { api: ManagerApi; canImport: boolean; canPublish: boolean; onExecution?: () => void }) {
   const [data, setData] = useState<CatalogListDTO | null>(null);
   const [query, setQuery] = useState<{ page: number; q: string; status: CatalogStatus | '' }>({ page: 1, q: '', status: '' });
   const [search, setSearch] = useState('');
@@ -142,6 +143,7 @@ export function CatalogPage({ api, canImport, canPublish }: { api: ManagerApi; c
   function changeQuery(next: typeof query) { closeDialog(); setQuery(next); }
   return <>
     <div className="page-heading users-heading"><div><p className="eyebrow">DANH MỤC</p><h1>Kịch bản</h1><p>Gói có phiên bản, nội dung riêng tư và lịch sử duyệt.</p></div>{canImport && !denied && <button className="primary" disabled={busy} onClick={() => { setFormError(''); setDialog({ kind: 'import' }); }}>Nhập ZIP</button>}</div>
+    <ReviewedProviders api={api} onExecution={onExecution} />
     <p className="panel panel-body presence-help">{assessment}</p>
     <section className="panel users-panel" aria-label="Danh mục kịch bản"><header className="users-panel-header catalog-panel-header"><h2>Danh mục {data && <span className="count-tag">{data.count}</span>}</h2><div className="catalog-tools"><form className="catalog-search" role="search" onSubmit={(event) => { event.preventDefault(); changeQuery({ ...query, page: 1, q: search.slice(0, 100) }); }}><label className="visually-hidden" htmlFor="catalog-search">Tìm kịch bản</label><input id="catalog-search" type="search" placeholder="Tên hoặc mã kịch bản…" maxLength={100} value={search} disabled={denied} onChange={(event) => setSearch(event.target.value)} /><button disabled={denied}>Tìm kiếm</button></form><div className="catalog-filter"><label htmlFor="catalog-status">Trạng thái gói</label><select id="catalog-status" value={query.status} disabled={denied} onChange={(event) => changeQuery({ ...query, page: 1, status: event.target.value as CatalogStatus | '' })}><option value="">Tất cả</option><option value="draft">Bản nháp</option><option value="published">Đã xuất bản</option><option value="unpublished">Đã ngừng xuất bản</option></select></div><button disabled={loading || denied} onClick={() => { closeDialog(); setRevision((value) => value + 1); }}>Làm mới</button></div></header>
       {error && <p role="alert" className="manager-alert users-feedback">{error}</p>}{loading && <p role="status" className="users-feedback">Đang tải danh mục…</p>}

@@ -8,6 +8,7 @@ import { MyAccount } from './MyAccount';
 import { UsersPage } from './UsersPage';
 import { DevicesPage } from './DevicesPage';
 import { CatalogPage } from './CatalogPage';
+import { ExecutionPage } from './ExecutionPage';
 import logo from '../../../packaging/windows/demo-launcher/assets/aegis-demo-logo.png';
 
 const anonymous: SessionDTO = { authenticated: false, csrf_token: '', user: null, expires_at: null };
@@ -19,7 +20,7 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const [sessionError, setSessionError] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [page, setPage] = useState<'overview' | 'users' | 'devices' | 'catalog'>('overview');
+  const [page, setPage] = useState<'overview' | 'users' | 'devices' | 'catalog' | 'execution'>('overview');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const generation = useRef(0);
   const active = useRef<AbortController | null>(null);
@@ -116,6 +117,13 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
       }
     }
     return { ...api,
+      executionProviders: (signal) => guarded(() => api.executionProviders(signal), signal),
+      executionDevice: (id, signal) => guarded(() => api.executionDevice(id, signal), signal),
+      setExecutionBinding: (id, input, signal) => guarded(() => api.setExecutionBinding(id, input, signal), signal),
+      previewExecution: (input, signal) => guarded(() => api.previewExecution(input, signal), signal),
+      approveExecution: (input, signal) => guarded(() => api.approveExecution(input, signal), signal),
+      executionJob: (id, signal) => guarded(() => api.executionJob(id, signal), signal),
+      cancelExecution: (id, signal) => guarded(() => api.cancelExecution(id, signal), signal),
       listCatalog: (query, signal) => guarded(() => api.listCatalog(query, signal), signal),
       catalogPackage: (id, signal) => guarded(() => api.catalogPackage(id, signal), signal),
       catalogFile: (id, path, signal) => guarded(() => api.catalogFile(id, path, signal), signal),
@@ -227,6 +235,8 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const canManageDevices = canView && !!user?.capabilities.includes('manage_devices');
   const showingDevices = page === 'devices' && canView;
   const showingCatalog = page === 'catalog' && canView;
+  const showingExecution = page === 'execution' && canView;
+  const canRun = canView && !!user?.capabilities.includes('run_jobs');
   const canImport = canView && !!user?.capabilities.includes('import_scenarios');
   const canPublish = canView && !!user?.capabilities.includes('publish_scenarios');
   const deviceAuthority = user ? `${user.id}:${[...user.capabilities].sort().join(',')}` : '';
@@ -234,13 +244,13 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   return <div className="manager-app" data-theme={theme}>
     {!session ? <main className="session-pending" aria-busy={!sessionError}>{sessionError ? <><p role="alert">{sessionError}</p><button onClick={() => { if (logoutFailed.current) void logout(); else void revalidate(); }}>Thử lại</button></> : <p>Đang xác minh phiên…</p>}</main> : !user ? <LoginPage onLogin={(input) => void login(input)} busy={authBusy} error={loginError} /> : <>
       <aside className="manager-sidebar"><div className="manager-brand"><img src={logo} alt="" /><div><strong>AEGIS</strong><small>VERIFY · MANAGER</small></div></div>
-        <p className="eyebrow nav-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng Manager"><button className={!showingUsers && !showingDevices && !showingCatalog ? 'selected' : ''} aria-current={!showingUsers && !showingDevices && !showingCatalog ? 'page' : undefined} onClick={() => setPage('overview')}>Tổng quan</button>
-          <button disabled={!canView} className={showingDevices ? 'selected' : ''} aria-current={showingDevices ? 'page' : undefined} onClick={() => setPage('devices')}>Máy</button><button disabled={!canView} className={showingCatalog ? 'selected' : ''} aria-current={showingCatalog ? 'page' : undefined} onClick={() => setPage('catalog')}>Kịch bản</button><button disabled title="Chưa khả dụng">Tác vụ <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Kết nối <small>Chưa khả dụng</small></button>
+        <p className="eyebrow nav-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng Manager"><button className={!showingUsers && !showingDevices && !showingCatalog && !showingExecution ? 'selected' : ''} aria-current={!showingUsers && !showingDevices && !showingCatalog && !showingExecution ? 'page' : undefined} onClick={() => setPage('overview')}>Tổng quan</button>
+          <button disabled={!canView} className={showingDevices ? 'selected' : ''} aria-current={showingDevices ? 'page' : undefined} onClick={() => setPage('devices')}>Máy</button><button disabled={!canView} className={showingCatalog ? 'selected' : ''} aria-current={showingCatalog ? 'page' : undefined} onClick={() => setPage('catalog')}>Kịch bản</button><button disabled={!canView} className={showingExecution ? 'selected' : ''} aria-current={showingExecution ? 'page' : undefined} onClick={() => setPage('execution')}>Tác vụ</button><button disabled title="Chưa khả dụng">Kết nối <small>Chưa khả dụng</small></button>
           {canManageUsers && <button className={showingUsers ? 'selected' : ''} aria-current={showingUsers ? 'page' : undefined} onClick={() => setPage('users')}>Tài khoản &amp; quyền</button>}
         </nav></aside>
-      <div className="manager-workspace"><header className="manager-header"><div className="header-identity"><div className="manager-brand"><img src={logo} alt="AEGIS" /><div><strong>AEGIS</strong><small>MANAGER</small></div></div><span className="breadcrumb">Không gian làm việc / {showingUsers ? 'Tài khoản & quyền' : showingDevices ? 'Máy' : showingCatalog ? 'Kịch bản' : 'Tổng quan'}</span></div>
+      <div className="manager-workspace"><header className="manager-header"><div className="header-identity"><div className="manager-brand"><img src={logo} alt="AEGIS" /><div><strong>AEGIS</strong><small>MANAGER</small></div></div><span className="breadcrumb">Không gian làm việc / {showingUsers ? 'Tài khoản & quyền' : showingDevices ? 'Máy' : showingCatalog ? 'Kịch bản' : showingExecution ? 'Tác vụ' : 'Tổng quan'}</span></div>
         <div className="header-actions"><button className="theme-toggle" aria-label={`Chuyển giao diện ${theme === 'dark' ? 'sáng' : 'tối'}`} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀' : '☾'}</button><AccountMenu user={user} onAccount={() => setAccountOpen(true)} onLogout={() => void logout()} /></div>
-      </header><main className="manager-content">{showingUsers ? <UsersPage key={user.id} api={accountsApi} onAuthorityChanged={refreshAuthority} /> : showingDevices ? <DevicesPage key={deviceAuthority} api={accountsApi} canManage={canManageDevices} /> : showingCatalog ? <CatalogPage key={deviceAuthority} api={accountsApi} canImport={canImport} canPublish={canPublish} /> : <><div className="page-heading"><p className="eyebrow">MANAGER</p><h1>Tổng quan</h1><p>Dữ liệu đã ghi nhận trong hệ thống quản lý.</p></div>
+      </header><main className="manager-content">{showingUsers ? <UsersPage key={user.id} api={accountsApi} onAuthorityChanged={refreshAuthority} /> : showingDevices ? <DevicesPage key={deviceAuthority} api={accountsApi} canManage={canManageDevices} onExecution={() => setPage('execution')} /> : showingExecution ? <ExecutionPage key={deviceAuthority} api={accountsApi} canRun={canRun} canManage={canManageDevices} /> : showingCatalog ? <CatalogPage key={deviceAuthority} api={accountsApi} canImport={canImport} canPublish={canPublish} onExecution={() => setPage('execution')} /> : <><div className="page-heading"><p className="eyebrow">MANAGER</p><h1>Tổng quan</h1><p>Dữ liệu đã ghi nhận trong hệ thống quản lý.</p></div>
         {!user.capabilities.includes('view') ? <p className="manager-alert" role="alert">Bạn không có quyền xem dữ liệu. Liên hệ quản trị viên để được cấp quyền.</p> : overviewError ? <section className="panel panel-body"><p className="manager-alert" role="alert">{overviewError}</p><button onClick={() => void revalidate()}>Xác minh lại phiên</button></section> : !overview ? <p>Đang tải tổng quan…</p> : <section className="overview-counts" aria-label="Số liệu đã ghi nhận">
           <article className="panel"><p>Thiết bị đã đăng ký</p><strong>{overview.registered_devices}</strong><small>Số đăng ký trong cơ sở dữ liệu</small></article><article className="panel"><p>Tác vụ đã ghi nhận</p><strong>{overview.recorded_jobs}</strong><small>Số tác vụ trong cơ sở dữ liệu</small></article><article className="panel"><p>Phiên bản đã ghi nhận</p><strong>{overview.recorded_releases}</strong><small>Số phiên bản trong cơ sở dữ liệu</small></article>
         </section>}</>}

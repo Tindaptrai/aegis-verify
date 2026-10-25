@@ -1,6 +1,7 @@
 import { validDeviceV2, validDevicesV2, validDeviceHistory, validPairingCode, type DeviceV2DTO, type DeviceHistoryDTO, type DevicesV2DTO, type PairingCodeDTO } from './types';
 import type { CreateUserInput, OverviewDTO, PermissionsDTO, SessionDTO, UpdateUserInput, UserDTO, UsersDTO } from './contracts';
 import { catalogValidationCodes, validCatalogFile, validCatalogList, validCatalogPackage, type CatalogValidationCode, type CatalogFileDTO, type CatalogListDTO, type CatalogPackageDTO, type CatalogQuery } from './catalogTypes';
+import { createExecutionMethods, readExecutionResponse } from './executionApi';
 
 const accountErrorStatuses = {
   invalid_request: 400, invalid_username: 400, invalid_display_name: 400, invalid_password: 400,
@@ -10,9 +11,10 @@ const accountErrorStatuses = {
   invalid_credentials: 401, current_password_invalid: 400,
 } as const;
 const deviceErrorStatuses = { device_conflict: 409, device_busy: 409, device_not_found: 404 } as const;
+const executionErrorStatuses = { preview_conflict: 409, job_conflict: 409, binding_conflict: 409, execution_unavailable: 503, job_not_found: 404 } as const;
 const catalogErrorStatuses = { ...Object.fromEntries(catalogValidationCodes.map((code) => [code, code === 'package_too_large' ? 413 : 400])), invalid_package: 400, version_conflict: 409, content_conflict: 409, package_not_found: 404, storage_unavailable: 503 };
-type ManagerErrorCode = keyof typeof accountErrorStatuses | keyof typeof deviceErrorStatuses | typeof catalogValidationCodes[number] | 'invalid_package' | 'version_conflict' | 'content_conflict' | 'package_not_found' | 'storage_unavailable';
-const errorStatuses: Record<string, number> = { ...accountErrorStatuses, ...deviceErrorStatuses, ...catalogErrorStatuses };
+type ManagerErrorCode = keyof typeof accountErrorStatuses | keyof typeof deviceErrorStatuses | keyof typeof executionErrorStatuses | typeof catalogValidationCodes[number] | 'invalid_package' | 'version_conflict' | 'content_conflict' | 'package_not_found' | 'storage_unavailable';
+const errorStatuses: Record<string, number> = { ...accountErrorStatuses, ...deviceErrorStatuses, ...catalogErrorStatuses, ...executionErrorStatuses };
 export class ManagerApiError extends Error {
   readonly code: ManagerErrorCode | undefined;
   readonly validationCodes: CatalogValidationCode[];
@@ -49,18 +51,18 @@ export function createManagerApi(fetcher: typeof fetch = fetch) {
   const invalidate = () => { generation += 1; csrfToken = ''; };
   const stale = () => new DOMException('Request superseded', 'AbortError');
 
-  async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal, token = csrfToken, expectedStatus?: number | number[], validate?: (value: unknown) => boolean, version: 'v1' | 'v2' = 'v1'): Promise<T> {
+  async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal, token = csrfToken, expectedStatus?: number | number[], validate?: (value: unknown) => boolean, version: 'v1' | 'v2' = 'v1', execution?: { serialize?: (input: never) => string }): Promise<T> {
     const multipart = body instanceof FormData;
     const response = await fetcher(`/api/${version}/${path}`, {
       method, credentials: 'same-origin', cache: 'no-store', signal,
       headers: body === undefined ? undefined : multipart ? { 'X-CSRFToken': token } : { 'Content-Type': 'application/json', 'X-CSRFToken': token },
-      ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }),
+      ...(body === undefined ? {} : { body: multipart ? body : execution?.serialize ? execution.serialize(body as never) : JSON.stringify(body) }),
     });
     if (!response.ok) { const failure = await readFailure(response); throw new ManagerApiError(response.status, failure.code, failure.validation); }
     if (expectedStatus !== undefined && !(Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus]).includes(response.status)) throw new ManagerApiError(response.status);
     if (response.status === 204) return undefined as T;
     let result: unknown;
-    try { result = await response.json(); } catch { throw new ManagerApiError(response.status); }
+    try { result = execution ? await readExecutionResponse(response) : await response.json(); } catch { throw new ManagerApiError(response.status); }
     if (validate && !validate(result)) throw new ManagerApiError(response.status);
     return result as T;
   }
@@ -75,6 +77,14 @@ export function createManagerApi(fetcher: typeof fetch = fetch) {
 
   return {
     invalidate,
+    ...createExecutionMethods(async (path, method, body, signal, statuses, validate, serialize) => {
+      const current = generation;
+      try {
+        const result = await request(path, method, body, signal, csrfToken, statuses, validate, 'v1', { serialize });
+        if (current !== generation || signal?.aborted) throw stale();
+        return result as never;
+      } catch (failure) { if (current !== generation || signal?.aborted) throw stale(); throw failure; }
+    }),
     listCatalog: (query: CatalogQuery = {}, signal?: AbortSignal) => {
       const params = new URLSearchParams({ page: String(query.page ?? 1), q: query.q ?? '', status: query.status ?? '' });
       return request<CatalogListDTO>(`catalog?${params}`, 'GET', undefined, signal, csrfToken, 200, validCatalogList);
