@@ -179,3 +179,18 @@ body { margin: 0; }
 .device-dialog pre { white-space:pre-wrap; overflow-wrap:anywhere; background:var(--surface); border:1px solid var(--border); border-radius:7px; padding:12px; font-size:11px; }
 .device-dialog .pairing-secret { display:block; overflow-wrap:anywhere; padding:14px; border:1px solid var(--mint); border-radius:7px; background:var(--surface); color:var(--mint); font-size:14px; user-select:all; }
 .device-dialog h4 { color:var(--muted); margin-bottom:6px; }
+
+/* Device inventory retains the account panel rhythm at narrow widths. */
+.device-scopes, .device-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-bottom: .8rem; }
+.device-scopes button[aria-pressed="true"] { background: var(--mint); color: var(--primary-text); }
+.device-ips { display: grid; gap: .35rem; min-width: 13rem; max-width: 25rem; overflow-wrap: anywhere; }
+.device-ips strong { font-size: .75rem; }
+.device-ips p, .device-ips ul { margin: 0; }
+.device-ips ul { padding-left: 1.1rem; }
+.device-ips small, .device-history small { display: block; color: var(--muted, #667085); }
+.device-ips strong:not(:first-child) { margin-top: .5rem; }
+.device-ips button { justify-self: start; font-size: .75rem; }
+.device-uuid, .device-history { overflow-wrap: anywhere; }
+.device-history { display: grid; gap: 1rem; padding-left: 1.2rem; }
+.devices-table td { vertical-align: top; }
+@media (max-width: 700px) { .device-dialog { width: 100%; max-width: 100%; } .device-ips { min-width: 11rem; } }

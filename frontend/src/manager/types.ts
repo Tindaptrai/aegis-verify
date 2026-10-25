@@ -49,3 +49,45 @@ export function validPairingCode(value: unknown): value is PairingCodeDTO {
   return closed(value, 'id,code,environment_id,expires_at') && uuid(value.id) && typeof value.code === 'string' && /^[0-9a-f]{64}$/.test(value.code)
     && typeof value.environment_id === 'string' && validEnvironment(value.environment_id) && date(value.expires_at);
 }
+
+export interface DeviceV2DTO extends Omit<DeviceDTO, 'status'> {
+  status: DeviceDTO['status'] | 'archived';
+  reported_ips: string[] | null;
+  ip_collection_status: 'unknown' | 'ok' | 'unavailable';
+  reported_ips_truncated: boolean;
+  reported_ips_received_at: string | null;
+  observed_ip: string | null;
+  observed_ip_received_at: string | null;
+  reported_agent_version: string | null;
+  archived_at: string | null;
+  archived_by_id: number | null;
+  can_archive: boolean;
+  archive_block_reason: 'legacy_device' | 'device_busy' | 'already_archived' | null;
+}
+export interface DevicesV2DTO { results: DeviceV2DTO[]; count: number; page: number; page_size: 50 }
+export interface DeviceHistoryRow { action: string; created_at: string; actor_id: number | null; code_id: string | null; device_id: string | null }
+export interface DeviceHistoryDTO { results: DeviceHistoryRow[]; count: number; page: number; page_size: 50 }
+const networkKeys = ['reported_ips', 'ip_collection_status', 'reported_ips_truncated', 'reported_ips_received_at', 'observed_ip', 'observed_ip_received_at', 'reported_agent_version', 'archived_at', 'archived_by_id', 'can_archive', 'archive_block_reason'];
+const ip = (value: unknown) => typeof value === 'string' && value.length <= 45 && (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(value) ? value.split('.').every((n) => Number(n) <= 255 && String(Number(n)) === n) : value.includes(':') && /^[0-9a-f:]+$/.test(value) && (() => { try { return new URL(`http://[${value}]/`).hostname.length > 0; } catch { return false; } })());
+export function validDeviceV2(value: unknown): value is DeviceV2DTO {
+  if (!record(value) || networkKeys.some((key) => !Object.hasOwn(value, key))) return false;
+  const base = Object.fromEntries(Object.entries(value).filter(([key]) => !networkKeys.includes(key)));
+  if (base.status === 'archived') base.status = 'revoked';
+  return validDevice(base) && typeof value.ip_collection_status === 'string' && ['unknown', 'ok', 'unavailable'].includes(String(value.ip_collection_status))
+    && (value.reported_ips === null || Array.isArray(value.reported_ips) && value.reported_ips.length <= 32 && value.reported_ips.every(ip) && new Set(value.reported_ips).size === value.reported_ips.length)
+    && (value.ip_collection_status === 'ok' ? Array.isArray(value.reported_ips) : value.reported_ips === null)
+    && typeof value.reported_ips_truncated === 'boolean' && (!value.reported_ips_truncated || Array.isArray(value.reported_ips) && value.reported_ips.length === 32)
+    && nullable(value.reported_ips_received_at, date) && nullable(value.observed_ip, ip) && nullable(value.observed_ip_received_at, date)
+    && nullable(value.reported_agent_version, (v) => typeof v === 'string' && v.length <= 32 && /^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/.test(v))
+    && nullable(value.archived_at, date) && nullable(value.archived_by_id, positive)
+    && (value.status === 'archived') === (value.archived_at !== null)
+    && typeof value.can_archive === 'boolean' && (value.archive_block_reason === null || typeof value.archive_block_reason === 'string' && ['legacy_device', 'device_busy', 'already_archived'].includes(value.archive_block_reason))
+    && value.can_archive === (value.archive_block_reason === null)
+    && (value.status !== 'archived' || value.archive_block_reason === 'already_archived')
+    && (value.connection_kind !== 'legacy_v1' || value.archive_block_reason === 'legacy_device' || value.archive_block_reason === 'already_archived');
+}
+function page(value: unknown, row: (value: unknown) => boolean) {
+ return closed(value, 'results,count,page,page_size') && Array.isArray(value.results) && value.results.length <= 50 && value.results.every(row) && Number.isSafeInteger(value.count) && Number(value.count) >= value.results.length && positive(value.page) && value.page_size === 50;
+}
+export const validDevicesV2 = (value: unknown): value is DevicesV2DTO => page(value, validDeviceV2);
+export const validDeviceHistory = (value: unknown): value is DeviceHistoryDTO => page(value, (row) => closed(row, 'action,created_at,actor_id,code_id,device_id') && typeof row.action === 'string' && ['pairing_code_created', 'pairing_code_revoked', 'device_enrolled', 'device_revoked', 'device_archived'].includes(row.action) && date(row.created_at) && nullable(row.actor_id, positive) && nullable(row.code_id, uuid) && nullable(row.device_id, uuid));

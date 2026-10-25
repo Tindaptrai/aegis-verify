@@ -2,16 +2,16 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ManagerApp } from './ManagerApp';
 import { ManagerApiError, createManagerApi } from './api';
-import type { DeviceDTO, DevicesDTO, PairingCodeDTO } from './types';
+import type { DeviceV2DTO as DeviceDTO, DevicesV2DTO as DevicesDTO, PairingCodeDTO } from './types';
 import { anonymousSession, signedInApiFixture, userSession } from './test-fixtures';
 const id = '00000000-0000-4000-8000-000000000001', codeId = '00000000-0000-4000-8000-000000000002', secret = 'a'.repeat(64);
-const device: DeviceDTO = { id, hostname: '<script>synthetic-host</script>', environment_id: 'training', wazuh_agent_id: null, connection_kind: 'paired_presence', os: 'linux', architecture: 'x64', agent_version: '0.1.0', generation: 1, status: 'offline', last_heartbeat_at: null, certificate_expires_at: '2026-11-24T00:00:00Z', execution_supported: false };
+const device: DeviceDTO = { id, hostname: '<script>synthetic-host</script>', environment_id: 'training', wazuh_agent_id: null, connection_kind: 'paired_presence', os: 'linux', architecture: 'x64', agent_version: '0.1.0', generation: 1, status: 'offline', last_heartbeat_at: null, certificate_expires_at: '2026-11-24T00:00:00Z', execution_supported: false, reported_ips: null, ip_collection_status: 'unknown', reported_ips_truncated: false, reported_ips_received_at: null, observed_ip: null, observed_ip_received_at: null, reported_agent_version: null, archived_at: null, archived_by_id: null, can_archive: true, archive_block_reason: null };
 const list = (results: DeviceDTO[] = [device], page = 1, count = results.length): DevicesDTO => ({ results, page, count, page_size: 50 });
 function fixture(role: 'admin' | 'viewer' = 'admin') {
   return Object.assign(signedInApiFixture(role), {
-    listDevices: vi.fn(async (_query?: { page?: number; search?: string }, _signal?: AbortSignal) => list()),
+    listDevices: vi.fn(async (_query?: { page?: number; search?: string; scope?: 'managed' | 'archived' }, _signal?: AbortSignal) => list()),
     createPairingCode: vi.fn(async (_input: { environment_id: string }, _signal?: AbortSignal) => ({ id: codeId, code: secret, environment_id: 'training', expires_at: new Date(Date.now() + 600000).toISOString() })),
-    revokePairingCode: vi.fn(async (_id: string, _signal?: AbortSignal) => undefined), revokeDevice: vi.fn(async (_id: string, _signal?: AbortSignal) => undefined),
+    revokePairingCode: vi.fn(async (_id: string, _signal?: AbortSignal) => undefined), archiveDevice: vi.fn(async (_id: string, _signal?: AbortSignal) => undefined),
   });
 }
 async function openDevices(api = fixture()) { render(<ManagerApp api={api} />); fireEvent.click(await screen.findByRole('button', { name: 'Máy' })); await screen.findByRole('heading', { name: 'Danh sách máy' }); return api; }
@@ -24,8 +24,8 @@ describe('Devices API wire boundary', () => {
     const controller = new AbortController(); await api.session();
     expect(await api.listDevices({ page: 2, search: 'host & vm' }, controller.signal)).toEqual(list());
     expect(await api.createPairingCode({ environment_id: 'training' }, controller.signal)).toMatchObject({ code: secret });
-    await api.revokePairingCode(codeId, controller.signal); await api.revokeDevice(id, controller.signal);
-    expect(seen.slice(1).map((request) => request.path)).toEqual(['/api/v1/devices?page=2&search=host+%26+vm', '/api/v1/pairing-codes', `/api/v1/pairing-codes/${codeId}/revoke`, `/api/v1/devices/${id}/revoke`]);
+    await api.revokePairingCode(codeId, controller.signal); await api.archiveDevice(id, controller.signal);
+    expect(seen.slice(1).map((request) => request.path)).toEqual(['/api/v2/devices?page=2&scope=managed&search=host+%26+vm', '/api/v1/pairing-codes', `/api/v1/pairing-codes/${codeId}/revoke`, `/api/v2/devices/${id}/archive`]);
     expect(seen.slice(1).every(({ init }) => init?.signal === controller.signal && init.credentials === 'same-origin' && init.cache === 'no-store')).toBe(true);
     expect(seen[2]?.init).toMatchObject({ body: '{"environment_id":"training"}', headers: { 'X-CSRFToken': 'synthetic-csrf' } }); expect(seen[3]?.init).toMatchObject({ body: '{}' });
   });
@@ -41,10 +41,10 @@ describe('Devices API wire boundary', () => {
     ['revoke wrong status', 'revoke', 200, {}],
   ])('rejects %s instead of reporting success', async (_label, operation, status, body) => {
     const api = createManagerApi(async () => Response.json(body, { status: Number(status) }));
-    await expect(operation === 'mint' ? api.createPairingCode({ environment_id: 'training' }) : operation === 'list' ? api.listDevices() : api.revokeDevice(id)).rejects.toThrow('Manager request failed');
+    await expect(operation === 'mint' ? api.createPairingCode({ environment_id: 'training' }) : operation === 'list' ? api.listDevices() : api.archiveDevice(id)).rejects.toThrow('Manager request failed');
   });
   it('accepts absent legacy metadata as null and renders an honest fallback', async () => {
-    const legacy: DeviceDTO = { ...device, connection_kind: 'legacy_v1', status: 'unknown', hostname: null, os: null, architecture: null, agent_version: null, last_heartbeat_at: null, certificate_expires_at: null };
+    const legacy: DeviceDTO = { ...device, connection_kind: 'legacy_v1', can_archive: false, archive_block_reason: 'legacy_device', status: 'unknown', hostname: null, os: null, architecture: null, agent_version: null, last_heartbeat_at: null, certificate_expires_at: null };
     const api = fixture('viewer');
     const wire = createManagerApi(async () => Response.json(list([legacy])));
     api.listDevices = vi.fn(wire.listDevices);
@@ -52,7 +52,7 @@ describe('Devices API wire boundary', () => {
     expect(await screen.findByText('Chưa ghi nhận tên máy')).toBeVisible();
     expect(screen.getByText('Chưa xác định (legacy)')).toBeVisible();
   });
-  it('recognizes fixed device_conflict without exposing arbitrary detail', async () => { const api = createManagerApi(async () => Response.json({ error: { code: 'device_conflict', detail: secret } }, { status: 409 })); await expect(api.revokeDevice(id)).rejects.toMatchObject({ status: 409, code: 'device_conflict', message: 'Manager request failed' }); });
+  it('recognizes fixed device_conflict without exposing arbitrary detail', async () => { const api = createManagerApi(async () => Response.json({ error: { code: 'device_conflict', detail: secret } }, { status: 409 })); await expect(api.archiveDevice(id)).rejects.toMatchObject({ status: 409, code: 'device_conflict', message: 'Manager request failed' }); });
 });
 describe('Devices in real Manager shell', () => {
   it('allows viewer read access and distinguishes legacy unknown from Offline', async () => {
@@ -64,7 +64,7 @@ describe('Devices in real Manager shell', () => {
     const commands = screen.getAllByText(/aegis-agent.*connect/).map((node) => node.textContent).join('\n'); expect(commands).toContain('https://<MANAGER-IP-OR-DNS>'); expect(commands).not.toContain(secret); expect(localStorage.length).toBe(0); expect(window.location.href).not.toContain(secret);
     fireEvent.click(screen.getByRole('button', { name: 'Thu hồi mã đang chờ' })); expect(await screen.findByText('Đã thu hồi mã ghép nối.')).toBeVisible(); expect(screen.queryByText(secret)).not.toBeInTheDocument();
   });
-  it('requires confirmation to revoke and renders refreshed terminal server status', async () => { const api = await openDevices(); await screen.findByText('<script>synthetic-host</script>'); fireEvent.click(screen.getByRole('button', { name: 'Thu hồi máy' })); const dialog = screen.getByRole('dialog', { name: 'Thu hồi máy' }); expect(within(dialog).getByText('<script>synthetic-host</script>')).toBeVisible(); api.listDevices.mockResolvedValue(list([{ ...device, status: 'revoked' }])); fireEvent.click(within(dialog).getByRole('button', { name: 'Xác nhận thu hồi' })); expect(await screen.findByText('Đã thu hồi')).toBeVisible(); expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); });
+  it('requires confirmation to revoke and renders refreshed terminal server status', async () => { const api = await openDevices(); await screen.findByText('<script>synthetic-host</script>'); fireEvent.click(screen.getByRole('button', { name: 'Xóa máy' })); const dialog = screen.getByRole('dialog', { name: 'Xóa máy' }); expect(within(dialog).getByText('<script>synthetic-host</script>')).toBeVisible(); api.listDevices.mockResolvedValue(list([{ ...device, status: 'revoked' }])); fireEvent.click(within(dialog).getByRole('button', { name: 'Xóa máy' })); expect(await screen.findByText('Đã thu hồi')).toBeVisible(); expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); });
   it.each([400, 409, 503])('shows fixed mint failure for %s', async (status) => { const api = await openDevices(); api.createPairingCode.mockRejectedValue(new ManagerApiError(status, status === 400 ? 'invalid_request' : 'private-source-value')); fireEvent.click(screen.getByRole('button', { name: 'Thêm máy' })); fireEvent.change(screen.getByLabelText('Môi trường'), { target: { value: 'training' } }); fireEvent.click(screen.getByRole('button', { name: 'Tạo mã ghép nối' })); expect(await screen.findByRole('alert')).toHaveTextContent(/Không thể|Môi trường/); expect(screen.queryByText('private-source-value')).not.toBeInTheDocument(); });
   it.each(['close', 'logout', 'navigation'] as const)('clears code on %s', async (action) => { await openDevices(); await mint(); if (action === 'close') fireEvent.click(screen.getByRole('button', { name: 'Đóng ghép nối' })); if (action === 'navigation') fireEvent.click(screen.getByRole('button', { name: 'Tổng quan' })); if (action === 'logout') { fireEvent.click(screen.getByRole('button', { name: /Menu tài khoản/ })); fireEvent.click(screen.getByRole('button', { name: 'Đăng xuất' })); } expect(screen.queryByText(secret)).not.toBeInTheDocument(); expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); });
   it.each(['navigation', 'logout'] as const)('aborts mint and ignores late success after %s', async (action) => {
@@ -86,11 +86,11 @@ describe('Devices in real Manager shell', () => {
 
 describe('Devices lifecycle boundaries', () => {
   it.each(['expired', 'revoked'] as const)('accepts legacy %s precedence without implying readiness', async (status) => {
-    const wire = createManagerApi(async () => Response.json(list([{ ...device, connection_kind: 'legacy_v1', status }])));
+    const wire = createManagerApi(async () => Response.json(list([{ ...device, connection_kind: 'legacy_v1', can_archive: false, archive_block_reason: 'legacy_device', status }])));
     const api = fixture('viewer'); api.listDevices = vi.fn(wire.listDevices);
     await openDevices(api);
     expect(await screen.findByText(status === 'expired' ? 'Đã hết hạn' : 'Đã thu hồi')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'Thu hồi máy' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Xóa máy' })).not.toBeInTheDocument();
   });
   it('waits 15 seconds after settlement and never overlaps a slow periodic refresh', async () => {
     vi.useFakeTimers();
@@ -188,11 +188,11 @@ describe('Devices lifecycle boundaries', () => {
 describe('Devices authority and confirmation safeguards', () => {
   it('leaves a rejected revoke visible for correction without reporting success', async () => {
     const api = await openDevices(); await screen.findByText('<script>synthetic-host</script>');
-    api.revokeDevice.mockRejectedValue(new ManagerApiError(409, 'device_conflict'));
-    fireEvent.click(screen.getByRole('button', { name: 'Thu hồi máy' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận thu hồi' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('Máy legacy không thể thu hồi');
-    expect(screen.getByRole('dialog', { name: 'Thu hồi máy' })).toBeVisible();
+    api.archiveDevice.mockRejectedValue(new ManagerApiError(409, 'device_conflict'));
+    fireEvent.click(screen.getByRole('button', { name: 'Xóa máy' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Xóa máy' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Máy legacy chỉ đọc');
+    expect(screen.getByRole('dialog', { name: 'Xóa máy' })).toBeVisible();
     expect(screen.queryByText('Đã thu hồi máy.')).not.toBeInTheDocument();
     expect(screen.getByText('Offline')).toBeVisible();
   });

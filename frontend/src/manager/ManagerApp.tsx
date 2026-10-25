@@ -115,6 +115,9 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
       }
     }
     return { ...api,
+      device: (id, signal) => guarded(() => api.device(id, signal), signal),
+      deviceHistory: (id, page, signal) => guarded(() => api.deviceHistory(id, page, signal), signal),
+      archiveDevice: (id, signal) => guarded(() => api.archiveDevice(id, signal), signal),
       listDevices: (query, signal) => guarded(() => api.listDevices(query, signal), signal),
       createPairingCode: (input, signal) => guarded(() => api.createPairingCode(input, signal), signal),
       revokePairingCode: (id, signal) => guarded(() => api.revokePairingCode(id, signal), signal),

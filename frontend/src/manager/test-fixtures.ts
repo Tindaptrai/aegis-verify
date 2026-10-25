@@ -14,6 +14,9 @@ export function signedInApiFixture(role: 'admin' | 'operator' | 'viewer', option
   const target = { ...current.user!, ...(options?.technicalTarget ? { role: 'technical' as const, editable: false } : {}) };
   return {
     invalidate: vi.fn(),
+    device: vi.fn(async () => { throw new Error('Configure synthetic device'); }),
+    deviceHistory: vi.fn(async () => ({ results: [], count: 0, page: 1, page_size: 50 as const })),
+    archiveDevice: vi.fn(async () => undefined),
     listDevices: vi.fn(async () => ({ results: [], count: 0, page: 1, page_size: 50 as const })),
     createPairingCode: vi.fn(async () => { throw new Error('Configure a synthetic pairing response in this test'); }),
     revokePairingCode: vi.fn(async () => undefined),
