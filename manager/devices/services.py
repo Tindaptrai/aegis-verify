@@ -111,7 +111,7 @@ def receive_heartbeat(*, request, data):
     except Device.DoesNotExist:
         raise DeviceError("identity_denied") from None
     now = timezone.now()
-    if (device.revoked or device.certificate_not_before is None or device.certificate_expires_at is None
+    if (device.archived_at is not None or device.revoked or device.certificate_not_before is None or device.certificate_expires_at is None
             or not device.certificate_not_before <= now < device.certificate_expires_at):
         raise DeviceError("identity_denied")
     device.last_heartbeat_at = now

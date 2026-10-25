@@ -10,6 +10,9 @@ from accounts.views import api_error, human_api
 from control.models import Device
 from .contracts import DeviceError, device_dto, devices_query, parse_json
 from .identity import require_https
+from .archive import archive_device
+from .contracts import canonical_uuid
+from .inventory import device_v2_dto, get_device, history_dto, history_query, inventory_query
 from .services import create_pairing_code, revoke_pairing_code, revoke_device, enroll_device, receive_heartbeat
 
 
@@ -30,7 +33,7 @@ def devices_api(view):
 def devices(request):
     require_product_permission(request.user, "view")
     page, search = devices_query(request)
-    rows = Device.objects.all()
+    rows = Device.objects.filter(archived_at__isnull=True)
     if search:
         rows = rows.filter(Q(hostname__icontains=search) | Q(environment_id__icontains=search) | Q(wazuh_agent_id__icontains=search))
     offset = (page - 1) * 50
@@ -94,3 +97,43 @@ def enroll(request):
 @machine_api
 def heartbeat(request):
     return JsonResponse(receive_heartbeat(request=request, data=parse_json(request)))
+
+
+@devices_api
+@human_api("GET", authenticated=True)
+def devices_v2(request):
+    require_product_permission(request.user, "view")
+    page, rows = inventory_query(request)
+    offset = (page - 1) * 50
+    return JsonResponse({"results": [device_v2_dto(row) for row in rows[offset:offset + 50]],
+                         "count": rows.count(), "page": page, "page_size": 50})
+
+
+@devices_api
+@human_api("GET", authenticated=True)
+def device_detail(request, device_id):
+    require_product_permission(request.user, "view")
+    if request.GET:
+        raise DeviceError("invalid_request")
+    return JsonResponse(device_v2_dto(get_device(device_id)))
+
+
+@devices_api
+@human_api("GET", authenticated=True)
+def device_history(request, device_id):
+    require_product_permission(request.user, "view")
+    page, _ = devices_query(request, allowed={"page"})
+    rows = history_query(get_device(device_id))
+    offset = (page - 1) * 50
+    return JsonResponse({"results": [history_dto(row) for row in rows[offset:offset + 50]],
+                         "count": rows.count(), "page": page, "page_size": 50})
+
+
+@devices_api
+@human_api("POST", authenticated=True)
+def device_archive(request, device_id):
+    require_product_permission(request.user, "manage_devices")
+    if parse_json(request) != {} or request.GET:
+        raise DeviceError("invalid_request")
+    archive_device(actor=request.user, device_id=canonical_uuid(str(device_id)))
+    return HttpResponse(status=204)

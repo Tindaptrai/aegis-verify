@@ -19,7 +19,9 @@ from django.test import RequestFactory, TransactionTestCase, override_settings
 
 from accounts.models import AccountMutationLock
 from accounts.services import update_product_user
-from control.models import Device
+from control.models import Device, DispatchLock, Job, RunnerRelease
+from control.jobs import claim_job
+from devices.archive import archive_device
 from devices.issuer import initialize_issuer
 from devices.models import PairingCode, EnrollmentAudit
 from devices.services import create_pairing_code, enroll_device, revoke_device, receive_heartbeat, DeviceError
@@ -30,6 +32,7 @@ from .helpers import csr
 class PostgreSQLPairingTests(TransactionTestCase):
     def setUp(self):
         AccountMutationLock.objects.get_or_create(pk=1)
+        DispatchLock.objects.get_or_create(pk=1)
         self.owner = get_user_model().objects.create_superuser("synthetic-owner", password="synthetic-password")
         self.issuer = get_user_model().objects.create_user("synthetic-issuer", password="synthetic-password")
         self.issuer.user_permissions.set(Permission.objects.filter(content_type__app_label="accounts", codename__in=("view", "manage_devices")))
@@ -81,6 +84,8 @@ class PostgreSQLPairingTests(TransactionTestCase):
                         return "committed"
                     except DeviceError as error:
                         return error.code
+                    except PermissionError:
+                        return "permission_denied"
             finally:
                 connections.close_all()
 
@@ -144,3 +149,62 @@ class PostgreSQLPairingTests(TransactionTestCase):
 
     def test_heartbeat_wins_then_revoke_cannot_leave_online(self):
         self.revoke_heartbeat(revoke_first=False)
+
+    def test_double_archive_commits_exactly_once(self):
+        enrolled = enroll_device(self.data)
+        archive = lambda: archive_device(actor=self.owner, device_id=enrolled["device_id"])
+        self.assertEqual(self.ordered_race(archive, archive, table="accounts_accountmutationlock"), ["committed", "committed"])
+        device = Device.objects.get()
+        self.assertTrue(device.revoked)
+        self.assertIsNotNone(device.archived_at)
+        self.assertEqual(EnrollmentAudit.objects.filter(action="device_archived").count(), 1)
+        self.assertEqual(EnrollmentAudit.objects.filter(action="device_revoked").count(), 1)
+
+    def archive_heartbeat(self, *, archive_first):
+        enrolled = enroll_device(self.data)
+        request = RequestFactory().post("/agent/v2/heartbeat", HTTP_X_FORWARDED_PROTO="https", HTTP_X_AEGIS_CLIENT_VERIFY="SUCCESS",
+            HTTP_X_AEGIS_CLIENT_CERT=quote(enrolled["certificate_pem"], safe=""))
+        data = {"protocol": "2.0", "device_id": enrolled["device_id"], "generation": 1}
+        archive = lambda: archive_device(actor=self.owner, device_id=enrolled["device_id"])
+        heartbeat = lambda: receive_heartbeat(request=request, data=data)
+        results = self.ordered_race(*((archive, heartbeat) if archive_first else (heartbeat, archive)), table="control_device")
+        self.assertEqual(results, ["committed", "identity_denied" if archive_first else "committed"])
+        device = Device.objects.get()
+        self.assertTrue(device.revoked)
+        self.assertIsNotNone(device.archived_at)
+        self.assertEqual(device.last_heartbeat_at is None, archive_first)
+        last = device.last_heartbeat_at
+        with self.assertRaises(DeviceError):
+            heartbeat()
+        device.refresh_from_db()
+        self.assertEqual(device.last_heartbeat_at, last)
+
+    def test_archive_wins_heartbeat_cannot_update_presence(self):
+        self.archive_heartbeat(archive_first=True)
+
+    def test_heartbeat_wins_then_archive_retains_final_presence(self):
+        self.archive_heartbeat(archive_first=False)
+
+    def archive_claim(self, *, archive_first):
+        from django.utils import timezone
+        enrolled = enroll_device(self.data)
+        device = Device.objects.get(pk=enrolled["device_id"])
+        release = RunnerRelease.objects.create()
+        now = timezone.now()
+        job = Job.objects.create(device=device, release=release, not_before=now, expires_at=now,
+                                 collection_start=now, collection_end=now)
+        archive = lambda: archive_device(actor=self.owner, device_id=device.pk)
+        claim = lambda: claim_job(device)
+        results = self.ordered_race(*((archive, claim) if archive_first else (claim, archive)), table="control_dispatchlock")
+        self.assertEqual(results, ["committed", "permission_denied"] if archive_first else ["permission_denied", "committed"])
+        job.refresh_from_db()
+        device.refresh_from_db()
+        self.assertEqual((job.execution_state, job.collection_state), ("draft", "pending"))
+        self.assertTrue(device.revoked)
+        self.assertIsNotNone(device.archived_at)
+
+    def test_archive_wins_worker_claim_is_denied(self):
+        self.archive_claim(archive_first=True)
+
+    def test_worker_claim_then_archive_preserves_draft(self):
+        self.archive_claim(archive_first=False)

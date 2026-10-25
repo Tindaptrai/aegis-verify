@@ -5,6 +5,7 @@ import tempfile
 from datetime import timedelta
 from pathlib import Path
 from urllib.parse import quote
+from unittest.mock import patch, PropertyMock
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa, padding
@@ -73,6 +74,34 @@ class ProtocolTests(TestCase):
         job = self.job()
         with self.assertRaisesMessage(ValueError, "Device unavailable"):
             approve_job(job.pk, self.owner)
+        job.refresh_from_db()
+        self.assertEqual(job.execution_state, "draft")
+        self.assertIsNone(job.envelope)
+
+    def test_archived_identity_denies_legacy_poll_and_start(self):
+        job, _ = self.claim()
+        self.device.archived_at = timezone.now()
+        self.device.revoked = True
+        self.device.save()
+        self.assertEqual(self.post().status_code, 403)
+        self.assertEqual(self.post(f"jobs/{job.pk}/start",
+            {"protocol": "0.1.0", "payload_sha256": job.payload_sha256}).status_code, 403)
+        job.refresh_from_db()
+        self.assertEqual(job.execution_state, "leased")
+
+    def test_archived_job_guards_do_not_depend_on_loaded_revoked_flag(self):
+        from control.jobs import claim_job
+        job = self.job()
+        self.device.archived_at = timezone.now()
+        self.device.revoked = True
+        self.device.save()
+        # The database constraint remains in force; emulate a legacy
+        # inconsistent revocation flag only after ORM materialization.
+        with patch.object(Device, "revoked", new_callable=PropertyMock, return_value=False):
+            with self.assertRaisesMessage(ValueError, "Device unavailable"):
+                approve_job(job.pk, self.owner)
+            with self.assertRaises(PermissionError):
+                claim_job(self.device)
         job.refresh_from_db()
         self.assertEqual(job.execution_state, "draft")
         self.assertIsNone(job.envelope)

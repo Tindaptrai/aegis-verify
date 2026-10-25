@@ -51,7 +51,7 @@ def endpoint(request, job_id=None, operation="poll"):
         with transaction.atomic():
             lock_dispatch()
             device = Device.objects.select_for_update().get(pk=device.pk)
-            if device.revoked: raise PermissionError()
+            if device.revoked or device.archived_at is not None: raise PermissionError()
             try: job = Job.objects.select_for_update().select_related("release").get(pk=job_id,device=device)
             except Job.DoesNotExist: raise PermissionError() from None
             if job.approved_generation != device.generation: raise PermissionError()
