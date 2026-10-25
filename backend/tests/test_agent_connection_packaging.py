@@ -12,6 +12,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/stage_agent_connection.py"
+CANONICAL_SCENARIO = b'# Draft manifest. Issue #2 will formalize and validate the scenario schema.\nid: SCN-001\nname: PowerShell Execution\nversion: 0.1.0\nstatus: draft\ndescription: >-\n  Execute an approved, non-destructive PowerShell test script and verify that\n  endpoint telemetry and the expected Wazuh detection are present.\nsafety:\n  destructive: false\n  authorization_required: true\n  notes: Run only in the approved lab with a reviewed test payload.\nexpected_sources:\n  - sysmon\n  - powershell\n  - wazuh\nexpected_outcome: detected\nassertions:\n  - id: SCN-001-A01\n    description: PowerShell process execution telemetry exists.\n    source: sysmon\n  - id: SCN-001-A02\n    description: PowerShell script or command telemetry exists.\n    source: powershell\n  - id: SCN-001-A03\n    description: Wazuh detection references the execution evidence.\n    source: wazuh\ntags:\n  - regression-demo\n  - gap-fix-retest\n'
 COMMIT = "1234567890abcdef1234567890abcdef12345678"
 NOTICE_HASHES = {
     "win-x64": {
@@ -35,9 +36,9 @@ def package_input(request, tmp_path):
         (build / name).write_bytes(b"synthetic public binary")
     (build / "aegis-agent.runtimeconfig.json").write_text(json.dumps({"runtimeOptions": {
         "tfm": "net10.0", "includedFrameworks": [{"name": "Microsoft.NETCore.App", "version": "10.0.13"}]}}))
-    (build / "aegis-agent.deps.json").write_text(json.dumps({"libraries": {"aegis-agent/0.2.0": {"type": "project"}}}))
+    (build / "aegis-agent.deps.json").write_text(json.dumps({"libraries": {"aegis-agent/0.3.0": {"type": "project"}}}))
     platform = "windows" if request.param == "win-x64" else "linux"
-    scripts = ["Install-Agent.ps1", "Uninstall-Agent.ps1"] if platform == "windows" else ["install.sh", "uninstall.sh", "aegis-agent.service"]
+    scripts = ["Install-Agent.ps1", "Uninstall-Agent.ps1", "Enable-Execution.ps1"] if platform == "windows" else ["install.sh", "uninstall.sh", "aegis-agent.service"]
     deploy = source / "deploy/agent" / platform
     deploy.mkdir(parents=True)
     for name in scripts:
@@ -45,6 +46,8 @@ def package_input(request, tmp_path):
     guide = source / "docs/manager/AGENT_CONNECTION_RUNBOOK.md"
     guide.parent.mkdir(parents=True)
     guide.write_text("Synthetic public guide\n")
+    (source / "canonical-scenario.yaml").write_bytes(CANONICAL_SCENARIO)
+    (guide.parent / "windows-web-execution.md").write_text("Synthetic public execution guide\n")
     notices = source / "deploy/agent/runtime-notices" / request.param
     notices.mkdir(parents=True)
     for name in NOTICE_HASHES[request.param]:
@@ -52,11 +55,12 @@ def package_input(request, tmp_path):
     return source, build, request.param, scripts
 
 
-def stage(data, output, *extra):
+def stage(data, output, *extra, canonical=True):
     source, build, rid, _ = data
+    canonical = ["--canonical-scenario", str(source / "canonical-scenario.yaml")] if rid == "win-x64" and canonical else []
     return subprocess.run([sys.executable, "-B", str(SCRIPT), "--source-root", str(source),
         "--build-root", str(build), "--output-root", str(output), "--runtime", rid,
-        "--version", "0.2.0", "--commit", COMMIT, *extra], capture_output=True, text=True)
+        "--version", "0.3.0", "--commit", COMMIT, *canonical, *extra], capture_output=True, text=True)
 
 
 def archive_payload(path):
@@ -74,11 +78,18 @@ def test_public_packages_have_stable_hashes_layout_metadata_and_no_private_sourc
     result = stage(package_input, output)
     assert result.returncode == 0, result.stderr
     extension = ".zip" if rid == "win-x64" else ".tar.gz"
-    archive = output / ("AEGIS-Agent-Connection-0.2.0-" + rid + extension)
+    archive = output / ("AEGIS-Agent-Connection-0.3.0-" + rid + extension)
     data = archive_payload(archive)
-    assert set(name for name in data if not name.startswith("bin/")) == {*scripts, "AGENT_CONNECTION_RUNBOOK.md", "version.json", "SHA256SUMS.txt"}
+    expected = {*scripts, "AGENT_CONNECTION_RUNBOOK.md", "version.json", "SHA256SUMS.txt"}
+    if rid == "win-x64":
+        expected |= {"WINDOWS_WEB_EXECUTION.md", "execution/SCN-001-powershell-execution.yaml"}
+        assert data["execution/SCN-001-powershell-execution.yaml"] == CANONICAL_SCENARIO
+    assert set(name for name in data if not name.startswith("bin/")) == expected
+    assert all(name not in data for name in ("profile.json", "installed-grant.json", "manager-execution-v2-public.pem", "state.json", "kit.json", "study.json"))
+    if rid == "linux-x64":
+        assert not any(name.startswith("execution/") or name == "Enable-Execution.ps1" for name in data)
     metadata = json.loads(data["version.json"])
-    assert metadata == {"schema_version": "1.0", "version": "0.2.0", "source_commit": COMMIT,
+    assert metadata == {"schema_version": "1.0", "version": "0.3.0", "source_commit": COMMIT,
                         "runtime": rid, "dotnet_runtime": "10.0.13"}
     lines = data["SHA256SUMS.txt"].decode().splitlines()
     assert lines == sorted(lines, key=lambda line: line[66:])
@@ -129,17 +140,55 @@ def test_runtime_notices_fail_closed_before_output(package_input, tmp_path, bad)
     assert not output.exists()
 
 
-def test_windows_public_guide_scopes_each_script_to_reviewed_child_process():
-    """Static public-command contract; intentionally does not execute a policy probe."""
+def test_windows_public_guide_uses_reviewed_file_without_policy_override():
     guide = (ROOT / "docs/manager/AGENT_CONNECTION_RUNBOOK.md").read_text(encoding="utf-8-sig")
     blocks = re.findall(r"```powershell\n(.*?)```", guide, flags=re.S)
     commands = [line for block in blocks for line in block.splitlines() if re.search(r"\.\\(?:Install|Uninstall)-Agent\.ps1", line)]
-    assert len(commands) == 4  # install, upgrade, uninstall, replacement recovery
-    assert all(re.search(r"powershell\.exe.*-NoProfile -ExecutionPolicy Bypass -File \.\\(?:Install|Uninstall)-Agent\.ps1", line) for line in commands)
-    assert guide.index("Get-FileHash") < guide.index("-ExecutionPolicy Bypass")
-    assert guide.index("Get-ExecutionPolicy -List") < guide.index("-ExecutionPolicy Bypass")
+    assert len(commands) == 4
+    assert all(re.search(r"powershell\.exe.*-NoLogo -NoProfile -NonInteractive -File \.\\(?:Install|Uninstall)-Agent\.ps1", line) for line in commands)
+    assert guide.index("Get-FileHash") < guide.index("-NoLogo")
+    assert guide.index("Get-ExecutionPolicy -List") < guide.index("-NoLogo")
     assert all(term in guide for term in ("Restricted", "RemoteSigned", "Internet", "Group Policy", "MachinePolicy", "UserPolicy"))
-    assert "Set-ExecutionPolicy" not in guide
+    assert all(term not in guide for term in (" -ExecutionPolicy", "Set-ExecutionPolicy", "Unblock-File"))
+
+
+@pytest.mark.parametrize("bad", ["missing", "crlf", "tampered", "empty", "hardlink"])
+def test_canonical_scenario_asset_rejects_unreviewed_bytes_before_output(package_input, tmp_path, bad):
+    source, _, rid, _ = package_input
+    if rid != "win-x64":
+        assert stage(package_input, tmp_path / "linux-output").returncode == 0
+        return  # Linux never consumes the deliberately unrelated canonical input.
+    path = source / "canonical-scenario.yaml"
+    if bad == "missing": path.unlink()
+    elif bad == "crlf": path.write_bytes(CANONICAL_SCENARIO.replace(b"\n", b"\r\n"))
+    elif bad == "tampered": path.write_bytes(CANONICAL_SCENARIO.replace(b"SCN-001", b"SCN-002"))
+    elif bad == "empty": path.write_bytes(b"")
+    else:
+        copy = tmp_path / "canonical-copy"
+        copy.write_bytes(path.read_bytes())
+        path.unlink()
+        path.hardlink_to(copy)
+    output = tmp_path / "output"
+    assert stage(package_input, output).returncode != 0
+    assert not output.exists()
+
+
+def test_linux_rejects_execution_asset_input(package_input, tmp_path):
+    source, _, rid, _ = package_input
+    if rid != "linux-x64":
+        assert stage(package_input, tmp_path / "windows-output").returncode == 0
+        return
+    output = tmp_path / "output"
+    assert stage(package_input, output, "--canonical-scenario", str(source / "canonical-scenario.yaml")).returncode != 0
+    assert not output.exists()
+
+
+def test_windows_requires_explicit_canonical_blob_input(package_input, tmp_path):
+    _, _, rid, _ = package_input
+    output = tmp_path / "output"
+    result = stage(package_input, output, canonical=False)
+    assert result.returncode == (1 if rid == "win-x64" else 0)
+    assert output.exists() == (rid == "linux-x64")
 
 
 @pytest.mark.parametrize("bad", ["missing", "private", "unknown-dll", "directory", "runtime", "source-script", "overlap", "version-traversal", "commit"])
@@ -222,7 +271,7 @@ def test_native_workflow_stages_current_connection_version():
 
 @pytest.mark.parametrize("metadata", [[], {"libraries": []}, {"libraries": {}},
     {"libraries": {"aegis-agent/0.1.0": {}}},
-    {"libraries": {"aegis-agent/0.1.0": {}, "aegis-agent/0.2.0": {}}}])
+    {"libraries": {"aegis-agent/0.1.0": {}, "aegis-agent/0.3.0": {}}}])
 def test_invalid_application_metadata_is_rejected(package_input, tmp_path, metadata):
     _, build, _, _ = package_input
     (build / "aegis-agent.deps.json").write_text(json.dumps(metadata))

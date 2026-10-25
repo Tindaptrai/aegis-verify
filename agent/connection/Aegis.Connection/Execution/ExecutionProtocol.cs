@@ -171,7 +171,7 @@ public static class ExecutionProtocol
             envelope = (byte[])envelope.Clone();
             var wire = Decode<ExecutionEnvelope>(envelope, EnvelopeLimit);
             var payload = Base64(wire.Payload); var signature = Base64(wire.Signature);
-            if (payload.Length > RequestLimit || key.KeySize < 3072 ||
+            if (payload.Length > RequestLimit || key.KeySize != 3072 ||
                 Convert.ToHexStringLower(SHA256.HashData(key.ExportSubjectPublicKeyInfo())) != grant.PublicKeySha256 ||
                 !key.VerifyData(payload, signature, HashAlgorithmName.SHA256, RSASignaturePadding.Pss)) throw new JsonException();
             var job = Decode<SignedJob>(payload);

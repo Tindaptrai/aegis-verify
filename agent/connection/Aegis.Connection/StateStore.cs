@@ -158,7 +158,7 @@ public sealed class StateStore : IDisposable
     {
         try
         {
-            if (state.Kind is not ("pending" or "enrolled") || Protocol.Origin(state.ManagerOrigin).GetLeftPart(UriPartial.Authority) != state.ManagerOrigin || state.Hostname.Length is < 1 or > 255 || state.Hostname.Any(char.IsControl) || state.Os is not ("windows" or "linux") || state.Architecture != "x64" || state.AgentVersion is not ("0.1.0" or "0.2.0") || state.Failure != null && !Failures.Contains(state.Failure) || state.LastAcknowledgedAt != null && !DateTimeOffset.TryParse(state.LastAcknowledgedAt, out _)) throw new CryptographicException();
+            if (state.Kind is not ("pending" or "enrolled") || Protocol.Origin(state.ManagerOrigin).GetLeftPart(UriPartial.Authority) != state.ManagerOrigin || state.Hostname.Length is < 1 or > 255 || state.Hostname.Any(char.IsControl) || state.Os is not ("windows" or "linux") || state.Architecture != "x64" || state.AgentVersion is not ("0.1.0" or "0.2.0" or "0.3.0") || state.Failure != null && !Failures.Contains(state.Failure) || state.LastAcknowledgedAt != null && !DateTimeOffset.TryParse(state.LastAcknowledgedAt, out _)) throw new CryptographicException();
             using var ca = Certificates.PublicPem(state.ServerCaPem);
             // Persisted expired trust/identity must still be readable for status and explicit retirement.
             if (!ca.Extensions.OfType<X509BasicConstraintsExtension>().Any(e => e.CertificateAuthority)) throw new CryptographicException();

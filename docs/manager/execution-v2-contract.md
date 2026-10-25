@@ -66,7 +66,7 @@ worker_unavailable,source_unavailable,busy,reconciliation_required`.
 
 Canonical hashing uses UTF-8 JSON, sorted keys, compact separators, ASCII escaping
 and no NaN. Signature verification always covers original payload bytes, without
-canonicalizing or reserializing them. RSA3072-or-stronger PSS-SHA256 uses salt32.
+canonicalizing or reserializing them. Exactly RSA3072 PSS-SHA256 uses salt32.
 `job_sha256` hashes raw signed JSON; inner `payload_sha256` pins the script.
 
 Set `AEGIS_MANAGER_EXECUTION_SIGNING_KEY` to a separately provisioned private key.
@@ -256,8 +256,9 @@ and rejects failed/incomplete/timed-out shards. Zero hits can be healthy. No
 binding scope, unknown status, drift or failed round blocks execution. Restart
 does not reclaim durable `collecting` state. The explicit v2 collection call is
 `process_one(connection, root, settle_seconds=..., execution_connection=registered)`;
-until the Task5 dispatcher implements that kwarg the configured v2 worker stops
-closed. Legacy positional collection calls retain their existing behavior.
+the registered worker dispatches v2 only for its exact source UUID/revision, and
+legacy `--config` mode collects legacy only. Legacy positional collection calls
+retain their existing behavior. See [private setup and recovery](windows-web-execution.md).
 
 Local loading uses explicit
 `ExecutionProfile.Load(profilePath, grantPath, signingPublicKeyPath, identity)`;

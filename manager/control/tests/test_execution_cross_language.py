@@ -14,8 +14,7 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from django.test import SimpleTestCase, override_settings
 from .test_execution_contracts import UUID, DIGEST, PINS, RULES, job_data, raw
 
-ROOT = Path(__file__).resolve().parents[3]
-VECTOR_EXE = Path(os.environ.get('AEGIS_CONNECTION_TEST_EXE', str(ROOT / ('agent/connection/Aegis.Connection.Tests/bin/Debug/net10.0/Aegis.Connection.Tests.exe' if os.name == 'nt' else 'agent/connection/Aegis.Connection.Tests/bin/Debug/net10.0/Aegis.Connection.Tests.dll'))))
+VECTOR_EXE = Path(os.environ['AEGIS_EXECUTION_VECTOR_TEST_EXE']) if os.environ.get('AEGIS_EXECUTION_VECTOR_TEST_EXE') else None
 
 
 class ExecutionCrossLanguageTests(SimpleTestCase):
@@ -27,7 +26,8 @@ class ExecutionCrossLanguageTests(SimpleTestCase):
     def setUp(self):
         from control.execution_contracts import canonical_bytes, decode_contract
         from control.execution_signing import sign_execution_payload
-        self.assertTrue(VECTOR_EXE.is_file(), 'Build connection test harness or set AEGIS_CONNECTION_TEST_EXE; cross-language vectors must execute')
+        self.assertTrue(VECTOR_EXE is not None and VECTOR_EXE.is_absolute() and VECTOR_EXE.is_file(),
+                        'Set AEGIS_EXECUTION_VECTOR_TEST_EXE to the explicit Release test harness; cross-language vectors must execute')
         self.space = tempfile.TemporaryDirectory(prefix='aegis-execution-vector-')
         self.addCleanup(self.space.cleanup)
         self.root = Path(self.space.name)
@@ -79,6 +79,15 @@ class ExecutionCrossLanguageTests(SimpleTestCase):
         result = self.validate(self.signed_raw(original))
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual(result.stdout.strip(), hashlib.sha256(original).hexdigest().encode())
+
+    def test_exact_rsa3072_rejects_valid_2048_and_4096_signatures(self):
+        for size in (2048, 3072, 4096):
+            with self.subTest(size=size):
+                self.key = rsa.generate_private_key(public_exponent=65537, key_size=size)
+                (self.root / 'public.pem').write_bytes(self.key.public_key().public_bytes(
+                    serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo))
+                result = self.validate(self.signed_raw(raw(self.payload)))
+                self.assertEqual(result.returncode, 0 if size == 3072 else 2, result.stderr.decode())
 
     def test_tampered_signed_byte_and_noncanonical_envelope_rejected(self):
         value = json.loads(self.envelope)

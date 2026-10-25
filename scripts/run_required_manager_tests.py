@@ -1,0 +1,183 @@
+"""CI-only Django runner: certify required roles from actual unittest outcomes."""
+import argparse
+import io
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import sys
+import unittest
+
+PREFIXES = {
+    "postgres_accounts": "accounts.tests.test_postgres_concurrency.",
+    "postgres_control": "control.tests.test_postgres_concurrency.",
+    "postgres_devices": "devices.tests.test_postgres_concurrency.",
+    "postgres_catalog": "catalog.tests.test_postgres_concurrency.",
+    "postgres_execution": "control.tests.test_execution_postgres.",
+    "vectors": "control.tests.test_execution_cross_language.ExecutionCrossLanguageTests.",
+    "manager_worker_service": "control.tests.test_execution_worker_service.RegisteredWorkerSystemdTests.",
+}
+PUBLISHED = "devices.tests.test_connection_agent.PublishedConnectionTests."
+EXACT = {
+    "nginx_execution": "control.tests.test_proxy_mtls.NginxMutualTlsTests.test_execution_exact_routes_require_verified_certificate",
+    "published_service": PUBLISHED + "test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall",
+    "linux_presence_only": PUBLISHED + "test_linux_published_client_remains_presence_only_and_rejects_execution_options",
+}
+CATEGORIES = (*PREFIXES, *EXACT, "published_presence")
+
+
+def category_for(identity):
+    for name, exact in EXACT.items():
+        if identity == exact: return name
+    for name, prefix in PREFIXES.items():
+        if identity.startswith(prefix): return name
+    if identity.startswith(PUBLISHED): return "published_presence"
+    return None
+
+
+class GateResult(unittest.TextTestResult):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.started, self.outcomes = set(), {}
+
+    def startTest(self, test):
+        self.started.add(test.id())
+        super().startTest(test)
+
+    def addSuccess(self, test):
+        if self.outcomes.get(test.id()) != "failed": self.outcomes[test.id()] = "passed"
+        super().addSuccess(test)
+
+    def addFailure(self, test, err):
+        self.outcomes[test.id()] = "failed"
+        super().addFailure(test, err)
+
+    def addError(self, test, err):
+        self.outcomes[test.id()] = "failed"
+        super().addError(test, err)
+
+    def addSkip(self, test, reason):
+        self.outcomes[test.id()] = "skipped"
+        super().addSkip(test, reason)
+
+    def addSubTest(self, test, subtest, err):
+        if err is not None: self.outcomes[test.id()] = "failed"
+        super().addSubTest(test, subtest, err)
+
+    def addExpectedFailure(self, test, err):
+        self.outcomes[test.id()] = "failed"
+        super().addExpectedFailure(test, err)
+
+    def addUnexpectedSuccess(self, test):
+        self.outcomes[test.id()] = "failed"
+        super().addUnexpectedSuccess(test)
+
+
+def counts(states):
+    states = list(states)
+    passed, failed, skipped = (states.count(state) for state in ("passed", "failed", "skipped"))
+    return dict(executed=passed + failed, passed=passed, failed=failed, skipped=skipped)
+
+
+def build_report(result, required, source_commit, run_url, errors=()):
+    categories = []
+    for name in sorted(set(required)):
+        if name not in CATEGORIES: raise ValueError("invalid_gate_category")
+        actual = counts(state for identity, state in result.outcomes.items()
+                        if identity in result.started and category_for(identity) == name)
+        passed = actual["executed"] > 0 and actual["passed"] == actual["executed"] and actual["failed"] == actual["skipped"] == 0
+        categories.append(dict(name=name, **actual, result="passed" if passed else "failed"))
+    totals = counts(state for identity, state in result.outcomes.items() if identity in result.started)
+    # Setup/teardown failures may have no started test, but must still fail the gate.
+    suite_failures = len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses) + len(result.expectedFailures)
+    passed = bool(categories) and not errors and not suite_failures and totals["executed"] > 0 and totals["failed"] == 0 and all(c["result"] == "passed" for c in categories)
+    return dict(schema_version=1, kind="required_manager_tests", required=True,
+                source_commit=source_commit, run_url=run_url, result="passed" if passed else "failed",
+                totals=totals, suite_failures=suite_failures, categories=categories,
+                blocking_codes=sorted(set(errors)))
+
+
+def prerequisites(required, *, vendor, environ, which=shutil.which):
+    errors = set()
+    if any(name.startswith("postgres_") or name == "manager_worker_service" for name in required) and vendor != "postgresql": errors.add("postgresql_required")
+    if "nginx_execution" in required and which("nginx") is None: errors.add("nginx_required")
+    for roles, variable, code, directory in (
+        ({"vectors"}, "AEGIS_EXECUTION_VECTOR_TEST_EXE", "vector_harness_required", False),
+        ({"published_presence", "published_service", "linux_presence_only"}, "AEGIS_CONNECTION_TEST_EXE", "published_cli_required", False),
+        ({"published_service"}, "AEGIS_CONNECTION_SERVICE_PACKAGE", "service_package_required", True),
+    ):
+        if not set(required) & roles: continue
+        value = environ.get(variable)
+        path = Path(value) if value else None
+        if path is None or not path.is_absolute() or not (path.is_dir() if directory else path.is_file()): errors.add(code)
+    if "linux_presence_only" in required and not sys.platform.startswith("linux"): errors.add("linux_required")
+    if "manager_worker_service" in required:
+        if not sys.platform.startswith("linux"): errors.add("linux_required")
+        if any(environ.get(name) != value for name, value in (
+            ("AEGIS_MANAGER_REQUIRE_WORKER_SYSTEMD", "1"), ("AEGIS_MANAGER_DISPOSABLE_SYSTEMD_CI", "1"),
+            ("AEGIS_MANAGER_CI", "1"), ("GITHUB_ACTIONS", "true"), ("CI", "true"),
+        )): errors.add("disposable_systemd_required")
+    return sorted(errors)
+
+
+def write_report(path, value):
+    path = Path(path)
+    if not path.is_absolute(): raise ValueError("absolute_gate_output_required")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8", newline="\n") as stream:
+        json.dump(value, stream, sort_keys=True, indent=2)
+        stream.write("\n")
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--require", action="append", choices=CATEGORIES, required=True)
+    parser.add_argument("--settings", choices=("aegis_manager.test_settings", "aegis_manager.ci_settings"), required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--source-commit", required=True)
+    parser.add_argument("--run-url", required=True)
+    parser.add_argument("labels", nargs="+")
+    args = parser.parse_args(argv)
+    result = GateResult(io.StringIO(), True, 0)
+    runner = None
+    errors = []
+    commit = args.source_commit if re.fullmatch(r"[0-9a-f]{40}", args.source_commit) else None
+    url = args.run_url if re.fullmatch(r"https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+/actions/runs/[0-9]+", args.run_url) else None
+    if commit is None or url is None: errors.append("invalid_gate_metadata")
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "manager"))
+        os.environ["DJANGO_SETTINGS_MODULE"] = args.settings
+        import django
+        django.setup()
+        from django.db import connection
+        from django.test.runner import DiscoverRunner
+        errors.extend(prerequisites(args.require, vendor=connection.vendor, environ=os.environ))
+        if not errors:
+            class RequiredRunner(DiscoverRunner):
+                captured = None
+                def get_resultclass(self): return GateResult
+                def get_test_runner_kwargs(self):
+                    return dict(super().get_test_runner_kwargs(), stream=io.StringIO())
+                def run_suite(self, suite, **kwargs):
+                    self.captured = super().run_suite(suite, **kwargs)
+                    return self.captured
+            runner = RequiredRunner(verbosity=0, interactive=False)
+            failed = runner.run_tests(args.labels)
+            if runner.captured is not None: result = runner.captured
+            if failed and result.wasSuccessful(): errors.append("suite_failed")
+    except Exception:
+        errors.append("gate_execution_failed")
+    if runner is not None and runner.captured is not None: result = runner.captured
+    value = build_report(result, args.require, commit, url, errors)
+    try:
+        write_report(args.output, value)
+    except (OSError, ValueError):
+        print("required_manager_gate_artifact_failed", file=sys.stderr)
+        return 1
+    print(json.dumps(value, sort_keys=True))
+    return 0 if value["result"] == "passed" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

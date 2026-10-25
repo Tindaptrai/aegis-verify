@@ -407,11 +407,11 @@ class PublishedConnectionTests(TransactionTestCase):
         path = self.state / "state.json"
         state = json.loads(path.read_text())
         if old_state:
-            # Synthetic upgrade fixture: the 0.1.0 schema is identical. Retain
+            # Synthetic upgrade fixture: the old creation schema is identical. Retain
             # real issuer/TLS identity; change only its recorded creation version.
-            state["agent_version"] = "0.1.0"
+            state["agent_version"] = "0.1.0" if old_state is True else old_state
             path.write_text(json.dumps(state))
-            Device.objects.filter(pk=state["device_id"]).update(agent_version="0.1.0")
+            Device.objects.filter(pk=state["device_id"]).update(agent_version=state["agent_version"])
         return state
 
     def assert_identity_preserved(self, before):
@@ -422,7 +422,9 @@ class PublishedConnectionTests(TransactionTestCase):
                         "Protected identity changed; values withheld")
 
     def assert_network_snapshot(self, device):
-        self.assertEqual(device.reported_agent_version, "0.2.0")
+        self.assertEqual(device.reported_agent_version, "0.3.0")
+        self.assertFalse(any(path.startswith("/agent/v2/execution/") for path in self.server.routes))
+        self.assertFalse(device_dto(device)["execution_supported"])
         self.assertEqual(device.ip_collection_status, "ok", "Native service OS collection failed")
         self.assertIsInstance(device.reported_ips, list)
         self.assertLessEqual(len(device.reported_ips), 32)
@@ -441,13 +443,19 @@ class PublishedConnectionTests(TransactionTestCase):
             "reported_agent_version", "observed_ip", "observed_ip_received_at")}
 
     def test_published_network_upgrade_archival_preserves_final_snapshot_and_old_identity(self):
-        before = self.enrolled_identity(old_state=True)
+        self.assert_published_network_upgrade("0.1.0")
+
+    def test_published_02_creation_version_preserves_identity_after_network_upgrade(self):
+        self.assert_published_network_upgrade("0.2.0")
+
+    def assert_published_network_upgrade(self, old_version):
+        before = self.enrolled_identity(old_state=old_version)
         identity = before["device_id"]
         process = self.start_loop()
-        self.wait_until(lambda: Device.objects.get(pk=identity).reported_agent_version == "0.2.0",
+        self.wait_until(lambda: Device.objects.get(pk=identity).reported_agent_version == "0.3.0",
                         "Published network heartbeat did not reach production Manager")
         device = Device.objects.get(pk=identity)
-        self.assertEqual(device.agent_version, "0.1.0")
+        self.assertEqual(device.agent_version, old_version)
         self.assert_network_snapshot(device)
         archive_device(actor=self.owner, device_id=identity)
         snapshot = self.final_snapshot(Device.objects.get(pk=identity))
@@ -481,13 +489,30 @@ class PublishedConnectionTests(TransactionTestCase):
         self.assertEqual(Device.objects.count(), 1)
         self.assert_identity_preserved(before)
 
+    @skipUnless(os.name != "nt", "Linux presence-only release gate")
+    def test_linux_published_client_remains_presence_only_and_rejects_execution_options(self):
+        before = self.enrolled_identity()
+        process = self.start_loop()
+        self.wait_until(lambda: Device.objects.get(pk=before["device_id"]).reported_agent_version == "0.3.0",
+                        "Linux published presence did not reach Manager")
+        self.assert_network_snapshot(Device.objects.get(pk=before["device_id"]))
+        self.stop_loop(process)
+        routes = list(self.server.routes)
+        result = subprocess.run([str(self.executable), "run", "--state-dir", str(self.state),
+            "--execution-profile", str(self.root / "absent-profile.json"),
+            "--execution-grant", str(self.root / "absent-grant.json"),
+            "--execution-key", str(self.root / "absent-key.pem")], capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 2, "Linux accepted execution configuration; output withheld")
+        self.assertEqual(self.server.routes, routes)
+        self.assert_identity_preserved(before)
+
     def native_phase(self, action, *, identity=None, code=None):
         repository = Path(__file__).resolve().parents[3]
         package = Path(os.environ["AEGIS_CONNECTION_SERVICE_PACKAGE"])
         self.assertTrue(package.is_absolute() and package.is_dir(), "Native release package missing")
         if os.name == "nt":
             command = [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
-                "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
+                "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
                 str(repository / "scripts/tests/agent/Test-WindowsService.ps1"),
                 "-Action", action, "-PackageRoot", str(package), "-ManagerOrigin", self.origin,
                 "-ServerCa", str(self.root / "server-ca.pem")]

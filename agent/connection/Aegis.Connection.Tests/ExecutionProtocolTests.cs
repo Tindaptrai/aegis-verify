@@ -34,6 +34,20 @@ internal static partial class Program
     }
     private static void ExecutionProtocolTests()
     {
+        Test("execution protocol signing key is exactly RSA3072", () =>
+        {
+            var (original, grant) = ExecutionFixture();
+            foreach (var size in new[] { 2048, 3072, 4096 })
+            {
+                using var key = RSA.Create(size);
+                var configured = grant with { PublicKeySha256 = ExecutionProfile.Hash(key.ExportSubjectPublicKeyInfo()) };
+                var payload = original.PayloadBytes;
+                var envelope = ExecutionProtocol.CanonicalBytes(new ExecutionEnvelope(ExecutionProtocol.Version, ExecutionProtocol.KeyId,
+                    Convert.ToBase64String(payload), Convert.ToBase64String(key.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pss))));
+                if (size == 3072) Check(ExecutionProtocol.Verify(envelope, key, configured, DateTimeOffset.UtcNow).PayloadBytes.SequenceEqual(payload), "RSA3072 rejected or bytes changed");
+                else Denied(() => ExecutionProtocol.Verify(envelope, key, configured, DateTimeOffset.UtcNow), "execution_invalid");
+            }
+        });
         Test("execution protocol strict vectors", () =>
         {
             var accepted = Encoding.UTF8.GetBytes("{\"protocol\":\"aegis-windows-execution/2\",\"server_time\":\"2026-10-25T12:00:00Z\",\"accepted\":true}");

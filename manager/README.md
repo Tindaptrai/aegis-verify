@@ -45,7 +45,7 @@ five auth authority/bootstrap races and one control dispatch race with actual
 PostgreSQL row locks. Its dedicated gate is:
 
 ```sh
-python manager/manage.py test accounts.tests.test_postgres_concurrency control.tests.test_postgres_concurrency --settings=aegis_manager.ci_settings --verbosity 2
+python manager/manage.py test accounts.tests.test_postgres_concurrency control.tests.test_postgres_concurrency devices.tests.test_postgres_concurrency catalog.tests.test_postgres_concurrency control.tests.test_execution_postgres --settings=aegis_manager.ci_settings --verbosity 2
 ```
 
 CI settings require the isolated CI environment and must not target a lab DB. Neither
@@ -55,3 +55,12 @@ New dependencies are isolated here: Django supplies auth/CSRF/ORM/admin;
 cryptography supplies RSA-PSS signatures and certificate parsing; psycopg supplies
 PostgreSQL; Gunicorn supplies the Linux WSGI server. No new core wheel or agent
 NuGet dependency is introduced.
+
+## Paired Windows execution 0.3
+
+Presence remains the installation default; Linux is presence-only. Windows opt-in
+requires explicit protected profile/grant/separate exact RSA3072 execution public
+pin and fresh service-local readiness. Old 0.1/0.2 state creation versions,
+identity keys/certificates and durable journal entries are preserved. Follow
+[the reviewed setup/recovery guide](../docs/manager/windows-web-execution.md).
+Execution receipts and health do not establish detection or collection completeness.

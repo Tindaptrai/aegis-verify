@@ -45,7 +45,7 @@ public static class ExecutionProfile
         var text = new UTF8Encoding(false,true).GetString(bytes);
         if (!text.StartsWith("-----BEGIN PUBLIC KEY-----",StringComparison.Ordinal) || text.Contains("PRIVATE",StringComparison.Ordinal)) throw new CryptographicException();
         var key = RSA.Create();
-        try { key.ImportFromPem(text); if (key.KeySize < 3072) throw new CryptographicException(); return key; }
+        try { key.ImportFromPem(text); if (key.KeySize != 3072) throw new CryptographicException(); return key; }
         catch { key.Dispose(); throw; }
     }
     internal static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));

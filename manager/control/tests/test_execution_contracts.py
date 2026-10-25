@@ -210,6 +210,27 @@ class ExecutionContractTests(SimpleTestCase):
             data = snapshot_data(); data['release'] = data['release'] | changes
             with self.assertRaises(ValueError): decode_contract('JobApprovalSnapshotData', raw(data))
 
+    def test_execution_signing_and_verifying_require_exact_rsa3072(self):
+        from control.execution_contracts import decode_contract
+        from control.execution_signing import sign_execution_payload, verify_execution_envelope
+        payload = raw(job_data())
+        for size in (2048, 3072, 4096):
+            with self.subTest(size=size), tempfile.TemporaryDirectory() as directory:
+                key = rsa.generate_private_key(public_exponent=65537, key_size=size)
+                path = Path(directory) / 'ephemeral.pem'
+                path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+                envelope = raw(dict(protocol='aegis-windows-execution/2', key_id='manager-execution-v2',
+                    payload=base64.b64encode(payload).decode(), signature=base64.b64encode(key.sign(payload,
+                        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32), hashes.SHA256())).decode()))
+                with override_settings(MANAGER_EXECUTION_SIGNING_KEY=str(path), MANAGER_SIGNING_KEY=None, ENROLLMENT_CA_KEY=None):
+                    if size == 3072:
+                        signed, _ = sign_execution_payload(decode_contract('SignedJob', payload))
+                        self.assertEqual(verify_execution_envelope(signed, key.public_key()).job_id, UUID)
+                        self.assertEqual(verify_execution_envelope(envelope, key.public_key()).job_id, UUID)
+                    else:
+                        with self.assertRaises(ValueError): sign_execution_payload(decode_contract('SignedJob', payload))
+                        with self.assertRaises(ValueError): verify_execution_envelope(envelope, key.public_key())
+
     def test_signatures_preserve_original_bytes_and_separate_key(self):
         from control.execution_contracts import decode_contract
         from control.execution_signing import sign_execution_payload, verify_execution_envelope

@@ -20,7 +20,7 @@ def sign_execution_payload(payload: SignedJob) -> tuple[bytes, str]:
     if hasattr(settings, 'PRIVATE_ROOT') and not execution_path.resolve().is_relative_to(Path(settings.PRIVATE_ROOT).resolve()):
         raise ValueError('invalid_request')
     key = serialization.load_pem_private_key(read_local(execution_path, limit=65536, stage='inputs'), password=None)
-    if not isinstance(key, rsa.RSAPrivateKey) or key.key_size < 3072: raise ValueError('invalid_request')
+    if not isinstance(key, rsa.RSAPrivateKey) or key.key_size != 3072: raise ValueError('invalid_request')
     for name in ('MANAGER_SIGNING_KEY', 'ENROLLMENT_CA_KEY'):
         reference = getattr(settings, name, None)
         if not reference: continue
@@ -39,7 +39,7 @@ def verify_execution_envelope(raw: bytes, public_key) -> SignedJob:
     envelope = decode_contract('Envelope', raw)
     payload = canonical_base64(envelope.payload)
     signature = canonical_base64(envelope.signature)
-    if not isinstance(public_key, rsa.RSAPublicKey) or public_key.key_size < 3072: raise ValueError('invalid_request')
+    if not isinstance(public_key, rsa.RSAPublicKey) or public_key.key_size != 3072: raise ValueError('invalid_request')
     try: public_key.verify(signature, payload, padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=32), hashes.SHA256())
     except (InvalidSignature, ValueError): raise ValueError('invalid_request') from None
     return decode_contract('SignedJob', payload)

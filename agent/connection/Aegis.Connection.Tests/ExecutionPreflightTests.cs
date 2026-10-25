@@ -10,6 +10,20 @@ internal static partial class Program
 {
     private static void ExecutionPreflightTests()
     {
+        Test("execution preflight profile signing key is exactly RSA3072", () =>
+        {
+            var (grant, facts) = PreflightFixture();
+            facts.Files[@"C:\Reviewed\profile.json"] = ExecutionProtocol.CanonicalBytes(grant.Profile);
+            facts.Files[@"C:\Reviewed\grant.json"] = ExecutionProtocol.CanonicalBytes(grant.Installed);
+            foreach (var size in new[] { 2048, 3072, 4096 })
+            {
+                using var key = RSA.Create(size);
+                facts.Files[@"C:\Reviewed\public.pem"] = Encoding.ASCII.GetBytes(key.ExportSubjectPublicKeyInfoPem());
+                ExecutionGrant Load() => ExecutionProfile.Load(@"C:\Reviewed\profile.json", @"C:\Reviewed\grant.json", @"C:\Reviewed\public.pem", grant.Identity, facts.ReadImmutable);
+                if (size == 3072) Check(Load().PublicKeySha256 == ExecutionProfile.Hash(key.ExportSubjectPublicKeyInfo()), "RSA3072 profile key rejected");
+                else Denied(() => Load(), "execution_invalid");
+            }
+        });
         Test("execution preflight clock bound and conservative expiry", () =>
         {
             var sent = DateTimeOffset.Parse("2026-10-25T12:00:00Z");
