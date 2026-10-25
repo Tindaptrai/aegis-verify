@@ -1,4 +1,4 @@
-.catalog-panel-header { display: grid; grid-template-columns: minmax(0, 1fr); }
+.users-panel-header.catalog-panel-header { display: grid; grid-template-columns: minmax(0, 1fr); }
 .catalog-tools { display: grid; grid-template-columns: minmax(16rem, 1fr) minmax(11rem, 14rem) auto; align-items: end; gap: .8rem; min-width: 0; }
 .catalog-tools .catalog-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .5rem; width: 100%; min-width: 0; }
 .catalog-tools .catalog-search input { width: 100%; min-width: 0; }
