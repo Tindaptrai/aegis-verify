@@ -289,3 +289,70 @@ class NginxMutualTlsTests(LiveServerTestCase):
         self.assertEqual(self._request(path="/agent/v2/enroll", body={"padding": "x" * 16385}), 413)
         statuses = [self._request(path="/agent/v2/enroll", body={}) for _ in range(8)]
         self.assertIn(429, statuses)
+
+    def test_catalog_browser_upload_over_64k_keeps_session_and_agent_boundaries(self):
+        """Exercise the shipped exact location through real verified TLS/nginx."""
+        import io
+        import runpy
+        import zipfile
+        from hashlib import sha256
+        from random import Random
+        from django.test import Client
+        from django.test.client import encode_multipart
+
+        build_sample = runpy.run_path(str(
+            Path(__file__).resolve().parents[3] / "scripts/create_catalog_sample.py"))["build_sample"]
+
+        owner = get_user_model().objects.create_superuser(
+            "synthetic-catalog-owner", password="synthetic-catalog-password")
+        client = Client(enforce_csrf_checks=True)
+        token = client.get("/api/v1/auth/session").json()["csrf_token"]
+        login = client.post("/api/v1/auth/login", {
+            "username": owner.username, "password": "synthetic-catalog-password"},
+            content_type="application/json", HTTP_X_CSRFTOKEN=token)
+        self.assertEqual(login.status_code, 200)
+        token = login.json()["csrf_token"]
+        cookie = "; ".join(f"{key}={value.value}" for key, value in client.cookies.items())
+
+        with zipfile.ZipFile(io.BytesIO(build_sample())) as source:
+            contents = {info.filename: source.read(info) for info in source.infolist()}
+        # Deterministic text avoids an artificial compression-bomb fixture.
+        alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+        rng = Random(900)
+        contents["README.md"] = ("Synthetic nginx upload coverage.\n" +
+            "".join(rng.choice(alphabet) for _ in range(100_000))).encode()
+        metadata = json.loads(contents["package.json"])
+        metadata["files"]["README.md"] = sha256(contents["README.md"]).hexdigest()
+        contents["package.json"] = json.dumps(metadata).encode()
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_STORED) as output:
+            for name, content in contents.items():
+                output.writestr(name, content)
+        upload = io.BytesIO(archive.getvalue())
+        upload.name = "synthetic.zip"
+        body = encode_multipart("aegis-synthetic-boundary", {"package": upload})
+        self.assertGreater(len(body), 65536)
+
+        def browser_request(path, data, *, authenticated=True):
+            context = ssl.create_default_context(cafile=str(Path(self.temp.name) / "agent-ca.pem"))
+            connection = http.client.HTTPSConnection("localhost", self.port, context=context, timeout=10)
+            headers = {"Content-Type": "multipart/form-data; boundary=aegis-synthetic-boundary",
+                       "X-Aegis-Client-Verify": "SUCCESS", "X-Aegis-Client-Cert": "forged"}
+            if authenticated:
+                headers.update({"Cookie": cookie, "X-CSRFToken": token})
+            try:
+                connection.request("POST", path, data, headers)
+                response = connection.getresponse()
+                return response.status, response.read()
+            finally:
+                connection.close()
+
+        status, payload = browser_request("/api/v1/catalog/import", body)
+        self.assertEqual(status, 201, payload)
+        row = json.loads(payload)
+        self.assertEqual((row["scenario_id"], row["status"]), ("SCN-900", "draft"))
+        self.assertFalse(row["execution_supported"])
+        # The upload exception must not enlarge login or machine endpoints.
+        self.assertEqual(browser_request("/api/v1/auth/login", body)[0], 413)
+        self.assertEqual(browser_request("/agent/v2/enroll", body)[0], 413)
+        self.assertIn(browser_request("/api/v1/catalog/import", body, authenticated=False)[0], (401, 403))

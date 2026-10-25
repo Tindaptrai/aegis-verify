@@ -11,6 +11,8 @@ It does not establish live lab acceptance or enterprise readiness.
 - [Vietnamese deployment and recovery runbook](../docs/manager/FIRST_FLOW_RUNBOOK.md)
 - [Windows foreground agent](../agent/windows/README.md)
 - [Authenticated web UI build, fresh bootstrap, upgrade and lab checklist](../docs/manager/WEB_AUTH_RUNBOOK.md)
+- [Catalog ZIP package format](../docs/manager/CATALOG_PACKAGE.md)
+- [Catalog ZIP upgrade and lab checklist](../docs/manager/CATALOG_RUNBOOK.md)
 
 The independently built `/manager/` UI adds real sessions, product accounts and
 per-action capabilities. `/` redirects there; `/admin/` remains technical

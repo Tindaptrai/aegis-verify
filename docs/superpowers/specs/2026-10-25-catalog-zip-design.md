@@ -46,7 +46,9 @@ README is text; payload files may be `.ps1`, `.json`, `.txt`, `.yaml`, `.yml`.
 Entrypoint/optional cleanup must be inventoried payload `.ps1` files. Timeout is
 an integer 1–600 seconds. Only the above Windows runner contract is admitted in
 this first slice; it is metadata, not an installed execution capability.
-Scenario identity/version match the existing scenario manifest. YAML remains
+Scenario name is bounded to 512 characters, version to 128, and package paths to
+240 ASCII characters using the documented portable components. Scenario
+identity/version match the existing scenario manifest. YAML remains
 `status: draft`; DB publication never rewrites it. Profile validation reuses the
 existing engine's manifest/profile/fingerprint checks. A separate SCN-900 sample
 is illustrative authoring material, not production evidence or an installed pilot.
@@ -86,7 +88,8 @@ authorize them. Publish requires the submitted exact SHA-256 and verified stored
 bytes; publish from draft/unpublished, unpublish from published. Retry same action
 is idempotent. No content edits; history and bytes survive unpublish. Catalog
 audit is append-only through services with action, actor, version, digest, time;
-no credentials or uploaded content. Publication means reviewed for availability,
+no credentials or uploaded content. Detail returns the recent 100 audit entries
+while all entries remain stored. Publication means reviewed for availability,
 not proven detection, runtime readiness or trusted code execution.
 
 ## Human API contract
