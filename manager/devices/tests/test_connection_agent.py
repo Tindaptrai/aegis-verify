@@ -18,6 +18,7 @@ import tempfile
 from threading import Thread
 import time
 from unittest import skipUnless
+from unittest.mock import patch
 from urllib.parse import quote
 
 from cryptography import x509
@@ -223,6 +224,14 @@ foreach ($name in @('Get-FileHash', 'Get-Acl', 'Get-CimInstance')) {
 
 
 class NativeDiagnosticsTests(SimpleTestCase):
+    def test_published_cli_failure_records_only_fixed_stage_and_code(self):
+        case = PublishedConnectionTests("test_cli_enrolls_over_ip_san_tls_reconnects_same_uuid_and_honors_revoke")
+        case.executable = Path("synthetic-agent")
+        result = subprocess.CompletedProcess([], 3, "PRIVATE_STDOUT", "PRIVATE_STDERR")
+        with patch("devices.tests.test_connection_agent.subprocess.run", return_value=result):
+            with self.assertRaises(AssertionError): case.cli("connect")
+        self.assertEqual((case.gate_stage, case.gate_codes), ("published_connect", ("published_cli_failed",)))
+
     def test_archive_timeout_diagnostic_reports_only_fixed_states_and_response_counts(self):
         self.assertEqual(native_denial_diagnostic({"state": "enrolled", "service_status": "Stopped"}, [200, 403, 403]),
                          "state=enrolled service=Stopped heartbeat_200=1 heartbeat_403=2 other_responses=0")
@@ -296,6 +305,7 @@ class ConnectionFixtureTests(TransactionTestCase):
 @skipUnless(os.environ.get("AEGIS_CONNECTION_TEST_EXE"), "Published connection CLI required; native CI sets AEGIS_CONNECTION_TEST_EXE")
 class PublishedConnectionTests(TransactionTestCase):
     def setUp(self):
+        self.gate_stage = "published_fixture"
         self.executable = Path(os.environ["AEGIS_CONNECTION_TEST_EXE"])
         self.assertTrue(self.executable.is_absolute() and self.executable.is_file(), "Published CLI is missing")
         self.temporary = tempfile.TemporaryDirectory(prefix="aegis-real-tls-")
@@ -306,8 +316,10 @@ class PublishedConnectionTests(TransactionTestCase):
             ENROLLMENT_CA_CERT=str(self.root / "issuer.pem"), ALLOWED_HOSTS=["testserver"])
         self.setting.enable()
         self.addCleanup(self.setting.disable)
+        self.gate_stage = "published_authority"
         self.owner = connection_test_owner()
         initialize_issuer()
+        self.gate_stage = "published_tls"
         synthetic_tls(self.root)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
@@ -333,22 +345,27 @@ class PublishedConnectionTests(TransactionTestCase):
     def cli(self, *arguments, code=None):
         # Never include code in argv/environment/file, and never show captured
         # unredacted child output if an assertion fails.
+        self.gate_stage = {"connect": "published_connect", "status": "published_status"}.get(arguments[0], "published_run")
         result = subprocess.run([str(self.executable), *arguments], input=None if code is None else code + "\n",
                                 capture_output=True, text=True, timeout=30)
+        if result.returncode != 0: self.gate_codes = ("published_cli_failed",)
         self.assertEqual(result.returncode, 0, "Published CLI failed; output withheld")
         if code is not None:
             self.assertTrue(code not in result.stdout + result.stderr, "Child exposed synthetic pairing input; output withheld")
         return result.stdout
 
     def wait_until(self, predicate, description):
+        self.gate_stage = "published_wait"
         deadline = time.monotonic() + 35
         while time.monotonic() < deadline:
             if predicate():
                 return
             time.sleep(0.1)
+        self.gate_codes = ("wait_timeout",)
         self.fail(description() if callable(description) else description)
 
     def start_loop(self):
+        self.gate_stage = "published_run"
         process = subprocess.Popen([str(self.executable), "run", "--state-dir", str(self.state)],
                                    stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self.addCleanup(process.stderr.close)
@@ -507,6 +524,9 @@ class PublishedConnectionTests(TransactionTestCase):
         self.assert_identity_preserved(before)
 
     def native_phase(self, action, *, identity=None, code=None):
+        self.gate_stage = {"Install": "published_native_install", "Restart": "published_native_restart",
+            "Reinstall": "published_native_reinstall", "Status": "published_native_status",
+            "Uninstall": "published_native_uninstall"}.get(action)
         repository = Path(__file__).resolve().parents[3]
         package = Path(os.environ["AEGIS_CONNECTION_SERVICE_PACKAGE"])
         self.assertTrue(package.is_absolute() and package.is_dir(), "Native release package missing")
@@ -528,6 +548,7 @@ class PublishedConnectionTests(TransactionTestCase):
         result = subprocess.run(command, input="" if code is None else code + "\n",
                                 env=native_process_environment(os.name, os.environ),
                                 capture_output=True, text=True, timeout=120)
+        if result.returncode != 0: self.gate_codes = ("published_native_failed",)
         assert_native_result(action, result, code=code)
         data = json.loads(result.stdout)
         self.assertEqual(set(data), {"action", "device_id", "state", "service_status", "identity_preserved"})

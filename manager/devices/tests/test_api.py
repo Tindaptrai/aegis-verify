@@ -5,6 +5,22 @@ from .helpers import PairingCase, component
 
 
 class ApiTests(PairingCase):
+    def test_enrollment_accepts_03_and_retains_legacy_versions_but_rejects_unknown(self):
+        from control.models import Device
+        self.initialize()
+        for version in ("0.1.0", "0.2.0", "0.3.0"):
+            with self.subTest(version=version):
+                data = self.enrollment() | {"agent_version": version}
+                response = self.client.post("/agent/v2/enroll", data, content_type="application/json", secure=True)
+                self.assertEqual(response.status_code, 201)
+                self.assertEqual(response.json()["protocol"], "2.0")
+                self.assertEqual(Device.objects.get(pk=response.json()["device_id"]).agent_version, version)
+        data = self.enrollment() | {"agent_version": "0.4.0"}
+        before = Device.objects.count()
+        response = self.client.post("/agent/v2/enroll", data, content_type="application/json", secure=True)
+        self.assertEqual((response.status_code, response.json()), (400, {"error": {"code": "invalid_request"}}))
+        self.assertEqual(Device.objects.count(), before)
+
     def test_duplicate_extension_issuer_returns_fixed_503_and_preserves_pairing_state(self):
         before_files = self.install_duplicate_extension_issuer()
         data = self.enrollment()

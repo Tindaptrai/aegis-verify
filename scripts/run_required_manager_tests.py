@@ -25,6 +25,76 @@ EXACT = {
     "linux_presence_only": PUBLISHED + "test_linux_published_client_remains_presence_only_and_rejects_execution_options",
 }
 CATEGORIES = (*PREFIXES, *EXACT, "published_presence")
+ROOT = Path(__file__).resolve().parents[1]
+DIAGNOSTIC_STAGES = frozenset((
+    "fixture_setup", "source_staging", "source_tls", "authority_setup", "environment_setup",
+    "unit_enable", "unit_start", "worker_health", "service_properties", "worker_lock",
+    "source_block", "source_keepalive", "unit_stop", "unit_restart", "approved_job",
+    "collection_claim", "interrupted_restart", "durable_claim", "explicit_recovery",
+    "failed_claim", "owner_review", "fixture_cleanup", "published_fixture", "published_authority",
+    "published_tls", "published_connect", "published_status", "published_run", "published_wait",
+    "published_native_install", "published_native_restart", "published_native_reinstall",
+    "published_native_status", "published_native_uninstall",
+))
+DIAGNOSTIC_CODES = frozenset(("worker_process_failed", "published_cli_failed", "published_native_failed",
+    "source_probe_failed", "wait_timeout", "gate_execution_failed", "unexpected_success"))
+EXCEPTION_CLASSES = frozenset(("AssertionError", "AttributeError", "ValueError", "TypeError", "KeyError",
+    "IndexError", "RuntimeError", "OSError", "PermissionError", "FileNotFoundError", "TimeoutError",
+    "CalledProcessError", "SSLError", "ConnectionError", "OperationalError", "IntegrityError",
+    "ImproperlyConfigured", "ImportError", "ModuleNotFoundError", "SystemExit", "UnicodeError"))
+SERVICE_ENUMS = {
+    "ActiveState": frozenset(("active", "activating", "inactive", "deactivating", "failed", "reloading", "maintenance", "refreshing")),
+    "SubState": frozenset(("dead", "running", "exited", "failed", "auto-restart", "auto-restart-queued", "start", "start-pre", "start-post", "stop", "stop-sigterm", "stop-sigkill", "stop-post", "final-sigterm", "final-sigkill", "reload", "reload-signal", "reload-notify", "condition", "cleaning")),
+    "Result": frozenset(("success", "exit-code", "signal", "core-dump", "timeout", "watchdog", "start-limit-hit", "resources", "protocol", "oom-kill", "exec-condition", "assert", "condition")),
+}
+
+
+def diagnostic_id(test):
+    if test is None: return "gate_setup"
+    identity = test.id()
+    if type(identity) is str and len(identity) <= 256:
+        if re.fullmatch(r"(?:accounts|control|devices|catalog)\.tests\.[A-Za-z0-9_.]+", identity): return identity
+        holder = re.fullmatch(r"(setUpClass|tearDownClass|setUpModule|tearDownModule) \(((?:accounts|control|devices|catalog)\.tests\.[A-Za-z0-9_.]+)\)", identity)
+        if holder: return holder[2] + "." + holder[1]
+    return "test_id_withheld"
+
+
+def safe_diagnostic(test, err):
+    frames = []
+    traceback = err[2] if err is not None else None
+    while traceback is not None:
+        try:
+            path = Path(traceback.tb_frame.f_code.co_filename).resolve()
+            if path.is_relative_to(ROOT) and path.is_file():
+                relative = path.relative_to(ROOT).as_posix()
+                if len(relative) <= 240 and re.fullmatch(r"[A-Za-z0-9_./-]+", relative):
+                    frames.append(dict(path=relative, line=traceback.tb_lineno))
+                    frames = frames[-8:]
+        except (OSError, ValueError):
+            pass
+        traceback = traceback.tb_next
+    exception = err[0].__name__ if err is not None else "UnexpectedSuccess"
+    if exception not in EXCEPTION_CLASSES and exception != "UnexpectedSuccess": exception = "OtherException"
+    stage = getattr(test, "gate_stage", None)
+    stage = stage if type(stage) is str and stage in DIAGNOSTIC_STAGES else None
+    codes = getattr(test, "gate_codes", ())
+    codes = sorted({code for code in codes[:16] if type(code) is str and code in DIAGNOSTIC_CODES}) if type(codes) in (tuple, list) else []
+    service = getattr(test, "gate_service_status", None)
+    service_status = {}
+    if type(service) is dict:
+        for name, vocabulary in SERVICE_ENUMS.items():
+            value = service.get(name)
+            if type(value) is str and value in vocabulary: service_status[name] = value
+        status = service.get("ExecMainStatus")
+        if type(status) is int and 0 <= status <= 255: service_status["ExecMainStatus"] = status
+    runtime = getattr(test, "gate_runtime_status", None)
+    runtime_status = {}
+    if type(runtime) is dict:
+        for name in ("minimal_environment_returncode", "library_environment_returncode"):
+            value = runtime.get(name)
+            if type(value) is int and -255 <= value <= 255: runtime_status[name] = value
+    return dict(test_id=diagnostic_id(test), exception_class=exception, frames=frames[-8:],
+                stage=stage, codes=codes, service_status=service_status, runtime_status=runtime_status)
 
 
 def category_for(identity):
@@ -40,6 +110,13 @@ class GateResult(unittest.TextTestResult):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.started, self.outcomes = set(), {}
+        self.diagnostics, self.diagnostics_truncated = [], False
+
+    def record_diagnostic(self, test, err):
+        if len(self.diagnostics) >= 32:
+            self.diagnostics_truncated = True
+            return
+        self.diagnostics.append(safe_diagnostic(test, err))
 
     def startTest(self, test):
         self.started.add(test.id())
@@ -51,10 +128,12 @@ class GateResult(unittest.TextTestResult):
 
     def addFailure(self, test, err):
         self.outcomes[test.id()] = "failed"
+        self.record_diagnostic(test, err)
         super().addFailure(test, err)
 
     def addError(self, test, err):
         self.outcomes[test.id()] = "failed"
+        self.record_diagnostic(test, err)
         super().addError(test, err)
 
     def addSkip(self, test, reason):
@@ -62,15 +141,19 @@ class GateResult(unittest.TextTestResult):
         super().addSkip(test, reason)
 
     def addSubTest(self, test, subtest, err):
-        if err is not None: self.outcomes[test.id()] = "failed"
+        if err is not None:
+            self.outcomes[test.id()] = "failed"
+            self.record_diagnostic(test, err)
         super().addSubTest(test, subtest, err)
 
     def addExpectedFailure(self, test, err):
         self.outcomes[test.id()] = "failed"
+        self.record_diagnostic(test, err)
         super().addExpectedFailure(test, err)
 
     def addUnexpectedSuccess(self, test):
         self.outcomes[test.id()] = "failed"
+        self.record_diagnostic(test, None)
         super().addUnexpectedSuccess(test)
 
 
@@ -95,7 +178,8 @@ def build_report(result, required, source_commit, run_url, errors=()):
     return dict(schema_version=1, kind="required_manager_tests", required=True,
                 source_commit=source_commit, run_url=run_url, result="passed" if passed else "failed",
                 totals=totals, suite_failures=suite_failures, categories=categories,
-                blocking_codes=sorted(set(errors)))
+                blocking_codes=sorted(set(errors)), diagnostics=list(result.diagnostics),
+                diagnostics_truncated=result.diagnostics_truncated)
 
 
 def prerequisites(required, *, vendor, environ, which=shutil.which):
@@ -141,6 +225,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     result = GateResult(io.StringIO(), True, 0)
     runner = None
+    execution_error = None
     errors = []
     commit = args.source_commit if re.fullmatch(r"[0-9a-f]{40}", args.source_commit) else None
     url = args.run_url if re.fullmatch(r"https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+/actions/runs/[0-9]+", args.run_url) else None
@@ -168,7 +253,9 @@ def main(argv=None):
             if failed and result.wasSuccessful(): errors.append("suite_failed")
     except Exception:
         errors.append("gate_execution_failed")
+        execution_error = sys.exc_info()
     if runner is not None and runner.captured is not None: result = runner.captured
+    if execution_error is not None: result.record_diagnostic(None, execution_error)
     value = build_report(result, args.require, commit, url, errors)
     try:
         write_report(args.output, value)

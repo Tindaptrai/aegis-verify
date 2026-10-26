@@ -104,10 +104,22 @@ jobs:
       DJANGO_SETTINGS_MODULE: aegis_manager.ci_settings
       AEGIS_EXECUTION_GATE_URL: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
     steps:
+      - name: Install Git before checkout in the slim container
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify and propagate exact checked-out source commit
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          source_commit=$(git rev-parse --verify HEAD)
+          test "$source_commit" = "$REQUESTED_SOURCE_COMMIT"
+          python -c 'import re,sys; sys.exit(0 if re.fullmatch("[0-9a-f]{40}",sys.argv[1]) else 1)' "$source_commit"
+          echo "AEGIS_MANAGER_SOURCE_COMMIT=$source_commit" >> "$GITHUB_ENV"
       - name: Install isolated test runtime
         run: |
           apt-get update
@@ -124,7 +136,7 @@ jobs:
       - name: Require real PostgreSQL races, nginx v2 isolation and execution vectors
         run: |
           python manager/manage.py makemigrations --check --dry-run --settings=aegis_manager.ci_settings
-          python scripts/run_required_manager_tests.py --settings aegis_manager.ci_settings --output "$RUNNER_TEMP/manager-postgres-results.json" --source-commit "$(git rev-parse HEAD)" --run-url "$AEGIS_EXECUTION_GATE_URL" --require postgres_accounts --require postgres_control --require postgres_devices --require postgres_catalog --require postgres_execution --require nginx_execution --require vectors accounts.tests control.tests devices.tests catalog.tests
+          python scripts/run_required_manager_tests.py --settings aegis_manager.ci_settings --output "$RUNNER_TEMP/manager-postgres-results.json" --source-commit "$AEGIS_MANAGER_SOURCE_COMMIT" --run-url "$AEGIS_EXECUTION_GATE_URL" --require postgres_accounts --require postgres_control --require postgres_devices --require postgres_catalog --require postgres_execution --require nginx_execution --require vectors accounts.tests control.tests devices.tests catalog.tests
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:

@@ -144,6 +144,8 @@ jobs:
           python -m pytest backend/tests/test_agent_connection_packaging.py backend/tests/test_required_manager_tests.py -q -p no:cacheprovider --basetemp $base --junitxml (Join-Path $verification 'builders.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($IsWindows) {
+            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File scripts/tests/agent/Test-InstallerContracts.ps1 -Pure
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File scripts/tests/agent/Test-InstallerContracts.ps1
           } else {
             bash scripts/tests/agent/test-installer-contracts.sh
@@ -192,7 +194,7 @@ jobs:
             $actual = @($value.PSObject.Properties.Name)
             if ($actual.Count -ne $fields.Count -or @($actual | Where-Object { $_ -cnotin $fields }).Count -ne 0) { throw 'required_windows_schema_invalid' }
           }
-          Assert-ClosedGateFields $native @('schema_version','kind','source_commit','required','platform','result','categories','lab_gates','run_url')
+          Assert-ClosedGateFields $native @('schema_version','kind','source_commit','required','platform','result','categories','lab_gates','run_url','diagnostics')
           $expected = @('containment','service_identity_acl','service_channel_grants','immutable_default_ancestors','upgrade_rollback_journal','policy_denial','published_presence_mtls_missing_vendor')
           if ($nativeExit -ne 0 -or ($native.schema_version -isnot [int] -and $native.schema_version -isnot [long]) -or $native.schema_version -ne 1 -or $native.kind -cne 'windows_execution_release_gate' -or $native.required -isnot [bool] -or !$native.required -or $native.platform -cne 'win-x64' -or $native.result -cne 'passed' -or $native.source_commit -cne $env:AEGIS_CONNECTION_SOURCE_COMMIT -or $native.run_url -cne $env:AEGIS_EXECUTION_GATE_URL) { throw 'required_windows_gate_failed' }
           if (@($native.categories).Count -ne $expected.Count -or @($native.categories.name | Sort-Object -Unique).Count -ne $expected.Count) { throw 'required_windows_categories_invalid' }
@@ -203,6 +205,12 @@ jobs:
           }
           Assert-ClosedGateFields $native.lab_gates @('real_vendor_readiness','scn001_detection','reboot_before_login')
           foreach ($lab in @('real_vendor_readiness','scn001_detection','reboot_before_login')) { if ($native.lab_gates.$lab -ne 'not_executed') { throw 'lab_gate_must_remain_explicit' } }
+          Assert-ClosedGateFields $native.diagnostics @('stage','code','child_exit_code','exception_type','hresult','fixture','failure_codes')
+          if ($native.diagnostics.stage -cne 'complete' -or $null -ne $native.diagnostics.code -or $null -ne $native.diagnostics.exception_type -or $null -ne $native.diagnostics.hresult -or @($native.diagnostics.failure_codes).Count -ne 0 -or ($native.diagnostics.child_exit_code -isnot [int] -and $native.diagnostics.child_exit_code -isnot [long]) -or $native.diagnostics.child_exit_code -ne 0) { throw 'required_windows_diagnostics_inconsistent' }
+          if ($null -ne $native.diagnostics.fixture) {
+            Assert-ClosedGateFields $native.diagnostics.fixture @('stage','exception_type','hresult','line')
+            if ($native.diagnostics.fixture.stage -cne 'complete' -or $null -ne $native.diagnostics.fixture.exception_type -or $null -ne $native.diagnostics.fixture.hresult -or ($null -ne $native.diagnostics.fixture.line -and (($native.diagnostics.fixture.line -isnot [int] -and $native.diagnostics.fixture.line -isnot [long]) -or $native.diagnostics.fixture.line -lt 1))) { throw 'required_windows_fixture_diagnostics_inconsistent' }
+          }
       - name: Require published TLS presence and actual native service lifecycle
         run: |
           $required = @('--require','published_presence','--require','published_service')
