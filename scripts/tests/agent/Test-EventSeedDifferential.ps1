@@ -25,7 +25,7 @@ function Invoke-SeedDiagnosticProcess([string]$Executable,[string[]]$Arguments,[
         return [pscustomobject]@{exit_code=$process.ExitCode;output=$text}
     } finally {$process.Dispose()}
 }
-function Get-SeedSdkSource([string]$ProviderName,[string]$Channel) {
+function Get-SeedSdkSource([string]$ProviderName,[string]$Channel,[bool]$Payload=$false) {
     if($ProviderName -cnotmatch '^AEGIS-Test-[0-9a-f]{32}-(Read|Denied)$' -or $Channel -cne ($ProviderName+'/Operational')){throw 'seed_sdk_input_invalid'}
     $source=@'
 #include <windows.h>
@@ -53,7 +53,7 @@ int wmain() {
                 generatedEnabled = EventEnabledFixtureEvent();
                 nativeEnabled = EventEnabled(Fixture_Context.RegistrationHandle, &FixtureEvent) != FALSE;
                 if (generatedEnabled) {
-                    write = EventWriteFixtureEvent_AssumeEnabled();
+                    write = @@WRITE@@;
                     wrote = true;
                     if (write != ERROR_SUCCESS) break;
                 }
@@ -81,10 +81,11 @@ int wmain() {
     return observed ? 0 : registration != 0 ? 20 : !wrote ? 21 : write != 0 ? 22 : queryError != 0 ? 24 : 23;
 }
 '@
-    return $source.Replace('@@PROVIDER@@',$ProviderName.Replace('-','_')).Replace('@@CHANNEL@@',$Channel)
+    $write=if($Payload){'EventWriteFixtureEvent_AssumeEnabled(1UL)'}else{'EventWriteFixtureEvent_AssumeEnabled()'}
+    return $source.Replace('@@PROVIDER@@',$ProviderName.Replace('-','_')).Replace('@@CHANNEL@@',$Channel).Replace('@@WRITE@@',$write)
 }
-function New-SeedReferenceWriter([string]$Directory,[string]$ProviderName,[string]$Channel) {
-    $source=Get-SeedSdkSource $ProviderName $Channel
+function New-SeedReferenceWriter([string]$Directory,[string]$ProviderName,[string]$Channel,[bool]$Payload=$false) {
+    $source=Get-SeedSdkSource $ProviderName $Channel $Payload
     $tools=Get-FixtureManifestTools
     $sdkBin=Split-Path (Split-Path $tools.mc -Parent) -Parent;$sdkVersion=Split-Path $sdkBin -Leaf
     $kits=Split-Path (Split-Path $sdkBin -Parent) -Parent
@@ -98,6 +99,54 @@ function New-SeedReferenceWriter([string]$Directory,[string]$ProviderName,[strin
     Invoke-FixtureCompiler $compiler $arguments $Directory
     if(!(Test-Path -LiteralPath $exe -PathType Leaf)){throw 'seed_sdk_compile_failed'}
     return $exe
+}
+function ConvertTo-SeedManifestVariant([string]$Xml,[ValidateSet('control','payload','message','access')][string]$Mode) {
+    if($Mode -cin @('control','access')){return $Xml}
+    $document=[xml]$Xml;$namespace='http://schemas.microsoft.com/win/2004/08/events'
+    $namespaces=[Xml.XmlNamespaceManager]::new($document.NameTable);$namespaces.AddNamespace('e',$namespace)
+    $providers=@($document.SelectNodes('/e:instrumentationManifest/e:instrumentation/e:events/e:provider',$namespaces))
+    if($providers.Count -ne 1){throw 'seed_manifest_input_invalid'}
+    $provider=$providers[0];$events=$provider.SelectSingleNode('e:events',$namespaces);$event=$events.SelectSingleNode('e:event',$namespaces)
+    if(@($events.SelectNodes('e:event',$namespaces)).Count -ne 1 -or $event.HasAttribute('template') -or $event.HasAttribute('message')){throw 'seed_manifest_input_invalid'}
+    if($Mode -ceq 'payload'){
+        $templates=$document.CreateElement('templates',$namespace);$template=$document.CreateElement('template',$namespace);$template.SetAttribute('tid','SeedTemplate')
+        $data=$document.CreateElement('data',$namespace);$data.SetAttribute('name','Seed');$data.SetAttribute('inType','win:UInt32')
+        $null=$template.AppendChild($data);$null=$templates.AppendChild($template);$null=$provider.InsertBefore($templates,$events)
+        $event.SetAttribute('template','SeedTemplate')
+    } else {
+        $event.SetAttribute('message','$(string.SeedMessage)')
+        $localization=$document.CreateElement('localization',$namespace);$resources=$document.CreateElement('resources',$namespace);$resources.SetAttribute('culture','en-US')
+        $table=$document.CreateElement('stringTable',$namespace);$text=$document.CreateElement('string',$namespace);$text.SetAttribute('id','SeedMessage');$text.SetAttribute('value','Synthetic fixture seed.')
+        $null=$table.AppendChild($text);$null=$resources.AppendChild($table);$null=$localization.AppendChild($resources);$null=$document.DocumentElement.AppendChild($localization)
+    }
+    return $document.OuterXml
+}
+function New-SeedArmManifest([string]$Directory,[string]$ProviderName,[guid]$Provider,[ValidateSet('control','payload','message','access')][string]$Mode) {
+    $compiled=New-FixtureEventManifest $Directory $ProviderName $Provider
+    if($Mode -cin @('payload','message')){
+        [IO.File]::WriteAllText($compiled.manifest,(ConvertTo-SeedManifestVariant ([IO.File]::ReadAllText($compiled.manifest)) $Mode))
+        $tools=Get-FixtureManifestTools
+        Invoke-FixtureCompiler $tools.mc @('-um','-h',$Directory,'-r',$Directory,$compiled.manifest) $Directory
+        Invoke-FixtureCompiler $tools.rc @('/nologo','/fo','fixture.res','fixture.rc') $Directory
+        Invoke-FixtureCompiler $tools.link @('/NOLOGO','/DLL','/NOENTRY','/MACHINE:X64','/OUT:fixture.dll','fixture.res') $Directory
+    }
+    return $compiled
+}
+function Get-SeedLocalServiceAcl([Security.AccessControl.DirectorySecurity]$Existing,[bool]$TraverseOnly) {
+    return Get-FixtureMetadataReadAcl $Existing ([Security.Principal.SecurityIdentifier]::new('S-1-5-19')) $TraverseOnly
+}
+function ConvertTo-SeedServiceFacts($ObjectName,$ServiceSidType) {
+    $account=$null;$sidType=$null
+    if($ObjectName -is [string]){
+        $account=switch -Exact ($ObjectName.ToLowerInvariant()){
+            'nt authority\localservice' {'local_service'}
+            'localsystem' {'local_system'}
+            'nt authority\networkservice' {'network_service'}
+            default {'other'}
+        }
+    }
+    if(($ServiceSidType -is [int] -or $ServiceSidType -is [long] -or $ServiceSidType -is [uint32]) -and $ServiceSidType -ge 0 -and $ServiceSidType -le [uint32]::MaxValue){$sidType=$ServiceSidType}
+    return [ordered]@{account=$account;sid_type=$sidType}
 }
 function ConvertFrom-SeedSdkResult([string]$Text) {
     try {
@@ -160,16 +209,19 @@ function Get-SeedEventLogErrors([guid]$Provider,[string]$Channel) {
     return $result
 }
 $source=if($env:AEGIS_CONNECTION_SOURCE_COMMIT -cmatch '^[0-9a-f]{40}$'){$env:AEGIS_CONNECTION_SOURCE_COMMIT}else{$null}
-$result=[ordered]@{schema_version=1;kind='windows_event_seed_differential';source_commit=$source;completed=$false;stage='prerequisites';error_code=$null;cleanup_succeeded=$true;arms=[ordered]@{csharp=$null;sdk=$null}}
+$result=[ordered]@{schema_version=1;kind='windows_event_seed_differential';source_commit=$source;completed=$false;stage='prerequisites';error_code=$null;cleanup_succeeded=$true;eventlog_service=[ordered]@{account=$null;sid_type=$null;read_error_code=$null};arms=[ordered]@{control=$null;payload=$null;message=$null;access=$null}}
 $installed=@();$owned=$false;$outputReady=$false;$root=$null;$id=[guid]::NewGuid().ToString('N')
 try {
     Import-SeedDiagnosticFunctions (Join-Path $PackageRoot 'Install-Agent.ps1') @('Assert-AgentAdministrator','Assert-AgentNoLinks','ConvertTo-AgentNativeArgument','Get-AgentServiceSid','Set-AgentServiceTreeAcl')
     Import-SeedDiagnosticFunctions (Join-Path $PSScriptRoot 'Test-ExecutionProvisioning.ps1') @('Get-FixtureManifestTools','Invoke-FixtureCompiler','New-FixtureEventManifest','Get-FixtureMetadataReadAcl','Assert-FixtureChannelMetadata','ConvertTo-FixtureSeedIdentity','Read-FixtureSeedDiagnosticSample')
     Assert-AgentAdministrator;Assert-AgentNoLinks $OutputRoot
     if([IO.Path]::GetFullPath($OutputRoot) -cne $OutputRoot -or (Test-Path -LiteralPath $OutputRoot)){throw 'seed_fresh_output_required'}
-    $testExe=$env:AEGIS_EXECUTION_NATIVE_TEST_EXE
-    if(!$testExe -or !(Test-Path -LiteralPath $testExe -PathType Leaf) -or [IO.Path]::GetExtension($testExe) -cne '.exe'){throw 'seed_harness_required'}
     New-Item -ItemType Directory -Path $OutputRoot|Out-Null;$outputReady=$true
+    try {
+        $service=Get-ItemProperty -LiteralPath 'HKLM:/SYSTEM/CurrentControlSet/Services/EventLog'
+        $facts=ConvertTo-SeedServiceFacts $service.ObjectName $service.ServiceSidType
+        $result.eventlog_service.account=$facts.account;$result.eventlog_service.sid_type=$facts.sid_type
+    } catch {$result.eventlog_service.read_error_code=[int]$_.Exception.GetBaseException().HResult}
     $root=Join-Path $env:ProgramData ('AEGIS-SeedDiag-'+$id);Assert-AgentNoLinks $root
     if(Test-Path -LiteralPath $root){throw 'seed_fresh_root_required'}
     New-Item -ItemType Directory -Path $root|Out-Null;$owned=$true
@@ -179,12 +231,18 @@ try {
     $eventLogSid=[Security.Principal.NTAccount]::new('NT SERVICE','EventLog').Translate([Security.Principal.SecurityIdentifier])
     (Get-Item -LiteralPath $root).SetAccessControl((Get-FixtureMetadataReadAcl (Get-Acl -LiteralPath $root) $eventLogSid $true))
     (Get-Item -LiteralPath $channels).SetAccessControl((Get-FixtureMetadataReadAcl (Get-Acl -LiteralPath $channels) $eventLogSid $false))
-    foreach($mode in @('csharp','sdk')){
+    # Access is last: its parent traversal grants cannot affect earlier observations.
+    foreach($mode in @('control','payload','message','access')){
         $result.stage=$mode
         $provider=[guid]::NewGuid();$name='AEGIS-Test-'+[guid]::NewGuid().ToString('N')+'-Read';$channel=$name+'/Operational'
         $directory=Join-Path $channels $mode
-        $compiled=New-FixtureEventManifest $directory $name $provider
-        $writer=if($mode -eq 'sdk'){New-SeedReferenceWriter $directory $name $channel}else{$testExe}
+        $compiled=New-SeedArmManifest $directory $name $provider $mode
+        $writer=New-SeedReferenceWriter $directory $name $channel ($mode -ceq 'payload')
+        if($mode -ceq 'access'){
+            # Add LocalService only on owned metadata paths; preserve EventLog SID access.
+            foreach($ancestor in @($root,$channels)){(Get-Item -LiteralPath $ancestor).SetAccessControl((Get-SeedLocalServiceAcl (Get-Acl -LiteralPath $ancestor) $true))}
+            (Get-Item -LiteralPath $directory).SetAccessControl((Get-SeedLocalServiceAcl (Get-Acl -LiteralPath $directory) $false))
+        }
         # Include attempted installs: a timeout/nonzero exit can still mutate registration.
         $installed+=@($compiled.manifest)
         $install=Invoke-SeedDiagnosticProcess "$env:SystemRoot/System32/wevtutil.exe" @('im',$compiled.manifest) $directory 15000
@@ -193,9 +251,8 @@ try {
         $configuration=[Diagnostics.Eventing.Reader.EventLogConfiguration]::new($channel)
         try {$latency=$configuration.ProviderLatency;$enabled=$configuration.IsEnabled;$isolation=[int]$configuration.LogIsolation}
         finally {$configuration.Dispose()}
-        $arguments=if($mode -eq 'csharp'){@('--provisioning-event',$provider.ToString('D'),'1',$channel)}else{@()}
-        $process=Invoke-SeedDiagnosticProcess $writer $arguments $directory 25000
-        $sdk=if($mode -eq 'sdk'){ConvertFrom-SeedSdkResult $process.output}else{$null}
+        $process=Invoke-SeedDiagnosticProcess $writer @() $directory 25000
+        $sdk=ConvertFrom-SeedSdkResult $process.output
         $result.arms[$mode]=[ordered]@{child_exit_code=$process.exit_code;sdk_writer=$sdk;channel_enabled=$enabled;isolation=$isolation;latency_ms=$latency;sample=(Get-SeedChannelSample $provider $channel);eventlog_errors=(Get-SeedEventLogErrors $provider $channel)}
     }
     $result.completed=$true;$result.stage='complete'

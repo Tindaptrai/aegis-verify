@@ -380,6 +380,93 @@ class EventSeedDifferentialTests(SimpleTestCase):
     # Reuse only the helper loader, not NativeGateRefusalTests' test inventory.
     fixture_helpers = NativeGateRefusalTests.fixture_helpers
 
+    @unittest.skipUnless(os.name == 'nt', 'Windows diagnostic manifest variants')
+    def test_differential_manifest_arms_change_only_their_intended_event_factor(self):
+        manifest = ('<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events" '
+                    'xmlns:win="http://manifests.microsoft.com/win/2004/08/windows/events">'
+                    '<instrumentation><events><provider name="Synthetic" guid="{62e52a21-b4f7-4e76-baba-f9ed5c198bea}" '
+                    'symbol="Fixture" resourceFileName="synthetic.dll" messageFileName="synthetic.dll">'
+                    '<channels><channel chid="Operational" name="Synthetic/Operational" type="Operational" '
+                    'value="16" enabled="true" access="synthetic-acl"/></channels><events>'
+                    '<event value="1" version="0" symbol="FixtureEvent" channel="Operational" '
+                    'level="win:Informational"/></events></provider></events></instrumentation></instrumentationManifest>')
+        result = self.fixture_helpers(r'''
+$variants=[ordered]@{}
+foreach($mode in @('control','payload','message','access')){$variants[$mode]=ConvertTo-SeedManifestVariant $env:AEGIS_TEST_SEED_MANIFEST $mode}
+$variants|ConvertTo-Json -Compress
+''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1'),
+                  'AEGIS_TEST_SEED_MANIFEST': manifest}, helpers=('ConvertTo-SeedManifestVariant',))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        variants = json.loads(result.stdout)
+        self.assertEqual(variants['control'], manifest)
+        self.assertEqual(variants['access'], manifest)
+        baseline = ET.fromstring(manifest)
+        base_provider = baseline.find('.//{*}provider')
+        base_event = base_provider.find('{*}events/{*}event')
+        for mode in ('payload', 'message'):
+            root = ET.fromstring(variants[mode])
+            provider = root.find('.//{*}provider')
+            self.assertEqual(provider.attrib, base_provider.attrib)
+            self.assertEqual(ET.tostring(provider.find('{*}channels')), ET.tostring(base_provider.find('{*}channels')))
+            events = provider.findall('{*}events/{*}event')
+            self.assertEqual(len(events), 1)
+            if mode == 'payload':
+                self.assertEqual(events[0].attrib, base_event.attrib | {'template': 'SeedTemplate'})
+                templates = provider.findall('{*}templates/{*}template')
+                self.assertEqual(len(templates), 1)
+                self.assertEqual(templates[0].attrib, {'tid': 'SeedTemplate'})
+                self.assertEqual([child.attrib for child in templates[0]], [{'name': 'Seed', 'inType': 'win:UInt32'}])
+                self.assertIsNone(root.find('{*}localization'))
+            else:
+                self.assertEqual(events[0].attrib, base_event.attrib | {'message': '$(string.SeedMessage)'})
+                self.assertIsNone(provider.find('{*}templates'))
+                resources = root.findall('{*}localization/{*}resources')
+                self.assertEqual(len(resources), 1)
+                self.assertEqual(resources[0].attrib, {'culture': 'en-US'})
+                strings = resources[0].findall('{*}stringTable/{*}string')
+                self.assertEqual([item.attrib for item in strings], [{'id': 'SeedMessage', 'value': 'Synthetic fixture seed.'}])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows diagnostic ACL variant')
+    def test_differential_access_acl_adds_only_local_service_read_or_traverse(self):
+        result = self.fixture_helpers(r'''
+$existing=[Security.AccessControl.DirectorySecurity]::new()
+$existing.SetSecurityDescriptorSddlForm('O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200A9;;;S-1-5-80-1-2-3-4-5)')
+$before=$existing.GetSecurityDescriptorSddlForm('All');$rows=@()
+foreach($traverse in @($true,$false)){
+    $acl=Get-SeedLocalServiceAcl $existing $traverse
+    $grants=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])|Where-Object{$_.IdentityReference.Value -eq 'S-1-5-19'})
+    if($grants.Count -ne 1){throw 'wrong_service_grant'}
+    $grant=$grants[0]
+    $rows+=@{rights=[int]$grant.FileSystemRights;inheritance=[int]$grant.InheritanceFlags;propagation=[int]$grant.PropagationFlags;allow=$grant.AccessControlType -eq 'Allow'}
+    $acl.RemoveAccessRuleSpecific($grant)
+    if($acl.GetSecurityDescriptorSddlForm('All') -cne $before){throw 'existing_permissions_changed'}
+}
+@{rows=$rows;original_unchanged=$existing.GetSecurityDescriptorSddlForm('All') -ceq $before}|ConvertTo-Json -Depth 4 -Compress
+''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1')},
+            helpers=('Get-FixtureMetadataReadAcl', 'Get-SeedLocalServiceAcl'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'original_unchanged': True, 'rows': [
+            dict(rights=0x100020, inheritance=0, propagation=0, allow=True),
+            dict(rights=0x1200A9, inheritance=3, propagation=0, allow=True),
+        ]})
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows diagnostic service facts')
+    def test_differential_service_facts_never_export_arbitrary_account_values(self):
+        result = self.fixture_helpers(r'''
+$rows=@()
+foreach($pair in @(@('NT AUTHORITY\LocalService',1),@('LocalSystem',3),@('NT AUTHORITY\NetworkService',0),@('private-account',4294967295L),@($null,$null),@(7,'private-sid'),@('NT AUTHORITY\LocalService',-1),@('NT AUTHORITY\LocalService',4294967296L))){$rows+=ConvertTo-SeedServiceFacts $pair[0] $pair[1]}
+ConvertTo-Json -InputObject $rows -Compress
+''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1')},
+            helpers=('ConvertTo-SeedServiceFacts',))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [
+            dict(account='local_service', sid_type=1), dict(account='local_system', sid_type=3),
+            dict(account='network_service', sid_type=0), dict(account='other', sid_type=4294967295),
+            dict(account=None, sid_type=None), dict(account=None, sid_type=None),
+            dict(account='local_service', sid_type=None), dict(account='local_service', sid_type=None),
+        ])
+        self.assertNotIn('private', result.stdout)
+
     @unittest.skipUnless(os.name == 'nt', 'Windows standalone diagnostic guard')
     def test_differential_refuses_owner_host_before_creating_output(self):
         with tempfile.TemporaryDirectory(prefix='aegis-seed-refusal-') as temporary:
