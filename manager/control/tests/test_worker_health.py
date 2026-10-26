@@ -7,6 +7,8 @@ import uuid
 import threading
 import time
 import copy
+import os
+import subprocess
 from types import SimpleNamespace
 from django.test import SimpleTestCase
 from contextlib import contextmanager
@@ -30,7 +32,9 @@ class WorkerHealthTests(ExecutionFixture, AccountsCase):
         path.chmod(0o600)
         # Only private connection resolution and the OS ACL boundary are injected;
         # actual key bytes, binding and release pins go through production validation.
-        with patch.object(self.health, 'resolve_execution_connection', return_value=(object(), Path(self.temp.name))), patch.object(self.health, 'validate_windows_acl'):
+        with patch.object(self.health, 'resolve_execution_connection', return_value=(object(), Path(self.temp.name))), \
+                patch.object(self.health, 'read_windows_acl', return_value={'synthetic_acl_boundary': True}) as acl_reader, \
+                patch.object(self.health, 'validate_windows_acl') as acl_validator:
             for bits in (3072, 4096):
                 with self.subTest(bits=bits):
                     key = rsa.generate_private_key(public_exponent=65537, key_size=bits)
@@ -41,6 +45,17 @@ class WorkerHealthTests(ExecutionFixture, AccountsCase):
                     else:
                         with self.assertRaises(ValueError): self.health._authority(self.connection)
                         with self.assertRaises(ValueError): _public_key()
+            if os.name == 'nt':
+                acl_reader.assert_called_with(path)
+                acl_validator.assert_called_with(acl_reader.return_value, directory=False)
+
+    def test_native_acl_probe_failure_still_refuses_authority(self):
+        if os.name != 'nt': self.skipTest('Windows ACL authority boundary')
+        with patch.object(self.health, 'resolve_execution_connection', return_value=(object(), Path(self.temp.name))), \
+                patch.object(self.health, 'read_windows_acl', side_effect=subprocess.TimeoutExpired('synthetic_acl_probe', 10)), \
+                patch.object(self.health, 'validate_windows_acl') as validator:
+            with self.assertRaises(subprocess.TimeoutExpired): self.health._authority(self.connection)
+            validator.assert_not_called()
 
     def test_keepalive_does_not_refresh_source_success(self):
         from aegis_verify.connectors.wazuh.live import ProbeResult

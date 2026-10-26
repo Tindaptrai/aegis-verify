@@ -41,7 +41,7 @@ DIAGNOSTIC_CODES = frozenset(("worker_process_failed", "published_cli_failed", "
     "source_probe_failed", "wait_timeout", "gate_execution_failed", "unexpected_success"))
 EXCEPTION_CLASSES = frozenset(("AssertionError", "AttributeError", "ValueError", "TypeError", "KeyError",
     "IndexError", "RuntimeError", "OSError", "PermissionError", "FileNotFoundError", "TimeoutError",
-    "CalledProcessError", "SSLError", "ConnectionError", "OperationalError", "IntegrityError",
+    "CalledProcessError", "TimeoutExpired", "SSLError", "ConnectionError", "OperationalError", "IntegrityError",
     "ImproperlyConfigured", "ImportError", "ModuleNotFoundError", "SystemExit", "UnicodeError"))
 SERVICE_ENUMS = {
     "ActiveState": frozenset(("active", "activating", "inactive", "deactivating", "failed", "reloading", "maintenance", "refreshing")),

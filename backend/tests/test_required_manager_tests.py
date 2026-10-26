@@ -113,6 +113,19 @@ def test_failure_diagnostics_include_fixed_test_and_repo_frames_without_values()
     assert str(ROOT) not in encoded
 
 
+def test_subprocess_timeout_diagnostic_keeps_type_without_private_command_or_output():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    case.id = lambda: 'control.tests.test_worker_health.WorkerHealthTests.test_synthetic_acl_probe'
+    try:
+        raise subprocess.TimeoutExpired(['PRIVATE_COMMAND', 'PRIVATE_PATH'], 10,
+                                        output=b'PRIVATE_OUTPUT', stderr=b'PRIVATE_ERROR')
+    except subprocess.TimeoutExpired:
+        diagnostic = gate.safe_diagnostic(case, sys.exc_info())
+    assert diagnostic['exception_class'] == 'TimeoutExpired'
+    assert 'PRIVATE' not in json.dumps(diagnostic)
+
+
 def test_diagnostics_accept_only_closed_stage_status_and_code_values():
     gate = gate_module()
     result = gate.GateResult(io.StringIO(), True, 0)
