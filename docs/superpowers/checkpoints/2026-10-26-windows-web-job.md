@@ -47,9 +47,16 @@ Windows acceptance gate remains mandatory; review approval alone does not satisf
 - Test-only follow-up preserves those fixed labels and corrects Cleanup to validate
   preserved identity using the verified package CLI after uninstall removes the
   installed CLI. UUID, marker, package and deletion-path checks remain mandatory.
-- Next: exact-source hosted CI must identify the remaining MissingVendor failure
-  and verify cleanup. Do not merge, deploy or claim Ready before required gates
-  and human lab review.
+- Run [40308641268](https://github.com/Tindaptrai/aegis-verify/actions/runs/40308641268)
+  at `d3d1963995992e93c9d09005b34322a2d78f2ef8` verified cleanup and exposed
+  `execution_configuration_invalid`. An inert test of the actual configuration
+  builder reproduced the cause: the fixture environment `synthetic.execution.service`
+  contains dots, which the stricter execution contract rejects. The fixture now uses
+  `synthetic_execution_service`; production validation remains unchanged. The new
+  regression checks generated content through the actual profile loader and
+  configuration validator, retaining rejection of the dot-containing environment.
+- Next: run exact-source Agent and Manager CI after the fixture correction. Do not
+  merge, deploy or claim Ready before required gates and human lab review.
 - Detailed decisions, local verification and fresh CI results are recorded in
   `.superpowers/sdd/2026-10-25-windows-web-job/progress.md`; the latest delivered
   evidence bundle is the portable counterpart. No live VM/scenario work was done.

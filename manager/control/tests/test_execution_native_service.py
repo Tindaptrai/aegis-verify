@@ -642,7 +642,8 @@ class ExecutionPublishedNativeTests(TransactionTestCase):
 
         identity = None
         try:
-            code = presence.create_pairing_code(actor=self.owner, environment_id='synthetic.execution.service')['code']
+            # Presence permits dots; this fixture must also satisfy the stricter execution contract.
+            code = presence.create_pairing_code(actor=self.owner, environment_id='synthetic_execution_service')['code']
 
             def install():
                 nonlocal subphase

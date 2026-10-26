@@ -122,6 +122,46 @@ internal static partial class Program
                 ClassifyProvisionSeedRead(true,1,false,0)==FixtureSeedObservation.ReadFailed,"missing event handle accepted");
         });
         if(!OperatingSystem.IsWindows())return;
+        foreach(var environment in new[]{"synthetic.execution.service","synthetic_execution_service"})
+        Test("provisioning contract generated configuration "+environment,()=>{
+            var temporary=Path.GetFullPath(Path.GetTempPath());
+            var name="aegis-provisioning-config-"+Guid.NewGuid().ToString("N");
+            var root=Path.Combine(temporary,name);
+            try
+            {
+                var assets=Path.Combine(root,"assets");var runs=Path.Combine(root,"runs");
+                Directory.CreateDirectory(assets);Directory.CreateDirectory(runs);
+                var identity=PreflightFixture().Item1.Identity with {Hostname="RELOCATED",EnvironmentId=environment};
+                WriteProvisionConfiguration(identity,assets,runs);
+                ExecutionGrant Load()=>ExecutionProfile.Load(Path.Combine(assets,"profile.json"),Path.Combine(assets,"installed-grant.json"),
+                    Path.Combine(assets,"manager-execution-v2-public.pem"),identity,File.ReadAllBytes);
+                if(environment=="synthetic.execution.service")
+                {
+                    // Presence enrollment permits this value; the execution
+                    // fixture must satisfy the stricter existing contract.
+                    Denied(()=>ExecutionProtocol.Decode<InstallationProfile>(File.ReadAllBytes(Path.Combine(assets,"profile.json"))),"execution_invalid");
+                    Denied(()=>Load(),"execution_invalid");
+                    return;
+                }
+                var grant=Load();
+                var facts=new SyntheticExecutionFacts{Host=identity.Hostname,Telemetry=false,Policy=false};
+                foreach(var path in Directory.EnumerateFiles(assets,"*",SearchOption.AllDirectories))facts.Files[path]=File.ReadAllBytes(path);
+                ExecutionPreflight.CheckArtifacts(grant,facts);
+                var configuration=ExecutionPreflight.CheckConfiguration(grant,facts);
+                Check(configuration.ConfigurationValid && configuration.ServiceReadiness=="not_evaluated" && configuration.BlockingCodes.IsEmpty,
+                    "generated configuration rejected: "+string.Join(",",configuration.BlockingCodes));
+                Check(!ExecutionPreflight.Check(grant,facts).Ready,"configuration fixture granted readiness without vendor or policy proof");
+                facts.Files[grant.Profile.KitDirectory+"\\maintenance_check.ps1"]="synthetic altered payload"u8.ToArray();
+                Check(ExecutionPreflight.CheckConfiguration(grant,facts).BlockingCodes.Contains("artifact_mismatch"),"generated payload drift accepted");
+            }
+            finally
+            {
+                var resolved=Path.GetFullPath(root);
+                Check(Path.GetDirectoryName(resolved)==Path.TrimEndingDirectorySeparator(temporary) && Path.GetFileName(resolved)==name,
+                    "configuration fixture cleanup path changed");
+                if(Directory.Exists(resolved))Directory.Delete(resolved,true);
+            }
+        });
         Test("provisioning contract immutable owner and object-specific permissions",()=>{
             if(!OperatingSystem.IsWindows())return;
             const string ti="S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
@@ -304,10 +344,12 @@ internal static partial class Program
         catch { Console.Error.WriteLine("native_fixture_failed"); return 3; }
     }
     private static void WriteProvisionConfiguration(string state,string assets,string runs)
+        =>WriteProvisionConfiguration(StateStore.ReadExisting(state),assets,runs);
+    private static void WriteProvisionConfiguration(IdentityState identity,string assets,string runs)
     {
         // Generated TEST data only. Production receives its ordinary closed
         // contracts and immutable-file validation, with no test flag or shortcut.
-        var identity=StateStore.ReadExisting(state);var (template,facts)=PreflightFixture();
+        var (template,facts)=PreflightFixture();
         string PathMap(string value)=>value.Replace(@"C:\Reviewed",assets,StringComparison.Ordinal).Replace(@"C:\Runs",runs,StringComparison.Ordinal);
         string TextMap(string value)=>value.Replace(@"C:\\Reviewed",assets.Replace(@"\",@"\\"),StringComparison.Ordinal)
             .Replace(@"C:\Reviewed",assets,StringComparison.Ordinal).Replace("SYNTHETIC",identity.Hostname,StringComparison.Ordinal);
