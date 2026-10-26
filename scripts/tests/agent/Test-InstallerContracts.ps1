@@ -55,6 +55,12 @@ if ($Pure) {
         function Get-CimInstance { return $script:provisionService }
         function Get-Service { return [pscustomobject]@{Status='Running'} }
         function Get-AgentSourceDescriptor([string]$Kind,[string]$Name) { return $script:provisionDescriptors[$Name] }
+        function Get-AgentSourceProtection([string]$Name) {
+            # This scope simulates OS boundaries, never queries real vendors.
+            # The disposable-service gate separately exercises the native API.
+            if(!$script:provisionDescriptors.ContainsKey($Name)){throw 'unexpected_source_protection_query'}
+            return [uint32]0
+        }
         function Set-AgentSourceDescriptor([string]$Kind,[string]$Name,[string]$Expected,[string]$Replacement) {
             if($script:provisionDescriptors[$Name] -cne $Expected){throw 'unexpected_descriptor'}
             $script:provisionDescriptors[$Name]=$Replacement;Published-Boundary
