@@ -39,6 +39,7 @@ public static class AgentSupervisor
                     LocalReadiness Current()
                     {
                         var local = ExecutionPreflight.Check(grant, facts);
+                        if (!journal.HasReadinessCapacity()) local = local with { Ready = false, BlockingCodes = local.BlockingCodes.Add("local_not_ready").Distinct().ToImmutableArray() };
                         if (!clock.IsCertain(clock.MonotonicNow)) local = local with { Ready = false, BlockingCodes = local.BlockingCodes.Add("clock_uncertain").Distinct().ToImmutableArray() };
                         return local;
                     }

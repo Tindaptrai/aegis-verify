@@ -25,7 +25,7 @@ def _public_key():
     if hasattr(settings, 'PRIVATE_ROOT') and not path.resolve().is_relative_to(Path(settings.PRIVATE_ROOT).resolve()):
         raise ValueError
     key = serialization.load_pem_private_key(read_local(path, limit=65536, stage='inputs'), password=None)
-    if not isinstance(key, rsa.RSAPrivateKey) or key.key_size < 3072: raise ValueError
+    if not isinstance(key, rsa.RSAPrivateKey) or key.key_size != 3072: raise ValueError
     public = key.public_key()
     for name in ('MANAGER_SIGNING_KEY', 'ENROLLMENT_CA_KEY'):
         reference = getattr(settings, name, None)

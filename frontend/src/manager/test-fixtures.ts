@@ -19,6 +19,7 @@ export function signedInApiFixture(role: 'admin' | 'operator' | 'viewer', option
     setExecutionBinding: vi.fn(async () => { throw new Error('Configure synthetic execution binding'); }),
     previewExecution: vi.fn(async () => { throw new Error('Configure synthetic execution preview'); }),
     approveExecution: vi.fn(async () => { throw new Error('Configure synthetic execution approval'); }),
+    currentExecutionJob: vi.fn(async () => ({ job: null })),
     executionJob: vi.fn(async () => { throw new Error('Configure synthetic execution job'); }),
     cancelExecution: vi.fn(async () => { throw new Error('Configure synthetic execution cancel'); }),
     listCatalog: vi.fn(async () => ({ results: [], count: 0, page: 1, page_size: 50 as const })),

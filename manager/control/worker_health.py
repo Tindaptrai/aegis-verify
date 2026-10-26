@@ -111,7 +111,7 @@ def _authority(connection):
     elif path.stat().st_uid != os.getuid() or path.stat().st_mode & 0o077: raise ValueError
     # Signing is local only; reject reused authority exactly as the signer does.
     key = serialization.load_pem_private_key(read_local(path,limit=65536,stage='inputs'),password=None)
-    if not isinstance(key,rsa.RSAPrivateKey) or key.key_size < 3072: raise ValueError
+    if not isinstance(key,rsa.RSAPrivateKey) or key.key_size != 3072: raise ValueError
     for name in ('MANAGER_SIGNING_KEY','ENROLLMENT_CA_KEY'):
         ref = getattr(settings,name,None)
         if ref and Path(ref).exists():

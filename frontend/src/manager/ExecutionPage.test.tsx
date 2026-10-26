@@ -12,6 +12,63 @@ import { userSession } from './test-fixtures';
 
 async function openPreview() { fireEvent.click(await screen.findByRole('radio')); fireEvent.click(screen.getByRole('button', { name: 'Xem trước' })); return screen.findByRole('dialog', { name: 'Xem trước tác vụ' }); }
 describe('single Windows execution approval', () => {
+  it('recovers an accepted job through shell navigation and reload without browser storage', async () => {
+    const api = executionFixture(); const view = render(<ManagerApp api={api} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Tác vụ' })); await openPreview();
+    fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và chạy' })); await screen.findByRole('heading', { name: 'Trạng thái tác vụ' });
+    api.currentExecutionJob = vi.fn(async () => ({ job }));
+    fireEvent.click(screen.getByRole('button', { name: 'Tổng quan' })); fireEvent.click(screen.getByRole('button', { name: 'Tác vụ' }));
+    await screen.findByRole('heading', { name: 'Trạng thái tác vụ' }); view.unmount();
+    render(<ExecutionPage api={api} canRun canManage />); await screen.findByRole('heading', { name: 'Trạng thái tác vụ' });
+    expect(api.approveExecution).toHaveBeenCalledTimes(1); expect(localStorage.length).toBe(0); expect(sessionStorage.length).toBe(0);
+  });
+  it('discovers a late committed approval after the first reload lookup returned null', async () => {
+    vi.useFakeTimers();
+    try {
+      const api = executionFixture(); api.currentExecutionJob = vi.fn().mockResolvedValueOnce({ job: null }).mockResolvedValue({ job });
+      await act(async () => { render(<ExecutionPage api={api} canRun canManage />); });
+      expect(screen.queryByRole('heading', { name: 'Trạng thái tác vụ' })).not.toBeInTheDocument();
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(screen.getByRole('heading', { name: 'Trạng thái tác vụ' })).toBeVisible(); expect(api.approveExecution).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+  it.each(['logout', 'permission'] as const)('discards a delayed authenticated discovery after %s changes', async (change) => {
+    const api = executionFixture(); let finish!: (result: { job: typeof job }) => void;
+    api.currentExecutionJob = vi.fn().mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    render(<ManagerApp api={api} />); fireEvent.click(await screen.findByRole('button', { name: 'Tác vụ' }));
+    await waitFor(() => expect(api.currentExecutionJob).toHaveBeenCalledTimes(1));
+    const signal = vi.mocked(api.currentExecutionJob).mock.calls[0]![0];
+    if (change === 'logout') { fireEvent.click(screen.getByRole('button', { name: /Menu tài khoản/ })); fireEvent.click(screen.getByRole('button', { name: 'Đăng xuất' })); await screen.findByRole('heading', { name: 'Đăng nhập Manager' }); }
+    else { api.session = vi.fn(async () => userSession('viewer')); act(() => window.dispatchEvent(new Event('pageshow'))); await screen.findByText('17'); }
+    expect(signal?.aborted).toBe(true); await act(async () => finish({ job }));
+    expect(screen.queryByRole('heading', { name: 'Trạng thái tác vụ' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Kiểm tra phê duyệt đã gửi' })).not.toBeInTheDocument();
+  });
+  it('replays only the original uncertain approval after busy readiness and preview expiry', async () => {
+    vi.useFakeTimers();
+    try {
+      const api = executionFixture(); const expires = new Date(Date.now() + 60000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+      api.previewExecution = vi.fn(async () => ({ ...preview, expires_at: expires, summary: { ...preview.summary, expires_at: expires } }));
+      api.approveExecution = vi.fn().mockRejectedValueOnce(new Error('response lost')).mockResolvedValue({ ...job, summary: { ...job.summary, expires_at: expires } });
+      api.executionDevice = vi.fn().mockResolvedValueOnce(readiness).mockResolvedValue({ ...readiness, ready: false, blocking_codes: ['busy'] });
+      await act(async () => { render(<ExecutionPage api={api} canRun canManage />); });
+      await act(async () => { fireEvent.click(screen.getByRole('radio')); }); await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Xem trước' })); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và chạy' })); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(65000); });
+      expect(api.approveExecution).toHaveBeenCalledTimes(1);
+      await act(async () => { fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Kiểm tra phê duyệt đã gửi' })); });
+      expect(screen.getByRole('heading', { name: 'Trạng thái tác vụ' })).toBeVisible();
+      expect(vi.mocked(api.approveExecution).mock.calls[1]![0]).toEqual(vi.mocked(api.approveExecution).mock.calls[0]![0]);
+    } finally { vi.useRealTimers(); }
+  });
+  it.each([false, true])('uses server admission after cancellation, blocked=%s', async (blocked) => {
+    const api = executionFixture(); api.approveExecution = vi.fn(async () => ({ ...job, execution_state: 'queued' as const }));
+    api.cancelExecution = vi.fn(async () => ({ ...job, execution_state: 'cancelled' as const, admission_blocked: blocked }));
+    render(<ExecutionPage api={api} canRun canManage />); await openPreview(); fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và chạy' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Hủy trước khi bắt đầu' })); await screen.findByText('Đã hủy trước khi bắt đầu');
+    fireEvent.click(screen.getByRole('button', { name: 'Tải lại readiness' })); await waitFor(() => expect(screen.queryByRole('status')).not.toBeInTheDocument());
+    if (blocked) expect(screen.getByRole('button', { name: 'Xem trước' })).toBeDisabled(); else expect(screen.getByRole('button', { name: 'Xem trước' })).toBeEnabled();
+  });
   it('separates Online and Ready and chooses exactly one native Windows radio', async () => {
     const api = executionFixture(); api.listDevices = vi.fn(async () => ({ results: [device, { ...device, id: '22222222-2222-4222-8222-222222222222', hostname: 'Synthetic second' }, { ...device, id: '33333333-3333-4333-8333-333333333333', hostname: 'Synthetic Linux', os: 'linux' as const }], count: 3, page: 1, page_size: 50 as const }));
     render(<ExecutionPage api={api} canRun canManage />);
@@ -34,7 +91,7 @@ describe('single Windows execution approval', () => {
     expect(dialog).toHaveTextContent('training'); expect(dialog).toHaveTextContent('300'); expect(dialog).toHaveTextContent('bounded_process_tree'); expect(dialog).toHaveTextContent('unknown'); expect(dialog).toHaveTextContent('9007199254740993');
     fireEvent.click(within(dialog).getByText('Chi tiết kỹ thuật')); expect(dialog).toHaveTextContent(hash);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Xác nhận và chạy' })); await screen.findByRole('alert');
-    const confirm = screen.getByRole('button', { name: 'Xác nhận và chạy' }); fireEvent.click(confirm); fireEvent.click(confirm);
+    const confirm = screen.getByRole('button', { name: 'Kiểm tra phê duyệt đã gửi' }); fireEvent.click(confirm); fireEvent.click(confirm);
     await screen.findByRole('heading', { name: 'Trạng thái tác vụ' }); expect(api.approveExecution).toHaveBeenCalledTimes(2); expect(vi.mocked(api.approveExecution).mock.calls[0]![0]).toEqual(vi.mocked(api.approveExecution).mock.calls[1]![0]);
     expect(vi.mocked(api.approveExecution).mock.calls[0]![0]).toEqual({ preview_id: targetId, preview_sha256: hash, idempotency_key: expect.any(String) });
   });
@@ -99,9 +156,9 @@ describe('single Windows execution approval', () => {
     render(<ExecutionPage api={api} canRun canManage />); fireEvent.click(await screen.findByRole('radio')); expect(screen.getByRole('option', { name: 'Rehearsal' })).toBeInTheDocument(); fireEvent.change(screen.getByLabelText('Nhãn lượt chạy'), { target: { value: 'C' } }); fireEvent.click(screen.getByRole('button', { name: 'Xem trước' })); await screen.findByRole('dialog');
     expect(api.previewExecution).toHaveBeenCalledWith({ device_id: targetId, provider_id: provider.provider_id, binding_revision: 1, run_label: 'C', rule_revision: 'behavioral' }, expect.any(AbortSignal));
   });
-  it('new preview receives a new idempotency key after the old drawer closes', async () => {
+  it('closing an uncertain preview retains the original approval key and blocks a new preview', async () => {
     const api = executionFixture(); api.approveExecution = vi.fn().mockRejectedValue(new Error('network')); render(<ExecutionPage api={api} canRun canManage />); await openPreview(); fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và chạy' })); await screen.findByRole('alert'); fireEvent.keyDown(document, { key: 'Escape' });
-    fireEvent.click(screen.getByRole('button', { name: 'Xem trước' })); await screen.findByRole('dialog'); fireEvent.click(screen.getByRole('button', { name: 'Xác nhận và chạy' })); await screen.findByRole('alert'); const calls = vi.mocked(api.approveExecution).mock.calls; expect(calls[0]![0].idempotency_key).not.toBe(calls[1]![0].idempotency_key);
+    expect(screen.getByRole('button', { name: 'Xem trước' })).toBeDisabled(); fireEvent.click(screen.getByRole('button', { name: 'Kiểm tra phê duyệt đã gửi' })); await screen.findByRole('alert'); const calls = vi.mocked(api.approveExecution).mock.calls; expect(calls[0]![0]).toEqual(calls[1]![0]);
   });
   it('invalid canonical report stays unavailable without changing the evaluated stage', () => {
     render(<ExecutionJobStatus job={{ ...job, evaluation_state: 'evaluated', collection_state: 'evaluated', report: { private: 'untrusted' } }} />); expect(screen.getByText('Đã đánh giá')).toBeVisible(); expect(screen.queryByRole('link')).not.toBeInTheDocument(); expect(screen.queryByText('untrusted')).not.toBeInTheDocument();

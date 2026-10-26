@@ -21,6 +21,27 @@ class WorkerHealthTests(ExecutionFixture, AccountsCase):
         super().setUp()
         self.health = importlib.import_module('control.worker_health')
 
+    def test_execution_authority_requires_exact_rsa3072_for_health_and_collection(self):
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from django.conf import settings
+        from control.execution_collection import _public_key
+        path = Path(settings.MANAGER_EXECUTION_SIGNING_KEY)
+        path.chmod(0o600)
+        # Only private connection resolution and the OS ACL boundary are injected;
+        # actual key bytes, binding and release pins go through production validation.
+        with patch.object(self.health, 'resolve_execution_connection', return_value=(object(), Path(self.temp.name))), patch.object(self.health, 'validate_windows_acl'):
+            for bits in (3072, 4096):
+                with self.subTest(bits=bits):
+                    key = rsa.generate_private_key(public_exponent=65537, key_size=bits)
+                    path.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+                    if bits == 3072:
+                        self.assertEqual(len(self.health._authority(self.connection)[2]), 1)
+                        self.assertEqual(_public_key().key_size, 3072)
+                    else:
+                        with self.assertRaises(ValueError): self.health._authority(self.connection)
+                        with self.assertRaises(ValueError): _public_key()
+
     def test_keepalive_does_not_refresh_source_success(self):
         from aegis_verify.connectors.wazuh.live import ProbeResult
         row = CollectionWorkerLease.objects.create(instance_id=uuid.uuid4(),connection_id=self.connection.connection_id,

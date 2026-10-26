@@ -33,13 +33,32 @@ export function ExecutionPage({ api, canRun, canManage }: { api: ManagerApi; can
   const [pollRevision, setPollRevision] = useState(0); const jobRead = useRef<AbortController | null>(null);
   const mounted = useRef(false); const mutation = useRef<AbortController | null>(null); const reads = useRef<AbortController | null>(null); const deniedRef = useRef(false);
   const approvalPending = useRef<AbortController | null>(null);
+  const [uncertain, setUncertain] = useState<{ input: ApproveInput; summary: PreviewDTO['summary'] } | null>(null);
+  const recoveryRead = useRef<AbortController | null>(null);
+  const recoveryEpoch = useRef(0);
   function invalidatePreview() { mutation.current?.abort(); mutation.current = null; approvalPending.current = null; setBusy(false); setPreview(null); setApprovalKey(''); setEditing(null); }
   function fail(failure: unknown) {
-    if (failure instanceof ManagerApiError && [401, 403].includes(failure.status)) { deniedRef.current = true; setDenied(true); reads.current?.abort(); invalidatePreview(); setInventory(null); setMetadata({}); setJob(null); }
+    if (failure instanceof ManagerApiError && [401, 403].includes(failure.status)) { deniedRef.current = true; setDenied(true); reads.current?.abort(); recoveryRead.current?.abort(); invalidatePreview(); setUncertain(null); setInventory(null); setMetadata({}); setJob(null); }
     setError(message(failure));
   }
   useEffect(() => { mounted.current = true; const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => { mounted.current = false; mutation.current?.abort(); reads.current?.abort(); window.clearInterval(timer); }; }, []);
-  useEffect(() => { invalidatePreview(); }, [canRun, canManage]);
+  useEffect(() => { invalidatePreview(); setUncertain(null); setJob(null); recoveryEpoch.current++; }, [canRun, canManage]);
+  useEffect(() => {
+    if (denied || uncertain) return;
+    const controller = new AbortController(); recoveryRead.current = controller; let timer: number | undefined;
+    const current = () => mounted.current && !controller.signal.aborted && !deniedRef.current;
+    async function recover() {
+      const epoch = recoveryEpoch.current;
+      try {
+        const result = await api.currentExecutionJob(controller.signal);
+        // Discovery is fresh authenticated state, never a delayed approval callback.
+        // A write begun since this GET owns the newer state (including cancellation).
+        if (current() && epoch === recoveryEpoch.current && !mutation.current && result.job && result.job.job_id !== job?.job_id) setJob(result.job);
+      } catch (failure) { if (current()) fail(failure); }
+      finally { if (current()) timer = window.setTimeout(() => void recover(), 5000); }
+    }
+    void recover(); return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [api, canRun, canManage, denied, uncertain, job?.job_id]);
   useEffect(() => {
     const controller = new AbortController(); reads.current = controller; let timer: number | undefined;
     const current = () => mounted.current && !controller.signal.aborted && !deniedRef.current;
@@ -59,22 +78,23 @@ export function ExecutionPage({ api, canRun, canManage }: { api: ManagerApi; can
   }, [api, page, revision]);
   const target = inventory?.results.find((d) => d.id === selected); const meta = metadata[selected]; const provider = boundProvider(providers, meta);
   function eligible(device: DeviceV2DTO) { const fact = metadata[device.id]; return device.connection_kind === 'paired_presence' && device.os === 'windows' && device.archived_at === null && fact?.ready === true && fact.capability === 'installed_supported' && fact.blocking_codes.length === 0 && fact.binding_id !== null && fact.binding_revision !== null && fact.wazuh_connection_id !== null && fact.wazuh_agent_id !== null && fact.checked_at !== null && fact.readiness_expires_at !== null && Date.parse(fact.readiness_expires_at) > now && !!boundProvider(providers, fact); }
-  const jobHoldsAdmission = job !== null && !['evaluated', 'empty', 'reconciled'].includes(job.collection_state);
-  const allowed = !jobHoldsAdmission && !!target && eligible(target) && !!provider && (label !== 'Rehearsal' || provider.allow_rehearsal);
+  const jobHoldsAdmission = job?.admission_blocked === true;
+  const allowed = !uncertain && !jobHoldsAdmission && !!target && eligible(target) && !!provider && (label !== 'Rehearsal' || provider.allow_rehearsal);
   useEffect(() => {
     // Admission itself makes readiness busy. Keep the matching approval response
     // alive; explicit target/config/authority changes still call invalidatePreview.
-    if (!preview || approvalPending.current) return;
+    if (!preview || approvalPending.current || uncertain) return;
     const s = preview.summary;
     if (!allowed || s.device_id !== selected || s.binding_revision !== meta?.binding_revision || s.release_id !== meta?.release_id || s.release_sha256 !== meta?.release_sha256 || s.wazuh_connection_id !== meta?.wazuh_connection_id || s.wazuh_agent_id !== meta?.wazuh_agent_id || s.parameters.run_label !== label) invalidatePreview();
-  }, [allowed, selected, meta, label, preview, busy]);
+  }, [allowed, selected, meta, label, preview, busy, uncertain]);
   async function write<T>(action: (signal: AbortSignal) => Promise<T>, success: (result: T) => void, kind: 'approval' | 'other' = 'other') {
     if (!mounted.current || deniedRef.current || mutation.current) return;
     const controller = new AbortController(); mutation.current = controller; setBusy(true); setError('');
+    recoveryEpoch.current++;
     if (kind === 'approval') approvalPending.current = controller;
     const current = () => mounted.current && !controller.signal.aborted && mutation.current === controller;
     try { const result = await action(controller.signal); if (current()) success(result); }
-    catch (failure) { if (current()) { if (failure instanceof ManagerApiError && failure.status === 409) { setPreview(null); setApprovalKey(''); setEditing(null); } fail(failure); } }
+    catch (failure) { if (current()) { if (failure instanceof ManagerApiError && failure.status === 409) { setPreview(null); setApprovalKey(''); setEditing(null); if (kind === 'approval') setUncertain(null); } fail(failure); } }
     finally { if (approvalPending.current === controller) approvalPending.current = null; if (current()) { mutation.current = null; setBusy(false); } }
   }
   function requestPreview() {
@@ -86,7 +106,17 @@ export function ExecutionPage({ api, canRun, canManage }: { api: ManagerApi; can
       setPreview(result); setApprovalKey(crypto.randomUUID());
     });
   }
-  function approve(input: ApproveInput) { if (!preview || !canRun || !allowed || Date.parse(preview.expires_at) - Date.now() < 30000) return; void write((signal) => api.approveExecution(input, signal), (result) => { if (summaryIdentity(result.summary) !== summaryIdentity(preview.summary)) { setError('Không thể xác nhận tác vụ. Cần kiểm tra trạng thái server.'); return; } setJob(result); setPreview(null); setApprovalKey(''); }, 'approval'); }
+  function submitApproval(input: ApproveInput, frozen: PreviewDTO['summary']) {
+    void write((signal) => api.approveExecution(input, signal), (result) => {
+      if (summaryIdentity(result.summary) !== summaryIdentity(frozen)) { setError('Không thể xác nhận tác vụ. Cần kiểm tra trạng thái server.'); return; }
+      setJob(result); setPreview(null); setApprovalKey(''); setUncertain(null);
+    }, 'approval');
+  }
+  function approve(input: ApproveInput) {
+    if (uncertain) { if (canRun) submitApproval(uncertain.input, uncertain.summary); return; }
+    if (!preview || !canRun || !allowed || mutation.current || Date.parse(preview.expires_at) - Date.now() < 30000) return;
+    setUncertain({ input: { ...input }, summary: preview.summary }); submitApproval(input, preview.summary);
+  }
   useEffect(() => {
     if (!job || denied) return; const controller = new AbortController(); jobRead.current = controller; let timer: number | undefined; const jobId = job.job_id; const frozenSummary = summaryIdentity(job.summary);
     async function poll() { try { const result = await api.executionJob(jobId, controller.signal); if (!controller.signal.aborted) { if (result.job_id !== jobId || summaryIdentity(result.summary) !== frozenSummary) throw new Error('Unexpected job'); setJob(result); } } catch (failure) { if (!controller.signal.aborted) fail(failure); } finally { if (!controller.signal.aborted && !deniedRef.current) timer = window.setTimeout(() => void poll(), 5000); } }
@@ -101,7 +131,8 @@ export function ExecutionPage({ api, canRun, canManage }: { api: ManagerApi; can
       {inventory && <div className="device-actions"><button disabled={page <= 1 || busy || denied} onClick={() => { invalidatePreview(); setSelected(''); setPage((p) => p - 1); }}>Trang trước</button><span>Trang {page} · {inventory.count} máy</span><button disabled={page * inventory.page_size >= inventory.count || busy || denied} onClick={() => { invalidatePreview(); setSelected(''); setPage((p) => p + 1); }}>Trang sau</button></div>}
     </section>
     <section className="panel panel-body execution-parameters"><h2>Kịch bản đã review</h2>{provider ? <><p>{provider.scenario_id} · {provider.provider_id}</p><p>RunnerRelease #{provider.release_id} · {provider.runner_id} {provider.runner_version}</p><p>Timeout đã review: {provider.timeout_seconds} giây · mặc định 300 giây</p></> : <p>Chọn máy có binding khớp RunnerRelease đã review. Catalog ZIP không cấp khả năng thực thi.</p>}<label htmlFor="execution-label">Nhãn lượt chạy</label><select id="execution-label" value={label} disabled={!canRun || denied} onChange={(e) => { invalidatePreview(); setLabel(e.target.value as RunLabel); }}>{['A', 'B', 'C', ...(provider?.allow_rehearsal ? ['Rehearsal'] : [])].map((value) => <option key={value}>{value}</option>)}</select><p>Rule revision: {label === 'C' ? 'behavioral' : 'baseline'} · A/B dùng baseline, C dùng behavioral. Không cài rule từ giao diện này.</p><button className="primary" disabled={!allowed || !canRun || busy || denied} onClick={requestPreview}>Xem trước</button>{!canRun && <p>Cần quyền Chạy tác vụ để phê duyệt.</p>}</section>
-    {preview && canRun && !denied && <ExecutionPreview preview={preview} targetName={target?.hostname ?? preview.summary.device_id} idempotencyKey={approvalKey} now={now} busy={busy} error={error} onApprove={approve} onClose={invalidatePreview} />}
+    {uncertain && !preview && canRun && !denied && <section className="panel panel-body"><h2>Phê duyệt đã gửi</h2><p>{uncertain.summary.device_id} · {uncertain.summary.parameters.run_label}</p><p>Kết quả chưa được xác nhận. Kiểm tra lại cùng phê duyệt trước khi tạo tác vụ mới; thao tác này không tạo phê duyệt mới.</p><button disabled={busy} onClick={() => submitApproval(uncertain.input, uncertain.summary)}>Kiểm tra phê duyệt đã gửi</button></section>}
+    {preview && canRun && !denied && <ExecutionPreview submitted={uncertain !== null} preview={preview} targetName={target?.hostname ?? preview.summary.device_id} idempotencyKey={approvalKey} now={now} busy={busy} error={error} onApprove={approve} onClose={invalidatePreview} />}
     {editing && canManage && !denied && <ExecutionBindingEditor device={editing} providers={providers} busy={busy} error={error} onSave={saveBinding} onClose={invalidatePreview} />}
     {job && !denied && <ExecutionJobStatus job={job} busy={busy} onCancel={canRun ? () => void write((signal) => api.cancelExecution(job.job_id, signal), (result) => { if (result.job_id !== job.job_id || summaryIdentity(result.summary) !== summaryIdentity(job.summary)) { setError('Không thể xác nhận trạng thái hủy.'); return; } jobRead.current?.abort(); setPollRevision((r) => r + 1); setJob(result); }) : undefined} />}
   </>;

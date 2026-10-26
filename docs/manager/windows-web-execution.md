@@ -94,6 +94,30 @@ evidence IDs before drawing security conclusions:
 `collection_assurance: unknown`. Missing detection without collection assurance
 remains Inconclusive; it cannot establish a false negative or Regression Passed.
 
+Returning to Tác vụ or reloading retrieves the current signed-in actor's latest
+approved v2 job from the Manager and continues polling its authoritative status.
+Discovery repeats while the page is open, including when an earlier request is
+still committing. It does not approve work. The browser stores neither reports
+nor approval inputs across logout/reload. If an approval response is lost while
+the page remains open, use **Kiểm tra phê duyệt đã gửi** to retry the exact original
+approval. This recovery works after preview expiry or busy readiness; it does not
+mint a new approval. A permission change discards the local view and retry input.
+Never-leased cancellation/expiry releases admission; leased uncertain work and
+outstanding collection remain blocked until the server's reviewed lifecycle or
+reconciliation releases them.
+
+The protected execution journal retains at most 64 job records, including every
+accepted tombstone. Before polling, the agent reserves three file slots and
+2 MiB for a maximum 512 KiB record, its atomic publication temporary file, and
+1 MiB bounded output. The complete spool is bounded to 192 files / 128 MiB;
+orphan temporary/output files count against those limits and are never evicted.
+At saturation the agent stays present and reports `local_not_ready`, without
+polling for another lease. The final already admitted attempt can finish using
+its process-owned reservation; restart never inherits that reservation or replays
+a retained ID. All retained records remain protected. Capacity restoration needs
+an explicitly reviewed owner retention policy; this slice provides no automatic
+deletion, truncation or retention command. Do not delete tombstones to restore Ready.
+
 Before upgrade/rollback, drain/stop through the installer and inspect
 `aegis-agent execution-status --state-dir <PRIVATE_STATE>`. This is a point-in-time
 observation, not an upgrade lock. Keep SCM stopped through promotion. Preserve

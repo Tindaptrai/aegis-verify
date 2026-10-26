@@ -48,10 +48,31 @@ def snapshot_data():
 
 
 class ExecutionContractTests(SimpleTestCase):
+    def test_current_job_framing_preserves_existing_job_depth_and_byte_bounds(self):
+        from control.execution_contracts import decode_contract, public_summary, canonical_bytes
+        snapshot = decode_contract('JobApprovalSnapshotData', raw(snapshot_data()))
+        nested = []
+        for _ in range(9): nested = [nested]
+        data = dict(job_id=UUID, admission_blocked=False, summary=asdict(public_summary(snapshot)), execution_state='succeeded',
+            collection_state='evaluated', evaluation_state='evaluated', created_at=WINDOWS['not_before'],
+            started_authorized_at=None, finished_at=None, error_code=None, report={'nested': nested})
+        job = decode_contract('JobDTO', raw(data))
+        current = decode_contract('CurrentJobDTO', b'{"job":' + raw(data) + b'}')
+        self.assertEqual(current.job, job)
+        data['report'] = {'padding': ''}
+        data['report']['padding'] = 'x' * (4194304 - len(canonical_bytes(data)))
+        encoded = canonical_bytes(data)
+        self.assertEqual(len(encoded), 4194304)
+        self.assertEqual(decode_contract('CurrentJobDTO', b'{"job":' + encoded + b'}').job, decode_contract('JobDTO', encoded))
+        with self.assertRaises(ValueError): decode_contract('CurrentJobDTO', b'{"job":' + encoded + b' }')
+        data['report'] = {'nested': [nested]}
+        with self.assertRaises(ValueError): decode_contract('CurrentJobDTO', raw({'job': data}))
+        with self.assertRaises(ValueError): decode_contract('CurrentJobDTO', raw({'job': None, 'key': UUID}))
+
     def test_human_job_report_has_separate_4mib_limit_without_widening_requests(self):
         from control.execution_contracts import decode_contract, public_summary, canonical_bytes, parse_execution_request
         snapshot=decode_contract('JobApprovalSnapshotData',raw(snapshot_data()))
-        data=dict(job_id=UUID,summary=asdict(public_summary(snapshot)),execution_state='succeeded',
+        data=dict(job_id=UUID,admission_blocked=True,summary=asdict(public_summary(snapshot)),execution_state='succeeded',
             collection_state='evaluated',evaluation_state='evaluated',created_at=WINDOWS['not_before'],
             started_authorized_at=None,finished_at=None,error_code=None,
             report={'synthetic_transport_padding':'x'*131072})
@@ -137,7 +158,7 @@ class ExecutionContractTests(SimpleTestCase):
     def test_report_remains_json_and_deeply_immutable(self):
         from control.execution_contracts import decode_contract, public_summary, canonical_bytes
         snapshot = decode_contract('JobApprovalSnapshotData', raw(snapshot_data()))
-        data = dict(job_id=UUID, summary=asdict(public_summary(snapshot)), execution_state='succeeded',
+        data = dict(job_id=UUID,admission_blocked=True, summary=asdict(public_summary(snapshot)), execution_state='succeeded',
             collection_state='evaluated', evaluation_state='evaluated', created_at=WINDOWS['not_before'],
             started_authorized_at=None, finished_at=None, error_code=None, report={'evaluation': {'evidence_ids': ['synthetic-evidence']}})
         parsed = decode_contract('JobDTO', raw(data))

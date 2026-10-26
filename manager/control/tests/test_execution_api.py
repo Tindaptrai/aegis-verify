@@ -10,6 +10,53 @@ from .test_execution_authority import ExecutionCase
 
 
 class ExecutionApiTests(ExecutionCase):
+    def test_current_http_response_uses_exact_framing_for_maximum_existing_report(self):
+        dto = self.approve(); row = Job.objects.get(pk=dto.job_id)
+        base = asdict(dto); base['report'] = {'padding': ''}; base['evaluation_state'] = 'evaluated'
+        padding = 'x' * (4194304 - len(canonical_bytes(base)))
+        Job.objects.filter(pk=row.pk).update(report={'padding': padding})
+        response = self.login_human(self.operator).get('/api/v1/jobs/current')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.content), 4194304 + 8)
+        self.assertTrue(response.content.startswith(b'{"job":{'))
+        from control.execution_contracts import decode_contract
+        self.assertEqual(decode_contract('CurrentJobDTO', response.content).job.job_id, dto.job_id)
+
+    def test_current_job_recovers_original_committed_approval_after_expiry_and_busy_readiness(self):
+        from datetime import timedelta
+        request = self.approval(); dto = self.approve(request)
+        client = self.login_human(self.operator)
+        with patch('control.execution_services.execution_readiness', side_effect=AssertionError('recovery must not admit new work')), patch('control.execution_views.timezone.now', return_value=self.now + timedelta(minutes=10)):
+            recovered = client.get('/api/v1/jobs/current')
+            self.assertEqual(recovered.status_code, 200)
+            self.assertEqual(recovered['Cache-Control'], 'no-store')
+            self.assertEqual(recovered.json()['job']['job_id'], dto.job_id)
+            replay = self.human_post(client, '/api/v1/jobs/approve', asdict(request))
+            self.assertEqual(replay.status_code, 200)
+            self.assertEqual(replay.json()['job_id'], dto.job_id)
+        self.assertEqual(Job.objects.count(), 1)
+        self.assertEqual(self.login_human(self.viewer).get('/api/v1/jobs/current').json(), {'job': None})
+        self.operator.groups.clear()
+        self.assertEqual(client.get('/api/v1/jobs/current').status_code, 403)
+        self.assertEqual(Client().get('/api/v1/jobs/current').status_code, 401)
+
+    def test_current_discovery_can_find_late_commit_and_authoritative_admission_states(self):
+        client = self.login_human(self.operator)
+        self.assertEqual(client.get('/api/v1/jobs/current').json(), {'job': None})
+        dto = self.approve()
+        route = '/api/v1/jobs/' + dto.job_id
+        self.assertTrue(client.get('/api/v1/jobs/current').json()['job']['admission_blocked'])
+        self.service.cancel_execution(self.operator, dto.job_id)
+        self.assertFalse(client.get(route).json()['admission_blocked'])
+        from control.models import AuditEntry
+        row = Job.objects.get(pk=dto.job_id)
+        for state, collection, leased, blocked in [('expired', 'pending', False, False), ('cancelled', 'pending', True, True), ('expired', 'pending', True, True), ('execution_unknown', 'pending', True, True), ('succeeded', 'collecting', True, True), ('succeeded', 'evaluated', True, False), ('execution_unknown', 'reconciled', True, False)]:
+            with self.subTest(state=state, collection=collection, leased=leased):
+                if leased and not AuditEntry.objects.filter(job=row, action='leased').exists():
+                    self.service.audit(row, 'leased', self.device.pk)
+                Job.objects.filter(pk=row.pk).update(execution_state=state, collection_state=collection)
+                self.assertEqual(client.get(route).json()['admission_blocked'], blocked)
+
     def test_job_get_preserves_existing_nested_canonical_report(self):
         dto=self.approve(); report={'outcome':'inconclusive','evidence':[{'id':'synthetic-fixture-reference'}]}
         Job.objects.filter(pk=dto.job_id).update(report=report,collection_state='evaluated',execution_state='succeeded')

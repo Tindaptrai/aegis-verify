@@ -14,7 +14,7 @@ from . import execution_contracts as wire
 from .execution_models import (DeviceExecutionBinding, RegisteredExecutionConnection, JobApprovalSnapshot,
     ExecutionPreview, ExecutionIdempotency, ExecutionOwnerDecision)
 from .execution_ownership import (lock_human_authority, lock_dispatch, lock_device_ownership,
-    guard_execution_owner, require_idle)
+    guard_execution_owner, require_idle, execution_job_blocks)
 from .execution_signing import sign_execution_payload
 from .jobs import audit, release_pins
 from .models import Device, RunnerRelease, Job, AuditEntry
@@ -207,7 +207,7 @@ def preview_execution(actor, input, *, now):
 
 def job_dto(job):
     snapshot = wire.decode_contract('JobApprovalSnapshotData', bytes(job.approval_snapshot.snapshot_bytes))
-    return checked('JobDTO', dict(job_id=str(job.pk), summary=asdict(wire.public_summary(snapshot)),
+    return checked('JobDTO', dict(job_id=str(job.pk), admission_blocked=execution_job_blocks(job), summary=asdict(wire.public_summary(snapshot)),
         execution_state=job.execution_state, collection_state=job.collection_state,
         evaluation_state='evaluated' if job.report is not None else 'not_evaluated', created_at=stamp(job.created_at),
         started_authorized_at=stamp(job.started_authorized_at) if job.started_authorized_at else None,
@@ -388,6 +388,15 @@ def reconcile_execution(actor, job_id, *, reason, evidence_refs):
     if job.execution_state in ('queued','leased','started'): job.execution_state='execution_unknown'
     job.save(update_fields=['collection_state','execution_state']); audit(job,'owner_reconciled',actor.pk)
     return job_dto(job)
+
+
+@transaction.atomic
+def current_execution_job(actor):
+    lock_human_authority()
+    actor = require_product_permission(actor, 'view')
+    lock_dispatch()
+    latest = ExecutionIdempotency.objects.filter(actor=actor, operation='approve', job__protocol_family=FAMILY).select_related('job').order_by('-job__created_at', '-pk').first()
+    return checked('CurrentJobDTO', dict(job=asdict(job_dto(latest.job)) if latest else None))
 
 
 def get_execution_job(actor, job_id):

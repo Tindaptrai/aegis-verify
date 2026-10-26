@@ -6,6 +6,41 @@ internal static partial class Program
 {
     private static void ExecutionJournalTests()
     {
+        Test("execution capacity reserves file slots and bytes without removing orphan records", () =>
+        {
+            using var temp = new Scratch(); var journal = new ExecutionJournal(temp.Path);
+            Check(journal.HasAdmissionCapacity(), "empty spool denied");
+            for (var i = 0; i < 190; i++)
+            {
+                using var file = PrivatePaths.CreateFile(Path.Combine(temp.Path, ".journal-" + Guid.NewGuid().ToString("N") + ".tmp"));
+            }
+            Check(journal.Entries().Count == 0 && !journal.HasAdmissionCapacity() && Directory.GetFiles(temp.Path).Length == 190, "temporary files did not reserve atomic publication slots");
+            using var other = new Scratch(); var byteJournal = new ExecutionJournal(other.Path);
+            for (var i = 0; i < 127; i++)
+            {
+                using var file = PrivatePaths.CreateFile(Path.Combine(other.Path, Guid.NewGuid() + ".log")); file.SetLength(1024 * 1024);
+            }
+            Check(byteJournal.Entries().Count == 0 && !byteJournal.HasAdmissionCapacity(), "maximum record/temp/output byte reservation ignored");
+        });
+        Test("execution capacity final admitted attempt finishes and no retained ID replays", async () =>
+        {
+            using var temp = new Scratch(); var (job, grant) = ExecutionFixture(); var journal = new ExecutionJournal(temp.Path);
+            SeedAcceptedJournal(journal, job, 63); var before = journal.Entries().ToArray();
+            Check(journal.HasAdmissionCapacity(), "63 entries refused final attempt");
+            var transport = new ExecutionTransportDouble(job); var runner = new ExecutionRunnerDouble(journal);
+            var coordinator = new ExecutionCoordinator((_, _) => Task.FromResult(journal.HasReadinessCapacity()), (_, _) => Task.CompletedTask);
+            await coordinator.AttemptAsync(job, grant, transport, journal, runner, CancellationToken.None);
+            Check(runner.Runs == 1 && journal.Entries().Count == 64 && journal.Entries().All(e => e.Phase == "accepted"), "last admitted attempt self-blocked");
+            Check(!journal.HasAdmissionCapacity() && !journal.HasReadinessCapacity(), "64 accepted entries still Ready");
+            await coordinator.AttemptAsync(job, grant, transport, journal, runner, CancellationToken.None);
+            Check(runner.Runs == 1 && before.All(e => journal.Entries().Contains(e)), "retained attempt replayed or tombstone changed");
+        });
+        Test("execution capacity restart never inherits live final attempt reservation", () =>
+        {
+            using var temp = new Scratch(); var (job, _) = ExecutionFixture(); var journal = new ExecutionJournal(temp.Path);
+            SeedAcceptedJournal(journal, job, 63); var entry = ExecutionJournalEntry.Received(job); journal.Transition(entry.JobId, null, entry);
+            Check(journal.HasReadinessCapacity() && !new ExecutionJournal(temp.Path).HasReadinessCapacity(), "startup unknown inherited live admission reservation");
+        });
         Test("execution journal orphan temporary output files consume bounded spool budget", () =>
         {
             using var temp = new Scratch(); var journal = new ExecutionJournal(temp.Path);
@@ -103,5 +138,21 @@ internal static partial class Program
             Convert.ToBase64String(payload), Convert.ToBase64String(key.SignData(payload, HashAlgorithmName.SHA256, RSASignaturePadding.Pss))));
         grant = grant with { PublicKeySha256 = Convert.ToHexStringLower(SHA256.HashData(key.ExportSubjectPublicKeyInfo())) };
         return (ExecutionProtocol.Verify(envelope, key, grant, DateTimeOffset.UtcNow), grant);
+    }
+    private static void SeedAcceptedJournal(ExecutionJournal journal, VerifiedExecutionJob template, int count)
+    {
+        // Inert journal records only. No process launch, machine state or certificate installation.
+        for (var i = 0; i < count; i++)
+        {
+            var id = Guid.NewGuid().ToString(); var payload = ExecutionProtocol.CanonicalBytes(template.Job with { JobId = id, RunId = id });
+            var envelope = ExecutionProtocol.Decode<ExecutionEnvelope>(template.EnvelopeBytes, ExecutionProtocol.EnvelopeLimit) with { Payload = Convert.ToBase64String(payload) };
+            var entry = new ExecutionJournalEntry(1, id, ExecutionProfile.Hash(payload), Convert.ToBase64String(ExecutionProtocol.CanonicalBytes(envelope)), Convert.ToBase64String(payload), "received", null, null, null, null, null);
+            journal.Transition(id, null, entry);
+            var receipt = ExecutionCoordinator.Unknown(entry, DateTimeOffset.UtcNow);
+            var terminal = entry with { Phase = "terminal", Receipt = Convert.ToBase64String(receipt) }; journal.Transition(id, "received", terminal);
+            var parsed = ExecutionProtocol.Decode<ExecutionReceipt>(receipt);
+            var ack = new ReceiptAcknowledgment(ExecutionProtocol.Version, id, parsed.ReceiptId, entry.JobSha256, true);
+            journal.Transition(id, "terminal", terminal with { Phase = "accepted", ReceiptAck = Convert.ToBase64String(ExecutionProtocol.CanonicalBytes(ack)) });
+        }
     }
 }

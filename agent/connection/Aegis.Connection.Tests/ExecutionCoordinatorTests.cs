@@ -5,6 +5,21 @@ internal static partial class Program
 {
     private static void ExecutionCoordinatorTests()
     {
+        Test("execution capacity saturated journal never polls and supervision keeps presence alive", async () =>
+        {
+            using var temp = new Scratch(); var (job, grant) = ExecutionFixture(); var journal = new ExecutionJournal(temp.Path);
+            SeedAcceptedJournal(journal, job, 64);
+            var before = journal.Entries().ToArray(); var transport = new ExecutionTransportDouble(job); var runner = new ExecutionRunnerDouble(journal);
+            using var stop = new CancellationTokenSource(); var idle = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var heartbeat = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var coordinator = new ExecutionCoordinator((_, _) => Task.FromResult(true), async (_, token) => { idle.TrySetResult(); await Task.Delay(Timeout.Infinite, token); });
+            var identity = new IdentityState("enrolled", "https://synthetic.invalid", "unused", "unused", "unused", "SYNTHETIC", "windows", "x64", "0.3.0", DeviceId: job.Job.DeviceId, Generation: 1);
+            var supervised = AgentSupervisor.SuperviseAsync(async token => { await idle.Task.WaitAsync(token); heartbeat.TrySetResult(); await Task.Delay(Timeout.Infinite, token); return 0; },
+                token => coordinator.RunAsync(identity, grant, transport, journal, runner, token), token => Task.Delay(Timeout.Infinite, token), stop.Token);
+            try { await heartbeat.Task.WaitAsync(TimeSpan.FromSeconds(10)); Check(!supervised.IsCompleted && transport.Polls == 0 && runner.Runs == 0, "saturated journal consumed lease or stopped heartbeat"); }
+            finally { stop.Cancel(); try { await supervised; } catch (OperationCanceledException) { } }
+            Check(journal.Entries().SequenceEqual(before), "retained tombstones changed");
+        });
         Test("execution coordinator cancellation after lost start ack spools unknown without launch", async () =>
         {
             using var temp = new Scratch(); var (job, grant) = ExecutionFixture(); var journal = new ExecutionJournal(temp.Path);
@@ -83,10 +98,11 @@ internal static partial class Program
     }
     private sealed class ExecutionTransportDouble(VerifiedExecutionJob job) : IExecutionTransport
     {
+        public int Polls;
         public bool LoseStart, LoseReceipt, WrongAck;
         public List<byte[]> Starts { get; } = []; public List<byte[]> Receipts { get; } = [];
         public Task<byte[]> ReadinessAsync(ReadinessRequest request, CancellationToken stop) => throw new NotSupportedException();
-        public Task<VerifiedExecutionJob?> PollAsync(PollRequest request, CancellationToken stop) => Task.FromResult<VerifiedExecutionJob?>(job);
+        public Task<VerifiedExecutionJob?> PollAsync(PollRequest request, CancellationToken stop) { Polls++; return Task.FromResult<VerifiedExecutionJob?>(job); }
         public Task<byte[]> StartAsync(string jobId, StartRequest request, byte[] exact, CancellationToken stop)
         {
             Starts.Add((byte[])exact.Clone()); if (LoseStart && Starts.Count == 1) throw new ConnectionException("network_unavailable", true);

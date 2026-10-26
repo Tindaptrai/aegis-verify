@@ -62,7 +62,7 @@ export function createManagerApi(fetcher: typeof fetch = fetch) {
     if (expectedStatus !== undefined && !(Array.isArray(expectedStatus) ? expectedStatus : [expectedStatus]).includes(response.status)) throw new ManagerApiError(response.status);
     if (response.status === 204) return undefined as T;
     let result: unknown;
-    try { result = execution ? await readExecutionResponse(response) : await response.json(); } catch { throw new ManagerApiError(response.status); }
+    try { result = execution ? await readExecutionResponse(response, path === 'jobs/current') : await response.json(); } catch { throw new ManagerApiError(response.status); }
     if (validate && !validate(result)) throw new ManagerApiError(response.status);
     return result as T;
   }

@@ -6,6 +6,7 @@ human_urls=[
     path('execution/devices/<uuid:device_id>',views.device),
     path('execution/devices/<uuid:device_id>/binding',views.binding),
     path('jobs/preview',views.preview), path('jobs/approve',views.approve),
+    path('jobs/current',views.current_job),
     path('jobs/<uuid:job_id>',views.job), path('jobs/<uuid:job_id>/cancel',views.cancel),
 ]
 machine_urls=[

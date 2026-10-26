@@ -48,6 +48,10 @@ The human `JobDTO` response alone permits up to 4,194,304 bytes, including its
 opaque canonical report. Its depth, finite-number and closed execution-field
 rules remain unchanged. This response allowance does not widen any human or
 machine request, decoded signed payload, envelope, or other execution record.
+The closed `CurrentJobDTO` recovery response adds only its canonical `{"job":...}`
+framing: eight bytes and one container level (4,194,312 bytes / depth 13 total).
+Its nested JobDTO keeps the original raw 4 MiB / depth 12 bounds. Duplicate or
+unknown wrapper fields are rejected, and no request/machine/v1 bound changes.
 
 Receipt states are `succeeded,failed,execution_unknown`. Nullable start and int32
 exit code preserve unobserved values; cleanup is a strict bool. Observed start
@@ -122,7 +126,8 @@ not gain fields. Absent readiness metadata is null. Capability is one of
 | ApproveInput | preview_id,preview_sha256,idempotency_key |
 | PreviewDTO | preview_id,preview_sha256,expires_at,summary |
 | PublicSummary | device_id,environment_id,wazuh_connection_id,wazuh_agent_id,provider_id,binding_id,binding_revision,release_id,release_sha256,scenario_id,runner_id,runner_version,parameters,timeout_seconds,not_before,expires_at,collection_start,collection_end,artifact_pins,rule_pins,cleanup_policy,execution_receipt_is_detection_evidence,run_binding,collection_assurance |
-| JobDTO | job_id,summary,execution_state,collection_state,evaluation_state,created_at,started_authorized_at,finished_at,error_code,report |
+| JobDTO | job_id,admission_blocked,summary,execution_state,collection_state,evaluation_state,created_at,started_authorized_at,finished_at,error_code,report |
+| CurrentJobDTO | job |
 | ProviderDTO | provider_id,scenario_id,runner_id,runner_version,release_id,release_sha256,allow_rehearsal,timeout_seconds |
 | ProviderList | providers |
 
@@ -136,6 +141,23 @@ canonical JSON object or null, recursively frozen on decode within the separate
 4 MiB JobDTO response limit. Collection states
 remain pending/collecting/evaluated/empty/failed/reconciled. Receipt and health
 never manufacture detection evidence or declare collection complete.
+
+`GET /api/v1/jobs/current` returns no-store CurrentJobDTO with the latest v2 job
+approved by the freshly authorized current actor, or null. It uses the existing
+actor-bound approval idempotency records and view permission; no approval key,
+other actor's recovery record, or history list is returned. Repeated authenticated
+discovery can recover an approval whose commit completed after the first lookup.
+Discovery never approves work. An explicit retry of the original ApproveInput
+uses the existing idempotent approval endpoint independently of new-job readiness
+or preview lifetime; current run permission is still required.
+
+`admission_blocked` is a strict boolean derived from the same server predicate
+used for admission. Never-leased cancelled/expired pending jobs release admission;
+leased cancellation/expiry, execution uncertainty and outstanding collection do
+not. The browser also requires fresh ready device metadata for a new preview.
+It never infers lease history from execution/collection labels. Browser recovery
+persists no reports or approval inputs across logout/reload; permission/session
+changes discard local views and stale callbacks.
 
 Machine errors have exactly `{error:{code}}`: invalid_request400,
 identity_denied403, job_not_found404, lease_conflict/start_conflict/receipt_conflict409,

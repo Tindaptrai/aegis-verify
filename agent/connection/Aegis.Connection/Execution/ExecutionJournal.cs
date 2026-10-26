@@ -18,8 +18,12 @@ public sealed class ExecutionJournal
 {
     public const int RecordLimit = 512 * 1024;
     private const int EntryLimit = 64;
+    private const long AttemptByteReservation = 2L * RecordLimit + 1024 * 1024;
     private readonly string directory;
     private readonly object gate = new();
+    // Process-owned reservation only: restart must recover uncertain work, never
+    // infer new authority from a retained record.
+    private string? admittedJobId;
     public ExecutionJournal(string directory)
     {
         if (!Path.IsPathFullyQualified(directory)) throw Invalid();
@@ -29,6 +33,25 @@ public sealed class ExecutionJournal
     public IReadOnlyList<ExecutionJournalEntry> Entries()
     {
         lock (gate) return InspectExisting(directory);
+    }
+    public bool HasAdmissionCapacity()
+    {
+        lock (gate)
+        {
+            var entries = Entries();
+            var files = Directory.GetFiles(directory);
+            return entries.Count < EntryLimit && files.Length <= EntryLimit * 3 - 3 &&
+                files.Sum(path => new FileInfo(path).Length) <= (EntryLimit - 1) * AttemptByteReservation;
+        }
+    }
+    internal bool HasReadinessCapacity()
+    {
+        lock (gate)
+        {
+            if (HasAdmissionCapacity()) return true;
+            var pending = Entries().Where(ExecutionCoordinator.Unresolved).ToArray();
+            return admittedJobId != null && pending.Length == 1 && pending[0].JobId == admittedJobId;
+        }
     }
     internal static IReadOnlyList<ExecutionJournalEntry> InspectExisting(string directory)
     {
@@ -49,7 +72,7 @@ public sealed class ExecutionJournal
                 if (length > (extension == ".log" ? 1024 * 1024 : RecordLimit)) throw Invalid();
                 total += length;
             }
-            if (total > EntryLimit * (2L * RecordLimit + 1024 * 1024)) throw Invalid();
+            if (total > EntryLimit * AttemptByteReservation) throw Invalid();
             var paths = all.Where(p => Path.GetExtension(p) == ".json").ToArray();
             if (paths.Length > EntryLimit) throw Invalid();
             var entries = new List<ExecutionJournalEntry>();
@@ -74,7 +97,7 @@ public sealed class ExecutionJournal
         lock (gate)
         {
             var entries = Entries(); var old = entries.SingleOrDefault(e => e.JobId == jobId);
-            if (jobId != nextEntry.JobId || old?.Phase != expectedPhase || old == null && (expectedPhase != null || entries.Count >= EntryLimit)) throw Invalid();
+            if (jobId != nextEntry.JobId || old?.Phase != expectedPhase || old == null && (expectedPhase != null || !HasAdmissionCapacity())) throw Invalid();
             Validate(nextEntry);
             if (old == null ? nextEntry.Phase != "received" : !Allowed(old.Phase, nextEntry.Phase)) throw Invalid();
             if (old != null && (old.Envelope != nextEntry.Envelope || old.Payload != nextEntry.Payload || old.JobSha256 != nextEntry.JobSha256 ||
@@ -92,6 +115,8 @@ public sealed class ExecutionJournal
                 if (OperatingSystem.IsWindows() && File.Exists(path)) File.Replace(temporary, path, null);
                 else File.Move(temporary, path, true);
                 new DirectoryDurability().Synchronize(directory);
+                if (old == null) admittedJobId = jobId;
+                if (nextEntry.Phase == "accepted" && admittedJobId == jobId) admittedJobId = null;
             }
             catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException) { throw Invalid(); }
             finally { if (File.Exists(temporary)) File.Delete(temporary); }

@@ -85,6 +85,14 @@ def approve(request):
 
 @execution_api
 @human_api('GET',authenticated=True)
+def current_job(request):
+    require_product_permission(request.user,'view')
+    if request.GET: raise ValueError()
+    return response(service.current_execution_job(request.user))
+
+
+@execution_api
+@human_api('GET',authenticated=True)
 def job(request,job_id):
     require_product_permission(request.user,'view')
     if request.GET: raise ValueError()

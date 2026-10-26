@@ -4,6 +4,28 @@ import { provider, readiness, preview, job, targetId, hash, release } from './ex
 
 const raw = (value: unknown, status = 200) => new Response(JSON.stringify(value).replaceAll(`"${release}"`, release), { status });
 describe('authenticated execution API', () => {
+  it('current-job framing preserves the existing maximum job depth and byte bounds', async () => {
+    let nested: unknown = []; for (let i = 0; i < 9; i++) nested = [nested];
+    const value = { ...job, report: { nested } };
+    expect((await createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(raw(value))).executionJob(targetId)).report).toEqual({ nested });
+    expect((await createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(raw({ job: value }))).currentExecutionJob()).job?.report).toEqual({ nested });
+    await expect(createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(raw({ job: { ...job, report: { nested: [nested] } } }))).currentExecutionJob()).rejects.toMatchObject({ name: 'ManagerApiError' });
+    const base = JSON.stringify({ ...job, report: { padding: '' } }).replaceAll(`"${release}"`, release);
+    const large = base.replace('"padding":""', `"padding":"${'x'.repeat(4 * 1024 * 1024 - new TextEncoder().encode(base).length)}"`);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(`{"job":${large}}`)).mockResolvedValueOnce(new Response(`{"job":${large} }`));
+    const api = createManagerApi(fetcher); expect((await api.currentExecutionJob()).job?.job_id).toBe(targetId);
+    await expect(api.currentExecutionJob()).rejects.toMatchObject({ name: 'ManagerApiError' });
+  });
+  it('discovers one current job through a closed authenticated no-store response', async () => {
+    for (const body of [{ job: null }, { job }]) {
+      const fetcher = vi.fn<typeof fetch>().mockResolvedValue(raw(body)); const api = createManagerApi(fetcher);
+      expect(await api.currentExecutionJob()).toEqual(body);
+      expect(fetcher).toHaveBeenCalledWith('/api/v1/jobs/current', expect.objectContaining({ credentials: 'same-origin', cache: 'no-store', method: 'GET' }));
+    }
+    for (const body of [{ job, idempotency_key: targetId }, { job: { ...job, admission_blocked: 'false' } }, { job: { ...job, admission_blocked: undefined } }]) {
+      await expect(createManagerApi(vi.fn<typeof fetch>().mockResolvedValue(raw(body))).currentExecutionJob()).rejects.toMatchObject({ name: 'ManagerApiError' });
+    }
+  });
   it.each(['9007199254740993', '9223372036854775807'])('preserves raw int64 release %s inbound and outbound', async (id) => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(new Response(`{"providers":[${JSON.stringify(provider).replace(`"${release}"`, id)}]}`)).mockResolvedValueOnce(raw(readiness));
     const api = createManagerApi(fetcher);

@@ -37,7 +37,7 @@ public sealed class ExecutionCoordinator
             {
                 // Manager fences owner reconciliation. A new signed lease/start ack
                 // can authorize a distinct job; old IDs remain permanent tombstones.
-                if (!journal.Entries().Any(Unresolved) && await readiness(null, stop))
+                if (!journal.Entries().Any(Unresolved) && journal.HasAdmissionCapacity() && await readiness(null, stop))
                 {
                     var poll = new PollRequest(ExecutionProtocol.Version, identity.DeviceId!, identity.Generation!.Value,
                         grant.Installed.BindingId, grant.Installed.BindingRevision);

@@ -361,6 +361,7 @@ class PreviewDTO:
 @dataclass(frozen=True)
 class JobDTO:
     job_id: str
+    admission_blocked: bool
     summary: PublicSummary
     execution_state: str
     collection_state: str
@@ -370,6 +371,11 @@ class JobDTO:
     finished_at: str | None
     error_code: str | None
     report: FrozenReportMap | None
+
+
+@dataclass(frozen=True)
+class CurrentJobDTO:
+    job: JobDTO | None
 
 
 @dataclass(frozen=True)
@@ -408,14 +414,14 @@ def _finite_float(value):
     return number
 
 
-def load_json(raw: bytes, limit=REQUEST_LIMIT):
+def load_json(raw: bytes, limit=REQUEST_LIMIT, *, max_depth=12):
     if type(raw) is not bytes or not 0 < len(raw) <= limit:
         raise ValueError('invalid_request')
     try:
         value = json.loads(raw.decode('utf-8'), object_pairs_hook=_unique, parse_constant=_invalid_constant, parse_float=_finite_float)
         def depth(item, level=1):
             if isinstance(item, (dict, list)):
-                if level > 12: raise ValueError('invalid_request')
+                if level > max_depth: raise ValueError('invalid_request')
                 for child in (item.values() if isinstance(item, dict) else item): depth(child, level + 1)
         depth(value)
         return value
@@ -542,8 +548,12 @@ CONTRACTS = {cls.__name__: cls for cls in tuple(globals().values()) if isinstanc
 
 
 def decode_contract(kind: str, raw: bytes):
-    limit = JOB_RESPONSE_LIMIT if kind == 'JobDTO' else ENVELOPE_LIMIT if kind == 'Envelope' else REQUEST_LIMIT
-    try: return _convert(CONTRACTS[kind], load_json(raw, limit))
+    # Exactly {"job":...} is framing (8 bytes / one level), not a larger JobDTO.
+    # Even with whitespace/escaped keys the wrapper costs at least 8 raw bytes,
+    # so these aggregate bounds also enforce the unchanged nested raw limits.
+    framing = kind == 'CurrentJobDTO'
+    limit = JOB_RESPONSE_LIMIT + 8 if framing else JOB_RESPONSE_LIMIT if kind == 'JobDTO' else ENVELOPE_LIMIT if kind == 'Envelope' else REQUEST_LIMIT
+    try: return _convert(CONTRACTS[kind], load_json(raw, limit, max_depth=13 if framing else 12))
     except (KeyError, TypeError, AttributeError, ValueError): raise ValueError('invalid_request') from None
 
 

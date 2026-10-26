@@ -122,6 +122,7 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
       setExecutionBinding: (id, input, signal) => guarded(() => api.setExecutionBinding(id, input, signal), signal),
       previewExecution: (input, signal) => guarded(() => api.previewExecution(input, signal), signal),
       approveExecution: (input, signal) => guarded(() => api.approveExecution(input, signal), signal),
+      currentExecutionJob: (signal) => guarded(() => api.currentExecutionJob(signal), signal),
       executionJob: (id, signal) => guarded(() => api.executionJob(id, signal), signal),
       cancelExecution: (id, signal) => guarded(() => api.cancelExecution(id, signal), signal),
       listCatalog: (query, signal) => guarded(() => api.listCatalog(query, signal), signal),
