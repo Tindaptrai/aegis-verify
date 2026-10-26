@@ -98,6 +98,28 @@ def environment_file(values):
     return '\n'.join(lines) + '\n'
 
 
+def safe_systemd_status(output):
+    """Diagnostic state vocabulary only; never publish commands/environment/logs."""
+    allowed = {
+        'ActiveState': {'active', 'activating', 'inactive', 'deactivating', 'failed',
+                        'reloading', 'maintenance', 'refreshing'},
+        'SubState': {'dead', 'running', 'exited', 'failed', 'auto-restart', 'auto-restart-queued',
+                     'start', 'start-pre', 'start-post', 'stop', 'stop-sigterm', 'stop-sigkill',
+                     'stop-post', 'final-sigterm', 'final-sigkill', 'reload', 'reload-signal',
+                     'reload-notify', 'condition', 'cleaning'},
+        'Result': {'success', 'exit-code', 'signal', 'core-dump', 'timeout', 'watchdog',
+                   'start-limit-hit', 'resources', 'protocol', 'oom-kill', 'exec-condition',
+                   'assert', 'condition'},
+    }
+    result = {}
+    for line in output.splitlines():
+        name, separator, value = line.partition('=')
+        if separator and name in allowed and value in allowed[name]: result[name] = value
+        elif name == 'ExecMainStatus' and re.fullmatch(r'[0-9]{1,3}', value) and int(value) <= 255:
+            result[name] = int(value)
+    return result
+
+
 class TestIndexer:
     """Local TEST HTTPS source: authenticated, verified TLS, zero fabricated events."""
     def __init__(self, root):
@@ -193,6 +215,33 @@ class TestIndexer:
 
 
 class WorkerServiceHarnessTests(SimpleTestCase):
+    def test_service_diagnostics_preserve_only_known_states_and_bounded_exit_status(self):
+        parse = globals().get('safe_systemd_status')
+        self.assertTrue(callable(parse), 'safe systemd diagnostic parser is missing')
+        self.assertEqual(parse('ActiveState=failed\nSubState=failed\nResult=exit-code\nExecMainStatus=127\n'),
+            dict(ActiveState='failed', SubState='failed', Result='exit-code', ExecMainStatus=127))
+
+    def test_service_diagnostics_discard_unknown_values_and_private_fields(self):
+        parse = globals().get('safe_systemd_status')
+        self.assertTrue(callable(parse), 'safe systemd diagnostic parser is missing')
+        self.assertEqual(parse('ActiveState=private-value\nSubState=/private/path\nResult=credential\n'
+            'ExecMainStatus=999\nEnvironment=secret\nExecStart=/private/command\n'), {})
+        self.assertEqual(parse('ExecMainStatus=-1\n'), {})
+
+    def test_failure_capture_preserves_original_failure_without_an_installed_unit(self):
+        case = RegisteredWorkerSystemdTests('test_actual_enabled_unit_lifecycle_fresh_health_independent_loop_and_os_lock')
+        case.unit_enabled = False
+        case.gate_stage = 'worker_health'
+
+        def failed_check():
+            raise ValueError('fixture_failure')
+
+        with self.assertRaisesRegex(ValueError, '^fixture_failure$'):
+            case._callTestMethod(failed_check)
+        self.assertEqual(case.gate_stage, 'worker_health')
+        self.assertEqual(case.gate_service_status, {})
+        self.assertEqual(case.gate_runtime_status, {})
+
     def bash(self, *args):
         executable = shutil.which('bash')
         if __import__('os').name == 'nt':
@@ -285,6 +334,57 @@ for module in (control.worker_health, control.management.commands.manager_worker
 
 class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCase):
     """Actual unit/service/PG checks, never substituted by local or static tests."""
+    def _callSetUp(self):
+        try: super()._callSetUp()
+        except Exception:
+            self.capture_failure_diagnostics()
+            raise
+
+    def _callTestMethod(self, method):
+        try: super()._callTestMethod(method)
+        except Exception:
+            self.capture_failure_diagnostics()
+            raise
+
+    def _callCleanup(self, function, *args, **kwargs):
+        self.gate_stage = 'fixture_cleanup'
+        try: super()._callCleanup(function, *args, **kwargs)
+        except Exception:
+            self.capture_failure_diagnostics()
+            raise
+
+    def capture_failure_diagnostics(self):
+        """Capture before unittest reports/cleanup; preserve the original exception."""
+        self.gate_service_status, self.gate_runtime_status = {}, {}
+        # No generic service, journal or environment query is allowed here.
+        if (sys.platform != 'linux' or not getattr(self, 'unit_enabled', False)
+                or not re.fullmatch(r'aegis-worker-ci-[0-9a-f]{32}\.service', getattr(self, 'unit_name', ''))):
+            return
+        try:
+            observed = subprocess.run(['sudo', '-n', 'systemctl', 'show', '--property=ActiveState',
+                '--property=SubState', '--property=Result', '--property=ExecMainStatus', self.unit_name],
+                capture_output=True, text=True, timeout=10)
+            if observed.returncode == 0: self.gate_service_status = safe_systemd_status(observed.stdout)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        if not hasattr(self, 'service_environment'): return
+        # Controlled comparison only: never modify the actual unit environment.
+        # --help imports the same staged command but performs no source/DB work.
+        executable = str(Path(sys.executable).resolve())
+        command = [executable, 'manage.py', 'manager_worker', '--help']
+        try:
+            minimal = subprocess.run(command, env=self.service_environment, cwd=self.root/'source/manager',
+                                     capture_output=True, timeout=10)
+            self.gate_runtime_status['minimal_environment_returncode'] = minimal.returncode
+            library = Path(executable).parent.parent/'lib'
+            if (minimal.returncode != 0 and library.is_dir() and library.resolve().is_relative_to('/opt')
+                    and os.environ.get('LD_LIBRARY_PATH') == str(library)):
+                variant = subprocess.run(command, env=self.service_environment | {'LD_LIBRARY_PATH': str(library)},
+                    cwd=self.root/'source/manager', capture_output=True, timeout=10)
+                self.gate_runtime_status['library_environment_returncode'] = variant.returncode
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
     @classmethod
     def setUpClass(cls):
         if os.environ.get('AEGIS_MANAGER_REQUIRE_WORKER_SYSTEMD') != '1':
@@ -306,6 +406,7 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
     def setUp(self):
         # Deliberately do not call ExecutionCollectionFixture.setUp: its placeholder
         # CA/config and external ACL mocks are unsuitable for a native service gate.
+        self.gate_stage = 'fixture_setup'
         self.root = Path('/var/lib') / ('aegis-worker-ci-' + uuid.uuid4().hex)
         self.unit_name = self.root.name + '.service'
         self.root_created = False
@@ -316,9 +417,12 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
         self.command(['sudo', '-n', 'chown', f'{os.getuid()}:{os.getgid()}', '--', str(self.root)])
         self.private = self.root / 'private'; self.private.mkdir(mode=0o700)
         self.output = self.private / 'evidence'; self.output.mkdir(mode=0o700)
+        self.gate_stage = 'source_staging'
         self.stage_source()
+        self.gate_stage = 'source_tls'
         self.source = TestIndexer(self.private)
         self.addCleanup(self.source.close)
+        self.gate_stage = 'authority_setup'
         self.now = timezone.now().replace(microsecond=0) - timedelta(minutes=10)
         self.owner = get_user_model().objects.create_superuser('native-worker-owner', password=secrets.token_urlsafe(32))
         AccountMutationLock.objects.get_or_create(pk=1); DispatchLock.objects.get_or_create(pk=1)
@@ -357,6 +461,7 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
         self.identity = services.ExecutionIdentity(str(self.device.pk), 1, self.device.certificate_sha256)
         self.poll = PollRequest(protocol=PROTOCOL, device_id=str(self.device.pk), generation=1,
             binding_id=str(self.binding.binding_id), binding_revision=1)
+        self.gate_stage = 'environment_setup'
         self.service_environment = {key: str(connection.settings_dict[field]) for key, field in (
             ('AEGIS_MANAGER_DB_NAME','NAME'), ('AEGIS_MANAGER_DB_USER','USER'), ('AEGIS_MANAGER_DB_PASSWORD','PASSWORD'),
             ('AEGIS_MANAGER_DB_HOST','HOST'), ('AEGIS_MANAGER_DB_PORT','PORT'))}
@@ -368,6 +473,7 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
         unit_path = self.root / self.unit_name
         unit_path.write_text(fixture_unit((REPO / 'deploy/manager/aegis-manager-worker.service').read_text(),
             self.root, str(Path(sys.executable).resolve()), os.getuid(), os.getgid()), encoding='utf-8')
+        self.gate_stage = 'unit_enable'
         self.unit_enabled = True
         self.command(['sudo', '-n', 'systemctl', 'enable', str(unit_path)])
         self.assertEqual(self.systemctl('is-enabled').stdout.strip(), 'enabled')
@@ -433,13 +539,17 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
             shutil.rmtree(self.root)
 
     def test_actual_enabled_unit_lifecycle_fresh_health_independent_loop_and_os_lock(self):
+        self.gate_stage = 'unit_start'
         started = timezone.now()
         self.systemctl('start')
+        self.gate_stage = 'worker_health'
         first = self.fresh_health(after=started)
+        self.gate_stage = 'service_properties'
         self.assertEqual(self.systemctl('is-active').stdout.strip(), 'active')
         for property_name, value in (('PrivateTmp','yes'), ('ProtectHome','yes'),
                                      ('ProtectSystem','strict'), ('NoNewPrivileges','yes')):
             self.assertEqual(self.systemctl('show', '--property='+property_name, '--value').stdout.strip(), value)
+        self.gate_stage = 'worker_lock'
         contender = self.run_worker('--once')
         self.assertNotEqual(contender.returncode, 0)
         self.assertIn('worker_already_running', contender.stderr)
@@ -447,15 +557,19 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
         denied_recovery = self.run_worker('--recover-interrupted')
         self.assertNotEqual(denied_recovery.returncode, 0)
         self.assertIn('worker_already_running', denied_recovery.stderr)
+        self.gate_stage = 'source_block'
         self.source.health_block.set()
         self.assertTrue(self.source.health_entered.wait(25), 'actual_health_source_request_required')
+        self.gate_stage = 'source_keepalive'
         first.refresh_from_db(); before_seen, before_probe = first.last_seen_at, first.source_probe_succeeded_at
         self.wait_for(lambda: CollectionWorkerLease.objects.filter(pk=first.pk, last_seen_at__gt=before_seen).exists(), timeout=7)
         first.refresh_from_db(); self.assertEqual(first.source_probe_succeeded_at, before_probe)
         self.source.health_release.set()
         self.fresh_health(after=before_probe+timedelta(microseconds=1))
+        self.gate_stage = 'unit_stop'
         self.systemctl('stop'); first.refresh_from_db(); self.assertEqual(first.health_code, 'stopped')
         self.assertNotEqual(self.systemctl('is-active', check=False).returncode, 0)
+        self.gate_stage = 'unit_restart'
         stopped = timezone.now(); self.systemctl('start')
         second = self.fresh_health(after=stopped, excluding=(first.pk,))
         restarted = timezone.now(); self.systemctl('restart')
@@ -467,26 +581,35 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
         self.assertEqual([path.name for path in self.output.iterdir()], ['.worker.lock'])
 
     def test_killed_real_collection_is_not_reclaimed_and_requires_explicit_failure_and_owner_review(self):
-        self.systemctl('start'); first = self.fresh_health()
+        self.gate_stage = 'unit_start'
+        self.systemctl('start')
+        self.gate_stage = 'worker_health'
+        first = self.fresh_health()
         # Only the fixture Windows readiness input is injected by the existing
         # factory. Signed approval/start/receipt/pins and actual worker health run.
+        self.gate_stage = 'approved_job'
         job = self.succeeded()
+        self.gate_stage = 'collection_claim'
         self.assertTrue(self.source.collection_entered.wait(20), 'actual_collection_source_request_required')
         self.wait_for(lambda: Job.objects.filter(pk=job.pk, collection_state='collecting').exists())
         job.refresh_from_db(); original_envelope, original_receipt = bytes(job.envelope_bytes), bytes(job.terminal_receipt_bytes)
         self.assertEqual(AuditEntry.objects.filter(job=job, action='collection_started').count(), 1)
         self.assertIsNone(job.report)
+        self.gate_stage = 'owner_review'
         with self.assertRaises(ValueError):
             services.reconcile_execution(self.owner, str(job.pk), reason='TEST interrupted claim', evidence_refs=['fixture:claim'])
+        self.gate_stage = 'interrupted_restart'
         killed = timezone.now(); self.systemctl('kill', '--signal=SIGKILL', '--kill-whom=all')
         second = self.fresh_health(after=killed, excluding=(first.pk,))
         # Observe at least one further worker loop and independent health refresh.
+        self.gate_stage = 'durable_claim'
         self.wait_for(lambda: CollectionWorkerLease.objects.filter(pk=second.pk,
             last_seen_at__gt=second.last_seen_at+timedelta(seconds=5)).exists(), timeout=15)
         job.refresh_from_db()
         self.assertEqual((job.collection_state, job.error_code, job.report), ('collecting', '', None))
         self.assertEqual(self.source.collections, 1)
         self.assertEqual(AuditEntry.objects.filter(job=job, action='collection_started').count(), 1)
+        self.gate_stage = 'explicit_recovery'
         self.systemctl('stop')
         recovery = self.run_worker('--recover-interrupted')
         self.assertEqual(recovery.returncode, 0)
@@ -498,10 +621,12 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
         recovery_retry = self.run_worker('--recover-interrupted')
         self.assertEqual(recovery_retry.returncode, 0)
         self.assertIn('interrupted_collections_marked_failed=0', recovery_retry.stdout)
+        self.gate_stage = 'failed_claim'
         self.systemctl('start'); third = self.fresh_health(excluding=(first.pk, second.pk))
         self.wait_for(lambda: CollectionWorkerLease.objects.filter(pk=third.pk,
             last_seen_at__gt=third.last_seen_at+timedelta(seconds=5)).exists(), timeout=15)
         self.assertEqual(self.source.collections, 1)
+        self.gate_stage = 'owner_review'
         self.systemctl('stop')
         services.reconcile_execution(self.owner, str(job.pk), reason='Reviewed disposable TEST interruption',
             evidence_refs=['fixture:worker-ci-interrupted-claim'])
