@@ -12,6 +12,8 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text;
 using System.Security.AccessControl;
+using System.Xml.Linq;
+using System.Xml.XPath;
 
 internal static partial class Program
 {
@@ -23,6 +25,75 @@ internal static partial class Program
             var descriptor=ProvisionFixtureEvent(1);
             Check(descriptor.Id==1 && descriptor.Version==0 && descriptor.Channel==16 && descriptor.Level==4 &&
                 descriptor.Opcode==0 && descriptor.Task==0 && descriptor.Keyword==0x8000000000000000UL,"manifest descriptor mismatch");
+        });
+        Test("provisioning contract seed waits for enable and observed event before unregister",()=>{
+            var calls=new List<string>();var enabledChecks=0;var reads=0;var waits=0;
+            var result=SeedProvisionEvent(
+                ()=>{calls.Add("enabled");return ++enabledChecks==2;},
+                ()=>{calls.Add("write");return 0;},
+                ()=>{calls.Add("read");return ++reads==2 ? FixtureSeedObservation.Observed : FixtureSeedObservation.Empty;},
+                ()=>calls.Add("unregister"),()=>waits>=4,()=>{calls.Add("wait");waits++;});
+            Check(result==0 && string.Join(",",calls)=="enabled,wait,enabled,write,read,wait,read,unregister","seed accepted before enable/readback or released early");
+        });
+        Test("provisioning contract seed never writes while disabled",()=>{
+            var waits=0;var writes=0;var reads=0;var releases=0;
+            var result=SeedProvisionEvent(()=>false,()=>{writes++;return 0;},()=>{reads++;return FixtureSeedObservation.Observed;},
+                ()=>releases++,()=>waits>=3,()=>waits++);
+            Check(result==21 && waits==3 && writes==0 && reads==0 && releases==1,"disabled provider was written or accepted");
+        });
+        foreach(var (observation,expected) in new[]{(FixtureSeedObservation.Empty,23),(FixtureSeedObservation.QueryFailed,24),
+            (FixtureSeedObservation.ReadFailed,25),(FixtureSeedObservation.ReadTimeout,26)})
+            Test("provisioning contract seed fails closed on "+observation,()=>{
+                var waits=0;var writes=0;var releases=0;
+                var result=SeedProvisionEvent(()=>true,()=>{writes++;return 0;},()=>observation,
+                    ()=>releases++,()=>waits>=3,()=>waits++);
+                Check(result==expected && writes==1 && releases==1,"write status substituted for exact seed observation");
+                Check(waits==(observation is FixtureSeedObservation.Empty or FixtureSeedObservation.ReadTimeout ? 3 : 0),"failure retry/deadline wrong");
+            });
+        Test("provisioning contract seed write failure closes without readback",()=>{
+            var reads=0;var releases=0;
+            var result=SeedProvisionEvent(()=>true,()=>5,()=>{reads++;return FixtureSeedObservation.Observed;},
+                ()=>releases++,()=>false,()=>throw new Exception("write failure retried"));
+            Check(result==22 && reads==0 && releases==1,"failed write accepted or leaked registration");
+        });
+        Test("provisioning contract seed observation after deadline cannot pass",()=>{
+            var expired=false;var releases=0;
+            var result=SeedProvisionEvent(()=>true,()=>0,()=>{expired=true;return FixtureSeedObservation.Observed;},
+                ()=>releases++,()=>expired,()=>throw new Exception("waited after deadline"));
+            Check(result==23 && releases==1,"late observation accepted");
+        });
+        foreach(var boundary in new[]{"enable","write"})
+            Test("provisioning contract seed deadline at "+boundary+" stops later operations",()=>{
+                var expired=false;var writes=0;var reads=0;var releases=0;
+                var result=SeedProvisionEvent(()=>{if(boundary=="enable")expired=true;return true;},
+                    ()=>{writes++;expired=true;return 0;},()=>{reads++;return FixtureSeedObservation.Observed;},
+                    ()=>releases++,()=>expired,()=>throw new Exception("waited after deadline"));
+                Check(result==(boundary=="enable" ? 21 : 23) && writes==(boundary=="enable" ? 0 : 1) && reads==0 && releases==1,
+                    "deadline allowed later native operations");
+            });
+        Test("provisioning contract seed exceptions close registration",()=>{
+            var releases=0;
+            try{SeedProvisionEvent(()=>throw new InvalidOperationException(),()=>0,()=>FixtureSeedObservation.Observed,
+                ()=>releases++,()=>false,()=>{});throw new Exception("exception swallowed");}
+            catch(InvalidOperationException){Check(releases==1,"registration leaked on exception");}
+        });
+        Test("provisioning contract seed query rejects wrong provider event version and channel",()=>{
+            var provider=Guid.Parse("62e52a21-b4f7-4e76-baba-f9ed5c198bea");
+            const string channel="AEGIS-Test-0123456789abcdef0123456789abcdef-Read/Operational";
+            foreach(var (guid,id,version,log,expected) in new[]{(provider,1,0,channel,true),(Guid.Empty,1,0,channel,false),
+                (provider,2,0,channel,false),(provider,1,1,channel,false),(provider,1,0,channel+"Other",false)})
+            {
+                var xml=XDocument.Parse($"<Event><System><Provider Guid='{guid:B}'/><EventID>{id}</EventID><Version>{version}</Version><Channel>{log}</Channel></System></Event>");
+                Check((xml.XPathSelectElement(ProvisionSeedQuery(provider,channel))!=null)==expected,"wrong event accepted by seed query");
+            }
+        });
+        Test("provisioning contract seed read distinguishes empty timeout and failures",()=>{
+            Check(ClassifyProvisionSeedRead(true,1,true,0)==FixtureSeedObservation.Observed,"valid handle refused");
+            Check(ClassifyProvisionSeedRead(false,0,false,259)==FixtureSeedObservation.Empty,"empty result confused with failure");
+            Check(ClassifyProvisionSeedRead(false,0,false,1460)==FixtureSeedObservation.ReadTimeout,"timeout confused with empty");
+            foreach(var code in new[]{0,5,15001})Check(ClassifyProvisionSeedRead(false,0,false,code)==FixtureSeedObservation.ReadFailed,"read error accepted");
+            Check(ClassifyProvisionSeedRead(true,0,false,0)==FixtureSeedObservation.ReadFailed &&
+                ClassifyProvisionSeedRead(true,1,false,0)==FixtureSeedObservation.ReadFailed,"missing event handle accepted");
         });
         if(!OperatingSystem.IsWindows())return;
         Test("provisioning contract immutable owner and object-specific permissions",()=>{
@@ -65,6 +136,62 @@ internal static partial class Program
             });
     }
     private static FixtureEvent ProvisionFixtureEvent(ushort id)=>new(){Id=id,Channel=16,Level=4,Keyword=0x8000000000000000UL};
+    private enum FixtureSeedObservation { Observed, Empty, QueryFailed, ReadFailed, ReadTimeout }
+    private static int SeedProvisionEvent(Func<bool> enabled,Func<uint> write,Func<FixtureSeedObservation> read,
+        Action unregister,Func<bool> expired,Action pause)
+    {
+        try
+        {
+            var wrote=false;var observation=FixtureSeedObservation.Empty;
+            while(!expired())
+            {
+                // EventWrite returns success even when no session enabled the
+                // descriptor. Keep one registration alive through observation.
+                if(!wrote && enabled())
+                {
+                    if(expired())break;
+                    if(write()!=0)return 22;
+                    wrote=true;
+                }
+                if(wrote)
+                {
+                    if(expired())break;
+                    observation=read();
+                    if(observation==FixtureSeedObservation.QueryFailed)return 24;
+                    if(observation==FixtureSeedObservation.ReadFailed)return 25;
+                    if(expired())break;
+                    if(observation==FixtureSeedObservation.Observed)return 0;
+                }
+                pause();
+            }
+            return !wrote ? 21 : observation==FixtureSeedObservation.ReadTimeout ? 26 : 23;
+        }
+        finally { unregister(); }
+    }
+    private static string ProvisionSeedQuery(Guid provider,string channel)
+        =>$"*[System[Provider[@Guid='{provider:B}'] and (EventID=1) and (Version=0) and (Channel='{channel}')]]";
+    private static FixtureSeedObservation ClassifyProvisionSeedRead(bool success,uint returned,bool hasHandle,int error)
+        => success ? returned==1 && hasHandle ? FixtureSeedObservation.Observed : FixtureSeedObservation.ReadFailed
+            : error switch {259=>FixtureSeedObservation.Empty,1460=>FixtureSeedObservation.ReadTimeout,_=>FixtureSeedObservation.ReadFailed};
+    private static FixtureSeedObservation ReadProvisionSeed(Guid provider,string channel)
+    {
+        // Query only the generated channel, never a real vendor log. The exact
+        // provider/id/version/channel predicate prevents unrelated seed proof.
+        var events=new nint[1];
+        var query=FixtureEvtQuery(0,channel,ProvisionSeedQuery(provider,channel),0x201);
+        if(query==0)return FixtureSeedObservation.QueryFailed;
+        try
+        {
+            var success=FixtureEvtNext(query,1,events,0,0,out var returned);
+            var error=success ? 0 : Marshal.GetLastPInvokeError();
+            return ClassifyProvisionSeedRead(success,returned,events[0]!=0,error);
+        }
+        finally
+        {
+            foreach(var item in events)if(item!=0)FixtureEvtClose(item);
+            FixtureEvtClose(query);
+        }
+    }
     private sealed record ProvisionInput(string Output, string ProgramFilesAsset, string ProgramDataAsset,
         string State, string FixtureService, string FixtureChannel, string DeniedChannel, string Mode,
         string User, string Password, string ZoneFile);
@@ -92,13 +219,17 @@ internal static partial class Program
                 var input = JsonSerializer.Deserialize<ProvisionInput>(File.ReadAllBytes(args[1])) ?? throw new InvalidDataException();
                 return WindowsServiceHost.Run(input.State, new FixtureServiceApi("AegisAgent"), (_, stop) => OperatingSystem.IsWindows() ? ProvisioningService(input, stop) : Task.FromResult(3));
             }
-            if (args.Length == 3 && args[0] == "--provisioning-event")
+            if (args.Length == 4 && args[0] == "--provisioning-event")
             {
-                if(Environment.GetEnvironmentVariable("GITHUB_ACTIONS")!="true" || Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT")!="github-hosted")return 3;
-                var provider=Guid.Parse(args[1]);
-                if(EventRegister(ref provider,0,0,out var handle)!=0)return 3;
-                try { var descriptor=ProvisionFixtureEvent(ushort.Parse(args[2])); return EventWrite(handle,ref descriptor,0,0)==0 ? 0 : 3; }
-                finally { EventUnregister(handle); }
+                if(Environment.GetEnvironmentVariable("GITHUB_ACTIONS")!="true" || Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT")!="github-hosted" ||
+                    Environment.GetEnvironmentVariable("RUNNER_OS")!="Windows")return 3;
+                if(!Guid.TryParseExact(args[1],"D",out var provider) || provider==Guid.Empty || args[2]!="1" ||
+                    !System.Text.RegularExpressions.Regex.IsMatch(args[3],"^AEGIS-Test-[0-9a-f]{32}-(Read|Denied)/Operational$"))return 3;
+                if(EventRegister(ref provider,0,0,out var handle)!=0)return 20;
+                var descriptor=ProvisionFixtureEvent(1);var watch=Stopwatch.StartNew();
+                return SeedProvisionEvent(()=>EventEnabled(handle,ref descriptor),()=>EventWrite(handle,ref descriptor,0,0),
+                    ()=>ReadProvisionSeed(provider,args[3]),()=>EventUnregister(handle),
+                    ()=>watch.Elapsed>=TimeSpan.FromSeconds(15),()=>Thread.Sleep(50));
             }
             if(args.Length==2 && args[0]=="--provisioning-journal")
             {
@@ -259,6 +390,10 @@ internal static partial class Program
     [DllImport("advapi32.dll",EntryPoint="OpenServiceW",CharSet=CharSet.Unicode)]private static extern nint FixtureOpenServiceW(nint manager,string name,uint access);
     [DllImport("advapi32.dll",EntryPoint="CloseServiceHandle")] [return:MarshalAs(UnmanagedType.Bool)]private static extern bool FixtureCloseServiceHandle(nint handle);
     [DllImport("advapi32.dll")]private static extern uint EventRegister(ref Guid provider,nint callback,nint context,out long handle);
+    [DllImport("advapi32.dll")] [return:MarshalAs(UnmanagedType.U1)]private static extern bool EventEnabled(long handle,ref FixtureEvent descriptor);
     [DllImport("advapi32.dll")]private static extern uint EventWrite(long handle,ref FixtureEvent descriptor,uint count,nint data);
     [DllImport("advapi32.dll")]private static extern uint EventUnregister(long handle);
+    [DllImport("wevtapi.dll",EntryPoint="EvtQuery",CharSet=CharSet.Unicode,SetLastError=true)]private static extern nint FixtureEvtQuery(nint session,string path,string query,uint flags);
+    [DllImport("wevtapi.dll",EntryPoint="EvtNext",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)]private static extern bool FixtureEvtNext(nint query,uint count,[Out]nint[] events,uint timeout,uint flags,out uint returned);
+    [DllImport("wevtapi.dll",EntryPoint="EvtClose")] [return:MarshalAs(UnmanagedType.Bool)]private static extern bool FixtureEvtClose(nint handle);
 }

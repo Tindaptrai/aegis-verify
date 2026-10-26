@@ -138,10 +138,34 @@ foreach($traverseOnly in @($true,$false)){
         ])
 
     @unittest.skipUnless(os.name == 'nt', 'Windows fixture diagnostics contract')
+    def test_event_seed_exit_codes_require_observation_and_preserve_failure_boundaries(self):
+        result = self.fixture_helpers(r'''
+$rows=@()
+foreach($code in @(0,20,21,22,23,24,25,26,3,99)){
+    try { Assert-FixtureSeedExit $code; $rows+=@{exit=$code;failure=$null} }
+    catch { $rows+=@{exit=$code;failure=$_.Exception.Message} }
+}
+ConvertTo-Json -InputObject $rows -Compress
+''', helpers=('Assert-FixtureSeedExit',))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [
+            {'exit': 0, 'failure': None},
+            {'exit': 20, 'failure': 'fixture_event_registration_failed'},
+            {'exit': 21, 'failure': 'fixture_event_not_enabled'},
+            {'exit': 22, 'failure': 'fixture_event_write_failed'},
+            {'exit': 23, 'failure': 'fixture_event_not_observed'},
+            {'exit': 24, 'failure': 'fixture_event_query_failed'},
+            {'exit': 25, 'failure': 'fixture_event_read_failed'},
+            {'exit': 26, 'failure': 'fixture_event_read_timeout'},
+            {'exit': 3, 'failure': 'fixture_event_writer_failed'},
+            {'exit': 99, 'failure': 'fixture_event_writer_failed'},
+        ])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows fixture diagnostics contract')
     def test_channel_setup_diagnostics_accept_only_fixed_codes(self):
         result = self.fixture_helpers(r'''
 $rows=@()
-foreach($message in @('fixture_metadata_tools_missing','fixture_metadata_compile_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed','synthetic-private/key.pem token=value','FIXTURE_EVENT_NOT_OBSERVED')){
+foreach($message in @('fixture_metadata_tools_missing','fixture_metadata_compile_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed','fixture_event_registration_failed','fixture_event_not_enabled','fixture_event_query_failed','fixture_event_read_failed','fixture_event_read_timeout','fixture_event_writer_failed','synthetic-private/key.pem token=value','FIXTURE_EVENT_NOT_OBSERVED')){
     try { throw $message } catch { $rows+=@(Get-FixtureSetupFailure $_) }
 }
 ConvertTo-Json -InputObject $rows -Compress
@@ -150,13 +174,16 @@ ConvertTo-Json -InputObject $rows -Compress
         self.assertEqual(json.loads(result.stdout), [
             'fixture_metadata_tools_missing', 'fixture_metadata_compile_failed',
             'fixture_provider_metadata_invalid', 'fixture_channel_configuration_invalid',
-            'fixture_event_write_failed', 'fixture_event_not_observed', None, None,
+            'fixture_event_write_failed', 'fixture_event_not_observed',
+            'fixture_event_registration_failed', 'fixture_event_not_enabled',
+            'fixture_event_query_failed', 'fixture_event_read_failed',
+            'fixture_event_read_timeout', 'fixture_event_writer_failed', None, None,
         ])
 
     @unittest.skipUnless(os.name == 'nt', 'Windows gate diagnostic boundary')
     def test_outer_gate_accepts_known_setup_failures_and_rejects_unbounded_or_private_codes(self):
         result = self.fixture_helpers(r'''
-$known=@('native_fixture_setup_failed','fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed')
+$known=@('native_fixture_setup_failed','fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed','fixture_event_registration_failed','fixture_event_not_enabled','fixture_event_query_failed','fixture_event_read_failed','fixture_event_read_timeout','fixture_event_writer_failed')
 Assert-GateFixtureFailureCodes $known
 $rejected=0
 foreach($case in @(@('synthetic-private/key.pem token=value'),@(1),(@('native_fixture_setup_failed')*65))){
@@ -166,7 +193,7 @@ foreach($case in @(@('synthetic-private/key.pem token=value'),@(1),(@('native_fi
 @{accepted=$known.Count;rejected=$rejected}|ConvertTo-Json -Compress
 ''', helpers=('Assert-GateFixtureFailureCodes',))
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {'accepted': 11, 'rejected': 3})
+        self.assertEqual(json.loads(result.stdout), {'accepted': 17, 'rejected': 3})
 
     @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell stream contract')
     def test_ps51_origin_fixture_retains_internet_zone_and_inert_file(self):

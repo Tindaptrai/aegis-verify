@@ -17,7 +17,8 @@ function Get-GateError($Record) {
 }
 function Assert-GateFixtureFailureCodes($Failures) {
     $allowed=@('native_fixture_setup_failed','native_fixture_cleanup_failed','native_fixture_assertion_failed','service_primary_identity','state_write_and_immutable_denial','ordinary_user_private_denial','program_files_immutable_loader','program_data_immutable_loader','effective_service_query','effective_channel_read','unrelated_channel_denied','source_mutation_rights_denied','actual_origin_metadata_denial','production_missing_vendor_refuses','actual_scm_grandchild_started','actual_scm_stop_tree_cleanup',
-        'fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed')
+        'fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed',
+        'fixture_event_registration_failed','fixture_event_not_enabled','fixture_event_query_failed','fixture_event_read_failed','fixture_event_read_timeout','fixture_event_writer_failed')
     if(@($Failures).Count -gt 64 -or @($Failures|Where-Object{$_ -isnot [string] -or $_ -cnotin $allowed}).Count){throw 'fixture_result_invalid'}
 }
 function Invoke-GateProcess([string]$Executable,[string[]]$Arguments,[int]$Seconds=300) {

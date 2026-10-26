@@ -88,9 +88,25 @@ function Assert-FixtureChannelMetadata([string]$ProviderName,[guid]$Provider,[st
     } catch { throw 'fixture_channel_configuration_invalid' }
 }
 function Get-FixtureSetupFailure($Record) {
-    $known=@('fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed')
+    $known=@('fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed',
+        'fixture_event_registration_failed','fixture_event_not_enabled','fixture_event_query_failed','fixture_event_read_failed','fixture_event_read_timeout','fixture_event_writer_failed')
     if($Record.Exception.Message -cin $known){return $Record.Exception.Message}
     return $null
+}
+function Assert-FixtureSeedExit([int]$Code) {
+    # Only exit zero proves the TEST writer observed its exact seed. Never copy
+    # child output or native messages into the public result.
+    switch($Code){
+        0 {return}
+        20 {throw 'fixture_event_registration_failed'}
+        21 {throw 'fixture_event_not_enabled'}
+        22 {throw 'fixture_event_write_failed'}
+        23 {throw 'fixture_event_not_observed'}
+        24 {throw 'fixture_event_query_failed'}
+        25 {throw 'fixture_event_read_failed'}
+        26 {throw 'fixture_event_read_timeout'}
+        default {throw 'fixture_event_writer_failed'}
+    }
 }
 function Record-Check([string]$Category,[scriptblock]$Action) {
     if(!$categories.ContainsKey($Category)){$categories[$Category]=[ordered]@{executed=0;passed=0;failed=0;skipped=0}}
@@ -163,9 +179,10 @@ try {
         & "$env:SystemRoot/System32/wevtutil.exe" im $manifest 2>$null | Out-Null;if($LASTEXITCODE -ne 0){throw 'fixture_channel_registration_failed'}
         $installedManifests+=$manifest;$channels+=$channelName;$providers+=$provider
         Assert-FixtureChannelMetadata $providerName ([guid]$provider) $channelName $compiled.resource
-        & $hostExe --provisioning-event $provider 1 2>$null | Out-Null;if($LASTEXITCODE -ne 0){throw 'fixture_event_write_failed'}
-        # EventWrite success alone does not prove a routed/persisted event. Read
-        # this generated channel as administrator before evaluating service ACLs.
+        & $hostExe --provisioning-event $provider 1 $channelName 2>$null | Out-Null
+        Assert-FixtureSeedExit $LASTEXITCODE
+        # Independently read the writer's observed seed as administrator before
+        # evaluating service ACLs. EventWrite success alone is never seed proof.
         # Do not inspect, emit or clear a real vendor channel here.
         $seeded=$false;$seedWatch=[Diagnostics.Stopwatch]::StartNew()
         while(!$seeded -and $seedWatch.Elapsed.TotalSeconds -lt 5){
