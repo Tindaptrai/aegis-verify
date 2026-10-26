@@ -31,7 +31,7 @@ class NativeGateRefusalTests(SimpleTestCase):
         loader = r'''
 $ErrorActionPreference='Stop'
 $tokens=$null;$errors=$null
-foreach($source in @($env:AEGIS_TEST_INSTALLER_SCRIPT,$env:AEGIS_TEST_FIXTURE_SCRIPT,$env:AEGIS_TEST_WRAPPER_SCRIPT,$env:AEGIS_TEST_DIFFERENTIAL_SCRIPT)){
+foreach($source in @($env:AEGIS_TEST_INSTALLER_SCRIPT,$env:AEGIS_TEST_FIXTURE_SCRIPT,$env:AEGIS_TEST_WRAPPER_SCRIPT)){
     if(!$source){continue}
     $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
     if($errors.Count){throw 'fixture_parse_failed'}
@@ -71,6 +71,13 @@ New-FixtureEventManifest $env:AEGIS_TEST_METADATA_ROOT $env:AEGIS_TEST_PROVIDER_
             self.assertEqual(provider_xml.attrib['guid'], '{' + str(provider) + '}')
             self.assertEqual(provider_xml.attrib['resourceFileName'], str(resource_file))
             self.assertEqual(provider_xml.attrib['messageFileName'], str(resource_file))
+            event = provider_xml.find('{*}events/{*}event')
+            self.assertEqual(event.attrib['template'], 'SeedTemplate')
+            templates = provider_xml.findall('{*}templates/{*}template')
+            self.assertEqual(len(templates), 1)
+            self.assertEqual(templates[0].attrib, {'tid': 'SeedTemplate'})
+            self.assertEqual([item.attrib for item in templates[0]],
+                             [{'name': 'Seed', 'inType': 'win:UInt32'}])
             # LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE: no code runs.
             kernel = ctypes.WinDLL('kernel32', use_last_error=True)
             kernel.LoadLibraryExW.argtypes = (ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint32)
@@ -373,216 +380,6 @@ $zone=[string](Get-Content -LiteralPath $env:AEGIS_TEST_ORIGIN_FILE -Stream Zone
             self.assertEqual(data['diagnostics']['code'], 'required_native_prerequisites_missing')
             self.assertIsNone(data['diagnostics']['child_exit_code'])
             self.assertNotIn(str(output), json.dumps(data['diagnostics']))
-
-
-class EventSeedDifferentialTests(SimpleTestCase):
-    """Inert boundaries of the isolated SDK-versus-managed event experiment."""
-    # Reuse only the helper loader, not NativeGateRefusalTests' test inventory.
-    fixture_helpers = NativeGateRefusalTests.fixture_helpers
-
-    @unittest.skipUnless(os.name == 'nt', 'Windows diagnostic manifest variants')
-    def test_differential_manifest_arms_change_only_their_intended_event_factor(self):
-        manifest = ('<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events" '
-                    'xmlns:win="http://manifests.microsoft.com/win/2004/08/windows/events">'
-                    '<instrumentation><events><provider name="Synthetic" guid="{62e52a21-b4f7-4e76-baba-f9ed5c198bea}" '
-                    'symbol="Fixture" resourceFileName="synthetic.dll" messageFileName="synthetic.dll">'
-                    '<channels><channel chid="Operational" name="Synthetic/Operational" type="Operational" '
-                    'value="16" enabled="true" access="synthetic-acl"/></channels><events>'
-                    '<event value="1" version="0" symbol="FixtureEvent" channel="Operational" '
-                    'level="win:Informational"/></events></provider></events></instrumentation></instrumentationManifest>')
-        result = self.fixture_helpers(r'''
-$variants=[ordered]@{}
-foreach($mode in @('control','payload','message','access')){$variants[$mode]=ConvertTo-SeedManifestVariant $env:AEGIS_TEST_SEED_MANIFEST $mode}
-$variants|ConvertTo-Json -Compress
-''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1'),
-                  'AEGIS_TEST_SEED_MANIFEST': manifest}, helpers=('ConvertTo-SeedManifestVariant',))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        variants = json.loads(result.stdout)
-        self.assertEqual(variants['control'], manifest)
-        self.assertEqual(variants['access'], manifest)
-        baseline = ET.fromstring(manifest)
-        base_provider = baseline.find('.//{*}provider')
-        base_event = base_provider.find('{*}events/{*}event')
-        for mode in ('payload', 'message'):
-            root = ET.fromstring(variants[mode])
-            provider = root.find('.//{*}provider')
-            self.assertEqual(provider.attrib, base_provider.attrib)
-            self.assertEqual(ET.tostring(provider.find('{*}channels')), ET.tostring(base_provider.find('{*}channels')))
-            events = provider.findall('{*}events/{*}event')
-            self.assertEqual(len(events), 1)
-            if mode == 'payload':
-                self.assertEqual(events[0].attrib, base_event.attrib | {'template': 'SeedTemplate'})
-                templates = provider.findall('{*}templates/{*}template')
-                self.assertEqual(len(templates), 1)
-                self.assertEqual(templates[0].attrib, {'tid': 'SeedTemplate'})
-                self.assertEqual([child.attrib for child in templates[0]], [{'name': 'Seed', 'inType': 'win:UInt32'}])
-                self.assertIsNone(root.find('{*}localization'))
-            else:
-                self.assertEqual(events[0].attrib, base_event.attrib | {'message': '$(string.SeedMessage)'})
-                self.assertIsNone(provider.find('{*}templates'))
-                resources = root.findall('{*}localization/{*}resources')
-                self.assertEqual(len(resources), 1)
-                self.assertEqual(resources[0].attrib, {'culture': 'en-US'})
-                strings = resources[0].findall('{*}stringTable/{*}string')
-                self.assertEqual([item.attrib for item in strings], [{'id': 'SeedMessage', 'value': 'Synthetic fixture seed.'}])
-
-    @unittest.skipUnless(os.name == 'nt', 'Windows diagnostic ACL variant')
-    def test_differential_access_acl_adds_only_local_service_read_or_traverse(self):
-        result = self.fixture_helpers(r'''
-$existing=[Security.AccessControl.DirectorySecurity]::new()
-$existing.SetSecurityDescriptorSddlForm('O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200A9;;;S-1-5-80-1-2-3-4-5)')
-$before=$existing.GetSecurityDescriptorSddlForm('All');$rows=@()
-foreach($traverse in @($true,$false)){
-    $acl=Get-SeedLocalServiceAcl $existing $traverse
-    $grants=@($acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])|Where-Object{$_.IdentityReference.Value -eq 'S-1-5-19'})
-    if($grants.Count -ne 1){throw 'wrong_service_grant'}
-    $grant=$grants[0]
-    $rows+=@{rights=[int]$grant.FileSystemRights;inheritance=[int]$grant.InheritanceFlags;propagation=[int]$grant.PropagationFlags;allow=$grant.AccessControlType -eq 'Allow'}
-    $acl.RemoveAccessRuleSpecific($grant)
-    if($acl.GetSecurityDescriptorSddlForm('All') -cne $before){throw 'existing_permissions_changed'}
-}
-@{rows=$rows;original_unchanged=$existing.GetSecurityDescriptorSddlForm('All') -ceq $before}|ConvertTo-Json -Depth 4 -Compress
-''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1')},
-            helpers=('Get-FixtureMetadataReadAcl', 'Get-SeedLocalServiceAcl'))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {'original_unchanged': True, 'rows': [
-            dict(rights=0x100020, inheritance=0, propagation=0, allow=True),
-            dict(rights=0x1200A9, inheritance=3, propagation=0, allow=True),
-        ]})
-
-    @unittest.skipUnless(os.name == 'nt', 'Windows diagnostic service facts')
-    def test_differential_service_facts_never_export_arbitrary_account_values(self):
-        result = self.fixture_helpers(r'''
-$rows=@()
-foreach($pair in @(@('NT AUTHORITY\LocalService',1),@('LocalSystem',3),@('NT AUTHORITY\NetworkService',0),@('private-account',4294967295L),@($null,$null),@(7,'private-sid'),@('NT AUTHORITY\LocalService',-1),@('NT AUTHORITY\LocalService',4294967296L))){$rows+=ConvertTo-SeedServiceFacts $pair[0] $pair[1]}
-ConvertTo-Json -InputObject $rows -Compress
-''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1')},
-            helpers=('ConvertTo-SeedServiceFacts',))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), [
-            dict(account='local_service', sid_type=1), dict(account='local_system', sid_type=3),
-            dict(account='network_service', sid_type=0), dict(account='other', sid_type=4294967295),
-            dict(account=None, sid_type=None), dict(account=None, sid_type=None),
-            dict(account='local_service', sid_type=None), dict(account='local_service', sid_type=None),
-        ])
-        self.assertNotIn('private', result.stdout)
-
-    @unittest.skipUnless(os.name == 'nt', 'Windows standalone diagnostic guard')
-    def test_differential_refuses_owner_host_before_creating_output(self):
-        with tempfile.TemporaryDirectory(prefix='aegis-seed-refusal-') as temporary:
-            output = Path(temporary).resolve() / 'result'
-            environment = {key: value for key, value in os.environ.items()
-                           if key.upper() not in {'GITHUB_ACTIONS', 'RUNNER_ENVIRONMENT', 'RUNNER_OS'}}
-            for actions, hosting, platform in (
-                    ('', 'github-hosted', 'Windows'),
-                    ('true', 'self-hosted', 'Windows'),
-                    ('true', 'github-hosted', 'Linux')):
-                with self.subTest(actions=actions, hosting=hosting, platform=platform):
-                    result = subprocess.run([
-                        'powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive', '-File',
-                        str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1'),
-                        '-PackageRoot', str(ROOT), '-OutputRoot', str(output)],
-                        env=environment | {'GITHUB_ACTIONS': actions, 'RUNNER_ENVIRONMENT': hosting,
-                                           'RUNNER_OS': platform},
-                        capture_output=True, text=True, timeout=20)
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn('disposable_ci_required', result.stderr)
-                    self.assertFalse(output.exists())
-
-    @unittest.skipUnless(os.name == 'nt', 'Windows SDK diagnostic source boundary')
-    def test_differential_source_rejects_names_outside_the_generated_channel(self):
-        result = self.fixture_helpers(r'''
-$provider='AEGIS-Test-0123456789abcdef0123456789abcdef-Read'
-$channel=$provider+'/Operational'
-$source=Get-SeedSdkSource $provider $channel
-$rejected=0
-foreach($pair in @(@('private-provider',$channel),@($provider,'System'),@($provider,($channel+'Other')),@(($provider+'"'),$channel))){
-    try { $null=Get-SeedSdkSource $pair[0] $pair[1];throw 'invalid_target_accepted' }
-    catch { if($_.Exception.Message -cne 'seed_sdk_input_invalid'){throw};$rejected++ }
-}
-@{accepted=$source -is [string] -and $source.Length -gt 0;rejected=$rejected}|ConvertTo-Json -Compress
-''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1')},
-            helpers=('Get-SeedSdkSource',))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), {'accepted': True, 'rejected': 4})
-
-    @unittest.skipUnless(os.name == 'nt', 'Windows SDK diagnostic result boundary')
-    def test_differential_result_preserves_null_and_rejects_unbounded_or_private_output(self):
-        result = self.fixture_helpers(r'''
-$first='{"registration_status":0,"generated_enabled":true,"event_enabled":true,"write_status":0,"query_error":0,"exact_observed":false,"elapsed_ms":15000}'
-$second='{"registration_status":4294967295,"generated_enabled":false,"event_enabled":false,"write_status":null,"query_error":4294967295,"exact_observed":false,"elapsed_ms":25000}'
-$valid=@((ConvertFrom-SeedSdkResult $first),(ConvertFrom-SeedSdkResult $second))
-$rejected=0
-foreach($text in @(
-    ($first.Substring(0,$first.Length-1)+',"private":"token-value"}'),
-    ($first -replace '"registration_status":0','"registration_status":-1'),
-    ($first -replace '"registration_status":0','"registration_status":4294967296'),
-    ($first -replace '"registration_status":0','"registration_status":null'),
-    ($first -replace '"generated_enabled":true','"generated_enabled":"true"'),
-    ($first -replace '"write_status":0','"write_status":"0"'),
-    ($first -replace '"elapsed_ms":15000','"elapsed_ms":0.5'),
-    ($first -replace '"elapsed_ms":15000','"elapsed_ms":25001'),
-    ($first -replace ',"query_error":0',''),
-    ('['+$first+']'),($first+$second),(' '*1025), 'private-token'
-)){
-    try { $null=ConvertFrom-SeedSdkResult $text;throw 'invalid_result_accepted' }
-    catch { if($_.Exception.Message -cne 'seed_sdk_output_invalid'){throw};$rejected++ }
-}
-@{valid=$valid;rejected=$rejected}|ConvertTo-Json -Depth 4 -Compress
-''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1')},
-            helpers=('ConvertFrom-SeedSdkResult',))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        data = json.loads(result.stdout)
-        self.assertEqual(data['rejected'], 13)
-        self.assertEqual(data['valid'], [
-            dict(registration_status=0, generated_enabled=True, event_enabled=True,
-                 write_status=0, query_error=0, exact_observed=False, elapsed_ms=15000),
-            dict(registration_status=4294967295, generated_enabled=False, event_enabled=False,
-                 write_status=None, query_error=4294967295, exact_observed=False, elapsed_ms=25000),
-        ])
-        self.assertNotIn('private', result.stdout)
-
-    @unittest.skipUnless(os.name == 'nt', 'Windows Event Log error projection boundary')
-    def test_differential_error_projection_requires_generated_identity_and_strips_source(self):
-        result = self.fixture_helpers(r'''
-$provider=[guid]'62e52a21-b4f7-4e76-baba-f9ed5c198bea'
-$channel='AEGIS-Test-0123456789abcdef0123456789abcdef-Read/Operational'
-function New-ErrorXml($path,$guid,$code){
-    return '<Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event"><EventData><Data Name="ChannelPath">'+$path+'</Data><Data Name="PublisherGuid">'+$guid+'</Data><Data Name="ErrorCode">'+$code+'</Data><Data Name="Other">private-token</Data></EventData></Event>'
-}
-$rows=@()
-foreach($case in @(
-    @($channel,$provider.ToString('B'),'5'),
-    @($channel,'private-provider',''),
-    @('private-channel',$provider.ToString('B'),'0x5'),
-    @($channel,$provider.ToString('B'),'4294967295'),
-    @($channel,$provider.ToString('B'),'private-error'),
-    @($channel,$provider.ToString('B'),'-1'),
-    @($channel,$provider.ToString('B'),'4294967296')
-)){$rows+=ConvertTo-SeedEventLogError (New-ErrorXml $case[0] $case[1] $case[2]) $provider $channel 30}
-$pathMatch=ConvertTo-SeedEventLogError ((New-ErrorXml $channel 'private-provider' '5') -replace 'Name="ChannelPath"','Name="Path"') $provider $channel 22
-$refused=0
-foreach($xml in @((New-ErrorXml 'private-channel' ([guid]::Empty).ToString('B') '5'),'<',('x'*65537),'<Event/>')){
-    if($null -ne (ConvertTo-SeedEventLogError $xml $provider $channel 30)){throw 'foreign_error_accepted'};$refused++
-}
-if($null -ne (ConvertTo-SeedEventLogError (New-ErrorXml $channel $provider.ToString('B') '5') $provider $channel 99)){throw 'unknown_event_accepted'}
-@{rows=$rows;refused=$refused;path_match=$pathMatch}|ConvertTo-Json -Depth 4 -Compress
-''', environment={'AEGIS_TEST_DIFFERENTIAL_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-EventSeedDifferential.ps1')},
-            helpers=('ConvertTo-SeedEventLogError',))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        data = json.loads(result.stdout)
-        self.assertEqual(data['refused'], 4)
-        self.assertEqual(data['path_match'], dict(event_id=22, channel_match=True, provider_match=False, error_code=5))
-        self.assertEqual(data['rows'], [
-            dict(event_id=30, channel_match=True, provider_match=True, error_code=5),
-            dict(event_id=30, channel_match=True, provider_match=False, error_code=None),
-            dict(event_id=30, channel_match=False, provider_match=True, error_code=5),
-            dict(event_id=30, channel_match=True, provider_match=True, error_code=4294967295),
-            dict(event_id=30, channel_match=True, provider_match=True, error_code=None),
-            dict(event_id=30, channel_match=True, provider_match=True, error_code=None),
-            dict(event_id=30, channel_match=True, provider_match=True, error_code=None),
-        ])
-        self.assertNotIn('private', result.stdout)
 
 
 class ExecutionPublishedNativeTests(TransactionTestCase):

@@ -26,6 +26,32 @@ internal static partial class Program
             Check(descriptor.Id==1 && descriptor.Version==0 && descriptor.Channel==16 && descriptor.Level==4 &&
                 descriptor.Opcode==0 && descriptor.Task==0 && descriptor.Keyword==0x8000000000000000UL,"manifest descriptor mismatch");
         });
+        foreach(var mode in new[]{"success","error","exception"})
+            Test("provisioning contract seed payload remains valid and is freed on "+mode,()=>{
+                var descriptor=ProvisionFixtureEvent(1);nint allocation=0;var allocations=0;var releases=0;var writes=0;
+                try
+                {
+                    var result=WriteProvisionEvent(17,ref descriptor,
+                        (long handle,ref FixtureEvent nativeEvent,uint count,ref FixtureEventData data)=>{
+                            writes++;
+                            Check(handle==17 && nativeEvent.Id==1 && nativeEvent.Channel==16,"writer identity changed");
+                            Check(count==1 && data.Pointer!=0 && data.Size==4 && data.Reserved==0,"UInt32 payload descriptor missing");
+                            Check(Marshal.SizeOf<FixtureEventData>()==16 && Marshal.OffsetOf<FixtureEventData>(nameof(FixtureEventData.Size)).ToInt32()==8 &&
+                                Marshal.OffsetOf<FixtureEventData>(nameof(FixtureEventData.Reserved)).ToInt32()==12,"native data descriptor layout wrong");
+                            Check(unchecked((nint)data.Pointer)==allocation && releases==0,"payload released before native write");
+                            GC.Collect(2,GCCollectionMode.Forced,true,true);
+                            var bytes=new byte[4];Marshal.Copy(allocation,bytes,0,bytes.Length);
+                            Check(bytes.SequenceEqual(new byte[]{1,0,0,0}),"native payload does not match win:UInt32 Seed=1");
+                            if(mode=="exception")throw new InvalidOperationException("synthetic native write failure");
+                            return mode=="error" ? 5u : 0u;
+                        },size=>{Check(size==4,"payload allocation size wrong");allocations++;allocation=Marshal.AllocHGlobal(size);return allocation;},
+                        pointer=>{Check(pointer==allocation && releases==0,"wrong payload released");Marshal.FreeHGlobal(pointer);releases++;});
+                    Check(mode!="exception" && result==(mode=="error" ? 5u : 0u),"native write result changed");
+                }
+                catch(InvalidOperationException) when(mode=="exception"){}
+                finally {if(allocation!=0 && releases==0)Marshal.FreeHGlobal(allocation);}
+                Check(allocations==1 && writes==1 && releases==1,"native payload allocation leaked or was released twice");
+            });
         Test("provisioning contract seed waits for enable and observed event before unregister",()=>{
             var calls=new List<string>();var enabledChecks=0;var reads=0;var waits=0;
             var result=SeedProvisionEvent(
@@ -136,6 +162,20 @@ internal static partial class Program
             });
     }
     private static FixtureEvent ProvisionFixtureEvent(ushort id)=>new(){Id=id,Channel=16,Level=4,Keyword=0x8000000000000000UL};
+    private static uint WriteProvisionEvent(long handle,ref FixtureEvent descriptor,FixtureEventWriter write,
+        Func<int,nint> allocate,Action<nint> release)
+    {
+        // Match the fixture manifest's sole win:UInt32 Seed field. Keep its
+        // unmanaged bytes alive until the synchronous EventWrite call returns.
+        var payload=allocate(sizeof(uint));
+        try
+        {
+            Marshal.WriteInt32(payload,1);
+            var data=new FixtureEventData{Pointer=unchecked((ulong)payload.ToInt64()),Size=sizeof(uint),Reserved=0};
+            return write(handle,ref descriptor,1,ref data);
+        }
+        finally { release(payload); }
+    }
     private enum FixtureSeedObservation { Observed, Empty, QueryFailed, ReadFailed, ReadTimeout }
     private static int SeedProvisionEvent(Func<bool> enabled,Func<uint> write,Func<FixtureSeedObservation> read,
         Action unregister,Func<bool> expired,Action pause)
@@ -227,7 +267,7 @@ internal static partial class Program
                     !System.Text.RegularExpressions.Regex.IsMatch(args[3],"^AEGIS-Test-[0-9a-f]{32}-(Read|Denied)/Operational$"))return 3;
                 if(EventRegister(ref provider,0,0,out var handle)!=0)return 20;
                 var descriptor=ProvisionFixtureEvent(1);var watch=Stopwatch.StartNew();
-                return SeedProvisionEvent(()=>EventEnabled(handle,ref descriptor),()=>EventWrite(handle,ref descriptor,0,0),
+                return SeedProvisionEvent(()=>EventEnabled(handle,ref descriptor),()=>WriteProvisionEvent(handle,ref descriptor,EventWrite,Marshal.AllocHGlobal,Marshal.FreeHGlobal),
                     ()=>ReadProvisionSeed(provider,args[3]),()=>EventUnregister(handle),
                     ()=>watch.Elapsed>=TimeSpan.FromSeconds(15),()=>Thread.Sleep(50));
             }
@@ -382,6 +422,8 @@ internal static partial class Program
     [StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)]private struct FixtureServiceEntry{[MarshalAs(UnmanagedType.LPWStr)]public string? Name;public nint Main;}
     [StructLayout(LayoutKind.Sequential)]private struct FixtureStatus{public uint Type,State,Accepted,Win32,Specific,Checkpoint,Wait;}
     [StructLayout(LayoutKind.Sequential)]private struct FixtureEvent{public ushort Id;public byte Version,Channel,Level,Opcode;public ushort Task;public ulong Keyword;}
+    [StructLayout(LayoutKind.Sequential)]private struct FixtureEventData{public ulong Pointer;public uint Size,Reserved;}
+    private delegate uint FixtureEventWriter(long handle,ref FixtureEvent descriptor,uint count,ref FixtureEventData data);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode)] [return:MarshalAs(UnmanagedType.Bool)] private static extern bool StartServiceCtrlDispatcherW([In]FixtureServiceEntry[] entries);
     [DllImport("advapi32.dll",CharSet=CharSet.Unicode)] private static extern nint RegisterServiceCtrlHandlerExW(string name,FixtureControl callback,nint context);
     [DllImport("advapi32.dll")] [return:MarshalAs(UnmanagedType.Bool)]private static extern bool SetServiceStatus(nint handle,ref FixtureStatus status);
@@ -391,7 +433,7 @@ internal static partial class Program
     [DllImport("advapi32.dll",EntryPoint="CloseServiceHandle")] [return:MarshalAs(UnmanagedType.Bool)]private static extern bool FixtureCloseServiceHandle(nint handle);
     [DllImport("advapi32.dll")]private static extern uint EventRegister(ref Guid provider,nint callback,nint context,out long handle);
     [DllImport("advapi32.dll")] [return:MarshalAs(UnmanagedType.U1)]private static extern bool EventEnabled(long handle,ref FixtureEvent descriptor);
-    [DllImport("advapi32.dll")]private static extern uint EventWrite(long handle,ref FixtureEvent descriptor,uint count,nint data);
+    [DllImport("advapi32.dll")]private static extern uint EventWrite(long handle,ref FixtureEvent descriptor,uint count,ref FixtureEventData data);
     [DllImport("advapi32.dll")]private static extern uint EventUnregister(long handle);
     [DllImport("wevtapi.dll",EntryPoint="EvtQuery",CharSet=CharSet.Unicode,SetLastError=true)]private static extern nint FixtureEvtQuery(nint session,string path,string query,uint flags);
     [DllImport("wevtapi.dll",EntryPoint="EvtNext",SetLastError=true)] [return:MarshalAs(UnmanagedType.Bool)]private static extern bool FixtureEvtNext(nint query,uint count,[Out]nint[] events,uint timeout,uint flags,out uint returned);

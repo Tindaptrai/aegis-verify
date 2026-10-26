@@ -183,13 +183,6 @@ jobs:
           }
           "AEGIS_CONNECTION_TEST_EXE=$executable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "AEGIS_CONNECTION_SERVICE_PACKAGE=$package" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Diagnose generated Windows event seed writers
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: |
-          $diagnosticRoot = Join-Path $env:RUNNER_TEMP 'connection-seed-differential'
-          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File scripts/tests/agent/Test-EventSeedDifferential.ps1 -PackageRoot $env:AEGIS_CONNECTION_SERVICE_PACKAGE -OutputRoot $diagnosticRoot
-          if ($LASTEXITCODE -ne 0) { throw 'seed_differential_diagnostic_failed' }
       - name: Require disposable Windows execution categories
         if: runner.os == 'Windows'
         run: |
@@ -234,6 +227,5 @@ jobs:
             ${{ runner.temp }}/connection-verification/builders.xml
             ${{ runner.temp }}/connection-execution-native/execution-native-results.json
             ${{ runner.temp }}/connection-execution-native/fixtures/seed-diagnostic.json
-            ${{ runner.temp }}/connection-seed-differential/event-seed-differential.json
           if-no-files-found: error
           retention-days: 14

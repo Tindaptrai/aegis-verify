@@ -1,8 +1,38 @@
-# AEGIS checkpoint — paused at owner request
+# AEGIS checkpoint — resumed native CI investigation
 
 Date: 2026-10-26 (Asia/Saigon).
-Status: PAUSED. Owner explicitly asked to stop temporarily and will request continuation.
-Do not start reviews, CI, deployment or more implementation until that request.
+Status: RESUMED at the owner's explicit request. The earlier pause is revoked.
+
+The historical checkpoint below records the original pause, not the current task state.
+Tasks 1–6 and the scoped Task7/final code reviews have since been accepted. The native
+Windows acceptance gate remains mandatory; review approval alone does not satisfy it.
+
+## Current continuation
+
+- Branch/worktree and issue remain the same as below.
+- Source `4f098189f67675d7eae0c60b6238742e87fdaad1` passed all four Manager CI jobs
+  in run [40291510662](https://github.com/Tindaptrai/aegis-verify/actions/runs/40291510662).
+  Agent Windows CI failed because the generated fixture channel contained no seed.
+- Diagnostic source `901c01b58e1b47cb8722b76ab3257f3993390258`, run
+  [40300407396](https://github.com/Tindaptrai/aegis-verify/actions/runs/40300407396),
+  isolates the fixture boundary: only the UInt32 payload/template arm observed the
+  exact event (172 ms); empty control, message-only and ACL-only arms remained empty.
+  This is fixture evidence, not a general claim about all zero-payload Windows events.
+- The resulting test-only correction adds one UInt32 Seed=1 field to the generated
+  manifest and C# writer. Enablement, exact event identity, deadlines, ACL assertions
+  and all seven required native categories remain unchanged. Temporary differential
+  experiments are retired from normal CI; source and diagnostic artifact retain the
+  experiment. Failure-only bounded identity diagnostics remain.
+- The same run exposed an existing supervisor test handshake cancellation race.
+  The test now covers cancellation both during and after its handshake with
+  deterministic synchronization. Production supervisor behavior is unchanged.
+- Next: independent review of this correction, then exact-source Agent and Manager
+  CI. Do not merge, deploy or claim Ready before required gates and human lab review.
+- Detailed decisions, local verification and fresh CI results are recorded in
+  `.superpowers/sdd/2026-10-25-windows-web-job/progress.md`; the latest delivered
+  evidence bundle is the portable counterpart. No live VM/scenario work was done.
+
+## Historical pause record (superseded)
 
 ## Resume location
 

@@ -45,21 +45,35 @@ internal static partial class Program
         });
         Test("execution supervisor heartbeat independent and denial cancels owned work", async () =>
         {
-            var heartbeatEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            var executionEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            bool cleaned = false; bool readinessStopped = false;
-            var result = await AgentSupervisor.SuperviseAsync(async token =>
-            { heartbeatEntered.SetResult(); await executionEntered.Task.WaitAsync(token); return 3; }, async token =>
+            foreach (bool cancelDuringHandshake in new[] { true, false })
             {
-                executionEntered.SetResult(); await heartbeatEntered.Task.WaitAsync(token);
-                try { await Task.Delay(Timeout.Infinite, token); }
-                catch (OperationCanceledException) when (token.IsCancellationRequested) { cleaned = true; }
-            }, async token =>
-            {
-                try { await Task.Delay(Timeout.Infinite, token); }
-                catch (OperationCanceledException) when (token.IsCancellationRequested) { readinessStopped = true; }
-            }, CancellationToken.None);
-            Check(result == 3 && cleaned && readinessStopped, "identity failure did not await bounded cleanup");
+                var handshake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var executionEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var readinessEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                bool cleaned = false; bool readinessStopped = false;
+                var result = await AgentSupervisor.SuperviseAsync(async token =>
+                {
+                    if (!cancelDuringHandshake) handshake.SetResult();
+                    await Task.WhenAll(executionEntered.Task, readinessEntered.Task).WaitAsync(token);
+                    return 3;
+                }, async token =>
+                {
+                    try
+                    {
+                        executionEntered.SetResult();
+                        await handshake.Task.WaitAsync(token);
+                        await Task.Delay(Timeout.Infinite, token);
+                    }
+                    finally { cleaned = true; }
+                }, async token =>
+                {
+                    readinessEntered.SetResult();
+                    try { await Task.Delay(Timeout.Infinite, token); }
+                    catch (OperationCanceledException) when (token.IsCancellationRequested) { readinessStopped = true; }
+                }, CancellationToken.None);
+                Check(result == 3 && cleaned && readinessStopped,
+                    $"identity failure did not await bounded cleanup (handshake_pending={cancelDuringHandshake})");
+            }
         });
         Test("execution diagnostics missing state does not create directory and never reports ready", async () =>
         {
