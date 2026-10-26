@@ -3,11 +3,14 @@ import json
 import io
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 import unittest
 import uuid
 import xml.etree.ElementTree as ET
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 from django.test import SimpleTestCase, TransactionTestCase
 from devices.tests import test_connection_agent as presence
 
@@ -17,6 +20,33 @@ CATEGORIES = (
     'immutable_default_ancestors', 'upgrade_rollback_journal', 'policy_denial',
     'published_presence_mtls_missing_vendor',
 )
+PUBLISHED_SUBPHASES = frozenset(('install', 'service_status', 'heartbeat', 'network', 'noexecution',
+                               'missingvendor', 'upgrade', 'uninstall', 'cleanup'))
+PUBLISHED_GATE_STAGES = frozenset(('published_fixture', 'published_authority', 'published_tls',
+    'published_connect', 'published_status', 'published_run', 'published_wait', 'published_native_install',
+    'published_native_restart', 'published_native_reinstall', 'published_native_status', 'published_native_uninstall'))
+PUBLISHED_GATE_CODES = frozenset(('published_cli_failed', 'published_native_failed', 'wait_timeout'))
+PUBLISHED_EXCEPTION_TYPES = frozenset(('AssertionError', 'AttributeError', 'ValueError', 'TypeError',
+    'KeyError', 'IndexError', 'RuntimeError', 'OSError', 'PermissionError', 'FileNotFoundError',
+    'TimeoutError', 'TimeoutExpired'))
+
+
+def published_failure_diagnostic(subphase, error, gate_stage=None, gate_codes=()):
+    """Project fixed labels only; captured output and exception messages stay private."""
+    native_stage = native_code = None
+    if type(error) is AssertionError and len(error.args) == 1 and type(error.args[0]) is str and len(error.args[0]) <= 600:
+        match = re.fullmatch(r'Native (?:Install|Restart|Reinstall|Status|Uninstall|unknown) failed '
+                             r'\[([a-z_]+):([a-z0-9_-]+)\]; output withheld', error.args[0])
+        if match:
+            safe = presence.native_diagnostic(json.dumps(dict(stage=match[1], code=match[2])))
+            if safe is not None:
+                native_stage, native_code = safe.split(':', 1)
+    return dict(subphase=subphase if type(subphase) is str and subphase in PUBLISHED_SUBPHASES else None,
+        exception_type=type(error).__name__ if type(error).__name__ in PUBLISHED_EXCEPTION_TYPES else 'OtherException',
+        gate_stage=gate_stage if type(gate_stage) is str and gate_stage in PUBLISHED_GATE_STAGES else None,
+        gate_codes=sorted({code for code in gate_codes if type(code) is str and code in PUBLISHED_GATE_CODES})
+            if type(gate_codes) in (tuple, list) and len(gate_codes) <= 8 else [],
+        native_stage=native_stage, native_code=native_code)
 
 
 class NativeGateRefusalTests(SimpleTestCase):
@@ -379,7 +409,149 @@ $zone=[string](Get-Content -LiteralPath $env:AEGIS_TEST_ORIGIN_FILE -Stream Zone
             self.assertEqual(data['diagnostics']['stage'], 'prerequisites')
             self.assertEqual(data['diagnostics']['code'], 'required_native_prerequisites_missing')
             self.assertIsNone(data['diagnostics']['child_exit_code'])
+            self.assertIsNone(data['diagnostics']['published'])
             self.assertNotIn(str(output), json.dumps(data['diagnostics']))
+
+
+class PublishedDiagnosticTests(SimpleTestCase):
+    def test_published_failure_projects_only_closed_native_diagnostic(self):
+        error = AssertionError('Native Install failed [installer:service_operation_failed]; output withheld')
+        self.assertEqual(published_failure_diagnostic('install', error, 'published_native_install',
+                                                     ('published_native_failed',)), {
+            'subphase': 'install', 'exception_type': 'AssertionError',
+            'gate_stage': 'published_native_install', 'gate_codes': ['published_native_failed'],
+            'native_stage': 'installer', 'native_code': 'service_operation_failed',
+        })
+        for code in ('win32_5', 'hresult_-2147024891'):
+            row = published_failure_diagnostic('install', AssertionError(
+                f'Native Install failed [installer:{code}]; output withheld'))
+            self.assertEqual(row['native_code'], code)
+
+    def test_published_failure_withholds_private_malformed_and_unbounded_values(self):
+        for message in ('private-path token=value',
+                        'Native Install failed [installer:private-code]; output withheld',
+                        'Native Install failed [private-stage:service_operation_failed]; output withheld',
+                        'Native Install failed [installer:win32_65536]; output withheld',
+                        'Native Install failed [installer:service_operation_failed]; output withheld\n',
+                        'x' * 601):
+            row = published_failure_diagnostic('private-subphase', AssertionError(message),
+                                               'private-stage', ['private-code'] * 100)
+            self.assertEqual(row, dict(subphase=None, exception_type='AssertionError',
+                                       gate_stage=None, gate_codes=[], native_stage=None, native_code=None))
+            self.assertNotIn('private', json.dumps(row))
+        error = type('PrivateExceptionName', (Exception,), {})('private-message')
+        self.assertEqual(published_failure_diagnostic('cleanup', error)['exception_type'], 'OtherException')
+        row = published_failure_diagnostic('cleanup', subprocess.TimeoutExpired('private-command', 120,
+            output='private-output', stderr='private-stderr'))
+        self.assertEqual(row['exception_type'], 'TimeoutExpired')
+        self.assertNotIn('private', json.dumps(row))
+
+    def test_published_report_keeps_original_failure_before_cleanup_and_failed_counts(self):
+        for failure_action in ('Install', 'MissingVendor'):
+            with self.subTest(action=failure_action), tempfile.TemporaryDirectory() as temporary:
+                case = ExecutionPublishedNativeTests('test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default')
+                case.owner = object()
+                case.server = SimpleNamespace(routes=[], execution_reports=[])
+                case.wait_until = Mock()
+                case.assert_network_snapshot = Mock()
+                original = AssertionError('Native Install failed [installer:service_operation_failed]; output withheld')
+
+                def native(action, **kwargs):
+                    if action == failure_action:
+                        case.gate_stage = 'published_native_install' if action == 'Install' else None
+                        case.gate_codes = ('published_native_failed',)
+                        raise original
+                    if action == 'Uninstall':
+                        case.gate_stage = 'published_native_uninstall'
+                        raise subprocess.TimeoutExpired('private-command', 120, stderr='private-stderr')
+                    return dict(service_status='Running', device_id='synthetic-device')
+
+                case.native_phase = native
+                with patch.dict(os.environ, AEGIS_EXECUTION_NATIVE_OUTPUT_ROOT=temporary), \
+                        patch.object(presence, 'create_pairing_code', return_value={'code': 'synthetic-code'}), \
+                        patch.object(presence.Device, 'objects', Mock()):
+                    with self.assertRaises(AssertionError) as caught:
+                        case.test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default()
+                self.assertIs(caught.exception, original)
+                report = json.loads((Path(temporary) / 'published-results.json').read_text(encoding='utf-8'))
+                rows = report['diagnostics']
+                self.assertEqual([row['subphase'] for row in rows],
+                                 ['install'] if failure_action == 'Install' else ['missingvendor', 'uninstall'])
+                self.assertEqual(rows[0]['native_code'], 'service_operation_failed')
+                self.assertEqual(report['categories']['published_presence_mtls_missing_vendor'],
+                                 dict(executed=1, passed=0, failed=1, skipped=0) if failure_action == 'Install'
+                                 else dict(executed=2, passed=1, failed=1, skipped=0))
+                self.assertEqual(report['categories']['upgrade_rollback_journal'],
+                                 dict(executed=0, passed=0, failed=0, skipped=0) if failure_action == 'Install'
+                                 else dict(executed=1, passed=0, failed=1, skipped=0))
+                self.assertNotIn('private', json.dumps(report))
+
+    def test_published_report_captures_postconditions_and_normal_cleanup_without_crediting_checks(self):
+        for failure_subphase in ('upgrade', 'cleanup', None):
+            with self.subTest(subphase=failure_subphase), tempfile.TemporaryDirectory() as temporary:
+                case = ExecutionPublishedNativeTests('test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default')
+                case.owner = object()
+                case.server = SimpleNamespace(routes=[], execution_reports=[{'ready': False}])
+                case.wait_until = Mock()
+                case.assert_network_snapshot = Mock()
+                cleanup_calls = 0
+
+                def native(action, **kwargs):
+                    nonlocal cleanup_calls
+                    if action == 'Cleanup':
+                        cleanup_calls += 1
+                        if failure_subphase == 'cleanup' and cleanup_calls == 1:
+                            raise ValueError('private-cleanup-message')
+                    return dict(service_status='Running', device_id='synthetic-device')
+
+                case.native_phase = native
+                manager = Mock()
+                manager.count.return_value = 2 if failure_subphase == 'upgrade' else 1
+                with patch.dict(os.environ, AEGIS_EXECUTION_NATIVE_OUTPUT_ROOT=temporary), \
+                        patch.object(presence, 'create_pairing_code', return_value={'code': 'synthetic-code'}), \
+                        patch.object(presence.Device, 'objects', manager):
+                    if failure_subphase:
+                        with self.assertRaises(AssertionError if failure_subphase == 'upgrade' else ValueError):
+                            case.test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default()
+                    else:
+                        case.test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default()
+                report = json.loads((Path(temporary) / 'published-results.json').read_text(encoding='utf-8'))
+                self.assertEqual([row['subphase'] for row in report['diagnostics']],
+                                 [failure_subphase] if failure_subphase else [])
+                self.assertEqual(report['categories']['upgrade_rollback_journal'], dict(
+                    executed=1 if failure_subphase == 'upgrade' else 2,
+                    passed=1 if failure_subphase == 'upgrade' else 2, failed=0, skipped=0))
+                self.assertNotIn('private', json.dumps(report))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows gate diagnostic boundary')
+    def test_wrapper_rejects_private_or_unbounded_published_diagnostics(self):
+        record = dict(subphase='install', exception_type='AssertionError', gate_stage='published_native_install',
+                      gate_codes=['published_native_failed'], native_stage='installer', native_code='service_operation_failed')
+        invalid = [[record] * 3, [record | {'raw': 'private-value'}],
+                   [record | {'subphase': 'private-value'}], [record | {'exception_type': 'private-value'}],
+                   [record | {'gate_stage': 'private-value'}], [record | {'gate_codes': ['private-value']}],
+                   [record | {'gate_codes': ['published_native_failed'] * 9}],
+                   [record | {'native_stage': 'private-value'}], [record | {'native_code': 'private-value'}],
+                   [record | {'native_code': 'win32_65536'}], [record | {'native_stage': None}],
+                   [record | {'native_code': None}], None, record]
+        result = NativeGateRefusalTests.fixture_helpers(self, r'''
+$value=$env:AEGIS_TEST_PUBLISHED_INPUT|ConvertFrom-Json
+$accepted=@(ConvertTo-GatePublishedDiagnostics $value.valid @('service_operation_failed'))
+$numeric=@(ConvertTo-GatePublishedDiagnostics $value.numeric @('service_operation_failed'))
+$empty=@(ConvertTo-GatePublishedDiagnostics @() @('service_operation_failed'))
+$rejected=0
+foreach($candidate in $value.invalid){
+    try { $null=ConvertTo-GatePublishedDiagnostics $candidate @('service_operation_failed');throw 'unexpected_acceptance' }
+    catch { if($_.Exception.Message -cne 'published_result_invalid'){throw};$rejected++ }
+}
+@{accepted=$accepted;numeric=$numeric;empty_count=$empty.Count;rejected=$rejected}|ConvertTo-Json -Depth 5 -Compress
+''', environment={'AEGIS_TEST_PUBLISHED_INPUT': json.dumps(dict(valid=[record], invalid=invalid,
+                numeric=[record | {'native_code': code} for code in ('win32_5', 'hresult_-2147024891')]))},
+            helpers=('ConvertTo-GatePublishedDiagnostics',))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), dict(accepted=[record], empty_count=0, rejected=len(invalid),
+            numeric=[record | {'native_code': code} for code in ('win32_5', 'hresult_-2147024891')]))
+        self.assertNotIn('private', result.stdout)
 
 
 class ExecutionPublishedNativeTests(TransactionTestCase):
@@ -424,6 +596,14 @@ class ExecutionPublishedNativeTests(TransactionTestCase):
         rows = {name: dict(executed=0, passed=0, failed=0, skipped=0)
                 for name in ('published_presence_mtls_missing_vendor', 'upgrade_rollback_journal')}
         path = Path(os.environ['AEGIS_EXECUTION_NATIVE_OUTPUT_ROOT']) / 'published-results.json'
+        diagnostics = []
+        subphase = 'install'
+        self.gate_codes = ()
+
+        def record_failure(error):
+            if len(diagnostics) < 2:
+                diagnostics.append(published_failure_diagnostic(subphase, error,
+                    getattr(self, 'gate_stage', None), getattr(self, 'gate_codes', ())))
 
         def check(name, action):
             row = rows[name]
@@ -441,37 +621,55 @@ class ExecutionPublishedNativeTests(TransactionTestCase):
             code = presence.create_pairing_code(actor=self.owner, environment_id='synthetic.execution.service')['code']
 
             def install():
+                nonlocal subphase
                 installed = self.native_phase('Install', code=code)
+                subphase = 'service_status'
                 self.assertEqual(installed['service_status'], 'Running')
+                subphase = 'heartbeat'
                 self.wait_until(lambda: presence.Device.objects.get(pk=installed['device_id']).last_heartbeat_at is not None,
                                 'Published service did not reach real mTLS endpoint')
+                subphase = 'network'
                 self.assert_network_snapshot(presence.Device.objects.get(pk=installed['device_id']))
+                subphase = 'noexecution'
                 self.assertFalse(any('/execution/' in route for route in self.server.routes))
                 return installed['device_id']
 
             identity = check('published_presence_mtls_missing_vendor', install)
 
             def missing_vendor():
+                nonlocal subphase
+                subphase = 'missingvendor'
                 self.native_phase('MissingVendor', identity=identity)
                 self.assertTrue(self.server.execution_reports, 'Configured published service emitted no readiness exchange')
                 self.assertTrue(all(row['ready'] is False for row in self.server.execution_reports))
                 self.assertFalse(any(route.endswith('/poll') or route.endswith('/start') for route in self.server.routes))
 
             check('published_presence_mtls_missing_vendor', missing_vendor)
+            subphase = 'upgrade'
             check('upgrade_rollback_journal', lambda: self.native_phase('ExecutionUpgrade', identity=identity))
             self.assertEqual(presence.Device.objects.count(), 1)
             self.assertFalse(any(route.endswith('/poll') or route.endswith('/start') for route in self.server.routes))
+            subphase = 'uninstall'
             check('upgrade_rollback_journal', lambda: self.native_phase('Uninstall', identity=identity))
             # Cleanup is test-only and requires exact paired UUID plus absence of
             # service/binaries; production uninstall deliberately preserves these.
+            subphase = 'cleanup'
             self.native_phase('Cleanup', identity=identity)
             identity = None
+        except BaseException as error:
+            record_failure(error)
+            raise
         finally:
             if identity:
                 try:
+                    subphase = 'uninstall'
+                    self.gate_codes = ()
                     self.native_phase('Uninstall', identity=identity)
+                    subphase = 'cleanup'
                     self.native_phase('Cleanup', identity=identity)
-                except Exception:
+                except Exception as error:
+                    record_failure(error)
                     rows['upgrade_rollback_journal']['executed'] += 1
                     rows['upgrade_rollback_journal']['failed'] += 1
-            path.write_text(json.dumps(dict(schema_version=1, kind='execution_published_gate', categories=rows)), encoding='utf-8')
+            path.write_text(json.dumps(dict(schema_version=1, kind='execution_published_gate',
+                                           categories=rows, diagnostics=diagnostics)), encoding='utf-8')

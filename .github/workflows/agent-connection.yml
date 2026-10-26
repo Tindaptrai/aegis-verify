@@ -205,8 +205,9 @@ jobs:
           }
           Assert-ClosedGateFields $native.lab_gates @('real_vendor_readiness','scn001_detection','reboot_before_login')
           foreach ($lab in @('real_vendor_readiness','scn001_detection','reboot_before_login')) { if ($native.lab_gates.$lab -ne 'not_executed') { throw 'lab_gate_must_remain_explicit' } }
-          Assert-ClosedGateFields $native.diagnostics @('stage','code','child_exit_code','exception_type','hresult','fixture','failure_codes')
+          Assert-ClosedGateFields $native.diagnostics @('stage','code','child_exit_code','exception_type','hresult','fixture','failure_codes','published')
           if ($native.diagnostics.stage -cne 'complete' -or $null -ne $native.diagnostics.code -or $null -ne $native.diagnostics.exception_type -or $null -ne $native.diagnostics.hresult -or @($native.diagnostics.failure_codes).Count -ne 0 -or ($native.diagnostics.child_exit_code -isnot [int] -and $native.diagnostics.child_exit_code -isnot [long]) -or $native.diagnostics.child_exit_code -ne 0) { throw 'required_windows_diagnostics_inconsistent' }
+          if ($native.diagnostics.published -isnot [array] -or $native.diagnostics.published.Count -ne 0) { throw 'required_windows_published_diagnostics_inconsistent' }
           if ($null -ne $native.diagnostics.fixture) {
             Assert-ClosedGateFields $native.diagnostics.fixture @('stage','exception_type','hresult','line')
             if ($native.diagnostics.fixture.stage -cne 'complete' -or $null -ne $native.diagnostics.fixture.exception_type -or $null -ne $native.diagnostics.fixture.hresult -or ($null -ne $native.diagnostics.fixture.line -and (($native.diagnostics.fixture.line -isnot [int] -and $native.diagnostics.fixture.line -isnot [long]) -or $native.diagnostics.fixture.line -lt 1))) { throw 'required_windows_fixture_diagnostics_inconsistent' }

@@ -6,7 +6,7 @@ $rows=@{};foreach($name in $names){$rows[$name]=[ordered]@{name=$name;executed=0
 $source=if($env:AEGIS_CONNECTION_SOURCE_COMMIT -cmatch '^[0-9a-f]{40}$'){$env:AEGIS_CONNECTION_SOURCE_COMMIT}else{$null}
 $url=if($env:AEGIS_EXECUTION_GATE_URL -match '^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[0-9]+$'){$env:AEGIS_EXECUTION_GATE_URL}else{$null}
 $succeeded=$false;$outputReady=$false
-$diagnostics=[ordered]@{stage='output';code=$null;child_exit_code=$null;exception_type=$null;hresult=$null;fixture=$null;failure_codes=@()}
+$diagnostics=[ordered]@{stage='output';code=$null;child_exit_code=$null;exception_type=$null;hresult=$null;fixture=$null;published=$null;failure_codes=@()}
 function Get-GateError($Record) {
     # Only fixed codes and exception classes; never native text, paths or output.
     $known=@('fresh_output_required','output_reparse_refused','required_native_prerequisites_missing','package_source_mismatch','native_harness_required','gate_timeout','gate_output_invalid','native_gate_result_invalid','native_containment_failed','fixture_result_invalid','native_provisioning_failed','fixture_report_missing','published_result_invalid','published_gate_failed','published_report_missing','gate_category_invalid','gate_counts_invalid')
@@ -20,6 +20,29 @@ function Assert-GateFixtureFailureCodes($Failures) {
         'fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed',
         'fixture_event_registration_failed','fixture_event_not_enabled','fixture_event_query_failed','fixture_event_read_failed','fixture_event_read_timeout','fixture_event_writer_failed')
     if(@($Failures).Count -gt 64 -or @($Failures|Where-Object{$_ -isnot [string] -or $_ -cnotin $allowed}).Count){throw 'fixture_result_invalid'}
+}
+function ConvertTo-GatePublishedDiagnostics($Diagnostics,[string[]]$NativeCodes) {
+    if($Diagnostics -isnot [Array] -or $Diagnostics.Count -gt 2){throw 'published_result_invalid'}
+    $fields=@('subphase','exception_type','gate_stage','gate_codes','native_stage','native_code')
+    $subphases=@('install','service_status','heartbeat','network','noexecution','missingvendor','upgrade','uninstall','cleanup')
+    $types=@('AssertionError','AttributeError','ValueError','TypeError','KeyError','IndexError','RuntimeError','OSError','PermissionError','FileNotFoundError','TimeoutError','TimeoutExpired','OtherException')
+    $stages=@('published_fixture','published_authority','published_tls','published_connect','published_status','published_run','published_wait','published_native_install','published_native_restart','published_native_reinstall','published_native_status','published_native_uninstall')
+    foreach($item in $Diagnostics){
+        if($null -eq $item -or @($item.PSObject.Properties.Name).Count -ne $fields.Count -or @($item.PSObject.Properties.Name|Where-Object{$_ -cnotin $fields}).Count){throw 'published_result_invalid'}
+        if(($null -ne $item.subphase -and ($item.subphase -isnot [string] -or $item.subphase -cnotin $subphases)) -or $item.exception_type -isnot [string] -or $item.exception_type -cnotin $types -or ($null -ne $item.gate_stage -and ($item.gate_stage -isnot [string] -or $item.gate_stage -cnotin $stages))){throw 'published_result_invalid'}
+        if($item.gate_codes -isnot [Array] -or $item.gate_codes.Count -gt 8 -or @($item.gate_codes|Where-Object{$_ -isnot [string] -or $_ -cnotin @('published_cli_failed','published_native_failed','wait_timeout')}).Count){throw 'published_result_invalid'}
+        if(($null -eq $item.native_stage) -ne ($null -eq $item.native_code)){throw 'published_result_invalid'}
+        if($null -ne $item.native_stage){
+            if($item.native_stage -isnot [string] -or $item.native_stage -cnotin @('preflight','installer','configuration','status','restart','uninstall','owner_conflict','helper') -or $item.native_code -isnot [string] -or $item.native_code.Length -gt 128){throw 'published_result_invalid'}
+            $known=$item.native_code -cin $NativeCodes
+            if(!$known -and $item.native_code -cmatch '^(win32|hresult)_(-?(?:0|[1-9][0-9]*))$'){
+                $number=0L;$kind=$Matches[1];$digits=$Matches[2]
+                $known=[long]::TryParse($digits,[ref]$number) -and [string]$number -ceq $digits -and (($kind -ceq 'win32' -and $number -ge 0 -and $number -le 65535) -or ($kind -ceq 'hresult' -and $number -ge -2147483648 -and $number -le 2147483647))
+            }
+            if(!$known){throw 'published_result_invalid'}
+        }
+        [pscustomobject]@{subphase=$item.subphase;exception_type=$item.exception_type;gate_stage=$item.gate_stage;gate_codes=@($item.gate_codes);native_stage=$item.native_stage;native_code=$item.native_code}
+    }
 }
 function Invoke-GateProcess([string]$Executable,[string[]]$Arguments,[int]$Seconds=300) {
     $start=[Diagnostics.ProcessStartInfo]::new();$start.FileName=$Executable
@@ -93,10 +116,11 @@ try {
     $diagnostics.child_exit_code=$published.code
     if(!(Test-Path -LiteralPath (Join-Path $OutputRoot 'published-results.json'))){throw 'published_report_missing'}
     $publicReport=Get-Content -LiteralPath (Join-Path $OutputRoot 'published-results.json') -Raw|ConvertFrom-Json
-    Assert-AgentClosedRecord $publicReport @('schema_version','kind','categories')
+    Assert-AgentClosedRecord $publicReport @('schema_version','kind','categories','diagnostics')
     if($publicReport.schema_version -ne 1 -or $publicReport.kind -cne 'execution_published_gate'){throw 'published_result_invalid'}
+    $diagnostics.published=@(ConvertTo-GatePublishedDiagnostics $publicReport.diagnostics @(Get-Content -LiteralPath (Join-Path $PSScriptRoot 'native-diagnostic-codes.txt')))
     foreach($entry in $publicReport.categories.PSObject.Properties){Add-GateCounts $entry.Name $entry.Value}
-    if($published.code -ne 0){throw 'published_gate_failed'}
+    if($published.code -ne 0 -or $diagnostics.published.Count -ne 0){throw 'published_gate_failed'}
     $succeeded=$true
     $diagnostics.stage='complete'
 }catch{
