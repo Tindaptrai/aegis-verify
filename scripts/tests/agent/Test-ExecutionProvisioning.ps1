@@ -15,6 +15,83 @@ function Set-FixtureInternetOrigin([string]$Path) {
     Set-Content -LiteralPath $Path -Stream Zone.Identifier -Value $zone -Encoding ASCII -NoNewline
     if((Get-Content -LiteralPath $Path -Stream Zone.Identifier -Raw) -cne $zone){throw 'fixture_origin_stream_invalid'}
 }
+function Get-FixtureManifestTools {
+    # Existing SDK/VS prerequisites only. The fixture never downloads toolchains.
+    try {
+        $kits=(Get-ItemProperty -LiteralPath 'HKLM:/SOFTWARE/Microsoft/Windows Kits/Installed Roots' -Name KitsRoot10).KitsRoot10
+        $sdk=Get-ChildItem -LiteralPath (Join-Path $kits 'bin') -Directory |
+            Where-Object {$_.Name -match '^\d+\.\d+\.\d+\.\d+$' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'x64/mc.exe')) -and (Test-Path -LiteralPath (Join-Path $_.FullName 'x64/rc.exe'))} |
+            Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
+        $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+        if(!$sdk -or !(Test-Path -LiteralPath $vswhere -PathType Leaf)){throw 'missing_tools'}
+        $installation=@(& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null)
+        if($LASTEXITCODE -ne 0 -or $installation.Count -ne 1){throw 'missing_tools'}
+        $vc=Get-ChildItem -LiteralPath (Join-Path $installation[0] 'VC/Tools/MSVC') -Directory |
+            Where-Object {$_.Name -match '^\d+\.\d+\.\d+$' -and (Test-Path -LiteralPath (Join-Path $_.FullName 'bin/Hostx64/x64/link.exe'))} |
+            Sort-Object {[version]$_.Name} -Descending | Select-Object -First 1
+        if(!$vc){throw 'missing_tools'}
+        return [pscustomobject]@{mc=Join-Path $sdk.FullName 'x64/mc.exe';rc=Join-Path $sdk.FullName 'x64/rc.exe';link=Join-Path $vc.FullName 'bin/Hostx64/x64/link.exe'}
+    } catch { throw 'fixture_metadata_tools_missing' }
+}
+function Invoke-FixtureCompiler([string]$Executable,[string[]]$Arguments,[string]$Directory) {
+    $start=[Diagnostics.ProcessStartInfo]::new();$start.FileName=$Executable;$start.WorkingDirectory=$Directory
+    $start.Arguments=($Arguments|ForEach-Object{ConvertTo-AgentNativeArgument $_}) -join ' '
+    $start.UseShellExecute=$false;$start.CreateNoWindow=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+    $process=[Diagnostics.Process]::Start($start)
+    try {
+        $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
+        if(!$process.WaitForExit(30000)){try{$process.Kill()}catch{};throw 'fixture_metadata_compile_timeout'}
+        $null=$stdout.GetAwaiter().GetResult();$null=$stderr.GetAwaiter().GetResult()
+        if($process.ExitCode -ne 0){throw 'fixture_metadata_compile_failed'}
+    } finally { $process.Dispose() }
+}
+function New-FixtureEventManifest([string]$Directory,[string]$ProviderName,[guid]$Provider) {
+    if($ProviderName -cnotmatch '^AEGIS-Test-[0-9a-f]{32}-(Read|Denied)$' -or $Provider -eq [guid]::Empty -or (Test-Path -LiteralPath $Directory)){throw 'fixture_metadata_input_invalid'}
+    $tools=Get-FixtureManifestTools
+    New-Item -ItemType Directory -Path $Directory | Out-Null
+    $manifest=Join-Path $Directory 'fixture.man';$resource=Join-Path $Directory 'fixture.dll'
+    $resourceXml=[Security.SecurityElement]::Escape($resource);$channelName=$ProviderName+'/Operational'
+    $xml=@"
+<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events" xmlns:win="http://manifests.microsoft.com/win/2004/08/windows/events"><instrumentation><events><provider name="$ProviderName" guid="{$Provider}" symbol="Fixture" resourceFileName="$resourceXml" messageFileName="$resourceXml"><channels><channel chid="Operational" name="$channelName" type="Operational" value="16" enabled="true" access="O:BAG:SYD:(A;;0xf0007;;;SY)(A;;0x7;;;BA)"/></channels><events><event value="1" version="0" symbol="FixtureEvent" channel="Operational" level="win:Informational"/></events></provider></events></instrumentation></instrumentationManifest>
+"@
+    [IO.File]::WriteAllText($manifest,$xml)
+    # Event Log needs the compiled WEVT_TEMPLATE, not merely a registered XML
+    # file pointing at the unrelated test apphost. This DLL has no entry point.
+    Invoke-FixtureCompiler $tools.mc @('-um','-h',$Directory,'-r',$Directory,$manifest) $Directory
+    Invoke-FixtureCompiler $tools.rc @('/nologo','/fo','fixture.res','fixture.rc') $Directory
+    Invoke-FixtureCompiler $tools.link @('/NOLOGO','/DLL','/NOENTRY','/MACHINE:X64','/OUT:fixture.dll','fixture.res') $Directory
+    if(!(Test-Path -LiteralPath $resource -PathType Leaf)){throw 'fixture_metadata_compile_failed'}
+    return [pscustomobject]@{manifest=$manifest;resource=$resource}
+}
+function Get-FixtureMetadataReadAcl([Security.AccessControl.DirectorySecurity]$Existing,[Security.Principal.SecurityIdentifier]$EventLogSid,[bool]$TraverseOnly) {
+    $acl=[Security.AccessControl.DirectorySecurity]::new()
+    $acl.SetSecurityDescriptorBinaryForm($Existing.GetSecurityDescriptorBinaryForm())
+    $rights=if($TraverseOnly){[Security.AccessControl.FileSystemRights]::Traverse}else{[Security.AccessControl.FileSystemRights]::ReadAndExecute}
+    $inheritance=if($TraverseOnly){[Security.AccessControl.InheritanceFlags]::None}else{[Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit'}
+    $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($EventLogSid,$rights,$inheritance,[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow))
+    return $acl
+}
+function Assert-FixtureChannelMetadata([string]$ProviderName,[guid]$Provider,[string]$ChannelName,[string]$Resource) {
+    try {
+        $metadata=[Diagnostics.Eventing.Reader.ProviderMetadata]::new($ProviderName)
+        try {
+            $events=@($metadata.Events)
+            if($metadata.Id -ne $Provider -or ![string]::Equals($metadata.ResourceFilePath,$Resource,[StringComparison]::OrdinalIgnoreCase) -or
+                $events.Count -ne 1 -or $events[0].Id -ne 1 -or $events[0].Version -ne 0 -or $events[0].LogLink.LogName -cne $ChannelName){throw 'invalid_metadata'}
+        } finally { $metadata.Dispose() }
+    } catch { throw 'fixture_provider_metadata_invalid' }
+    try {
+        $configuration=[Diagnostics.Eventing.Reader.EventLogConfiguration]::new($ChannelName)
+        try {
+            if(!$configuration.IsEnabled -or $configuration.OwningProviderName -cne $ProviderName -or $configuration.LogName -cne $ChannelName){throw 'invalid_channel'}
+        } finally { $configuration.Dispose() }
+    } catch { throw 'fixture_channel_configuration_invalid' }
+}
+function Get-FixtureSetupFailure($Record) {
+    $known=@('fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed')
+    if($Record.Exception.Message -cin $known){return $Record.Exception.Message}
+    return $null
+}
 function Record-Check([string]$Category,[scriptblock]$Action) {
     if(!$categories.ContainsKey($Category)){$categories[$Category]=[ordered]@{executed=0;passed=0;failed=0;skipped=0}}
     $item=$categories[$Category];$item.executed++
@@ -71,15 +148,21 @@ try {
     (Get-Service $fixtureService).WaitForStatus('Running',[TimeSpan]::FromSeconds(20))
     $channels=@();$providers=@()
     $diagnostics.stage='channels'
+    $channelRoot=Join-Path $dataRoot 'channels';New-Item -ItemType Directory -Path $channelRoot | Out-Null
+    try {
+        $eventLogSid=[Security.Principal.NTAccount]::new('NT SERVICE','EventLog').Translate([Security.Principal.SecurityIdentifier])
+        # Only this generated root is traversable. Read access inherits solely
+        # under channels; private state/input/identity siblings stay unchanged.
+        (Get-Item -LiteralPath $dataRoot).SetAccessControl((Get-FixtureMetadataReadAcl (Get-Acl -LiteralPath $dataRoot) $eventLogSid $true))
+        (Get-Item -LiteralPath $channelRoot).SetAccessControl((Get-FixtureMetadataReadAcl (Get-Acl -LiteralPath $channelRoot) $eventLogSid $false))
+    } catch { throw 'fixture_metadata_acl_failed' }
     foreach($suffix in @('Read','Denied')){
         $provider=[Guid]::NewGuid().ToString();$channelName='AEGIS-Test-'+$id+'-'+$suffix+'/Operational';$providerName='AEGIS-Test-'+$id+'-'+$suffix
-        $manifest=Join-Path $dataRoot ($suffix+'.man')
-        $xml=@"
-<instrumentationManifest xmlns="http://schemas.microsoft.com/win/2004/08/events" xmlns:win="http://manifests.microsoft.com/win/2004/08/windows/events"><instrumentation><events><provider name="$providerName" guid="{$provider}" symbol="Fixture" resourceFileName="$hostExe" messageFileName="$hostExe"><channels><channel chid="Operational" name="$channelName" type="Operational" value="16" enabled="true" access="O:BAG:SYD:(A;;0xf0007;;;SY)(A;;0x7;;;BA)"/></channels><events><event value="1" version="0" symbol="FixtureEvent" channel="Operational" level="win:Informational"/></events></provider></events></instrumentation></instrumentationManifest>
-"@
-        [IO.File]::WriteAllText($manifest,$xml)
+        $compiled=New-FixtureEventManifest (Join-Path $channelRoot $suffix) $providerName ([guid]$provider)
+        $manifest=$compiled.manifest
         & "$env:SystemRoot/System32/wevtutil.exe" im $manifest 2>$null | Out-Null;if($LASTEXITCODE -ne 0){throw 'fixture_channel_registration_failed'}
         $installedManifests+=$manifest;$channels+=$channelName;$providers+=$provider
+        Assert-FixtureChannelMetadata $providerName ([guid]$provider) $channelName $compiled.resource
         & $hostExe --provisioning-event $provider 1 2>$null | Out-Null;if($LASTEXITCODE -ne 0){throw 'fixture_event_write_failed'}
         # EventWrite success alone does not prove a routed/persisted event. Read
         # this generated channel as administrator before evaluating service ACLs.
@@ -88,7 +171,7 @@ try {
         while(!$seeded -and $seedWatch.Elapsed.TotalSeconds -lt 5){
             $query=[Diagnostics.Eventing.Reader.EventLogQuery]::new($channelName,[Diagnostics.Eventing.Reader.PathType]::LogName,'*[System[(EventID=1)]]')
             $reader=[Diagnostics.Eventing.Reader.EventLogReader]::new($query)
-            try{$event=$reader.ReadEvent();if($event){try{$seeded=$event.Id -eq 1}finally{$event.Dispose()}}}finally{$reader.Dispose()}
+            try{$event=$reader.ReadEvent();if($event){try{$seeded=$event.Id -eq 1 -and $event.Version -eq 0 -and $event.ProviderId -eq [guid]$provider -and $event.LogName -ceq $channelName}finally{$event.Dispose()}}}finally{$reader.Dispose()}
             if(!$seeded){Start-Sleep -Milliseconds 100}
         }
         if(!$seeded){throw 'fixture_event_not_observed'}
@@ -135,6 +218,7 @@ try {
     $diagnostics.stage='complete'
 } catch {
     $failureCodes+='native_fixture_setup_failed'
+    $setupCode=Get-FixtureSetupFailure $_;if($setupCode){$failureCodes+=$setupCode}
     $type=$_.Exception.GetType().Name
     if($type -cnotin @('RuntimeException','ArgumentException','InvalidOperationException','UnauthorizedAccessException','Win32Exception','IOException','ItemNotFoundException','ParameterBindingException','CommandNotFoundException')){$type='OtherException'}
     $diagnostics.exception_type=$type;$diagnostics.hresult=$_.Exception.HResult;$diagnostics.line=$_.InvocationInfo.ScriptLineNumber

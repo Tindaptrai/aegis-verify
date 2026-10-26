@@ -6,6 +6,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import uuid
+import xml.etree.ElementTree as ET
 from django.test import SimpleTestCase, TransactionTestCase
 from devices.tests import test_connection_agent as presence
 
@@ -18,6 +20,154 @@ CATEGORIES = (
 
 
 class NativeGateRefusalTests(SimpleTestCase):
+    def fixture_helpers(self, command, *, environment=None, helpers=()):
+        """Load selected inert helpers, never the disposable fixture entry."""
+        environment = os.environ | (environment or {}) | {
+            'AEGIS_TEST_FIXTURE_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-ExecutionProvisioning.ps1'),
+            'AEGIS_TEST_INSTALLER_SCRIPT': str(ROOT / 'deploy/agent/windows/Install-Agent.ps1'),
+            'AEGIS_TEST_WRAPPER_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-WindowsExecution.ps1'),
+            'AEGIS_TEST_FIXTURE_HELPERS': ','.join(helpers),
+        }
+        loader = r'''
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+foreach($source in @($env:AEGIS_TEST_INSTALLER_SCRIPT,$env:AEGIS_TEST_FIXTURE_SCRIPT,$env:AEGIS_TEST_WRAPPER_SCRIPT)){
+    $ast=[Management.Automation.Language.Parser]::ParseFile($source,[ref]$tokens,[ref]$errors)
+    if($errors.Count){throw 'fixture_parse_failed'}
+    foreach($name in @('ConvertTo-AgentNativeArgument')+$env:AEGIS_TEST_FIXTURE_HELPERS.Split(',')){
+        $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $name},$false)
+        if($definition){. ([scriptblock]::Create($definition.Extent.Text))}
+    }
+}
+'''
+        return subprocess.run([
+            str(Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', loader + command,
+        ], env=environment, capture_output=True, text=True, timeout=60)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows manifest resource contract')
+    def test_manifest_references_compiled_resources_for_its_own_provider_and_channel(self):
+        """An apphost path without this manifest's WEVT_TEMPLATE cannot substitute."""
+        import ctypes
+        provider = uuid.uuid4()
+        name = f'AEGIS-Test-{uuid.uuid4().hex}-Read'
+        with tempfile.TemporaryDirectory(prefix='aegis-event-metadata-') as temporary:
+            directory = Path(temporary).resolve() / 'metadata & resources'
+            result = self.fixture_helpers(r'''
+New-FixtureEventManifest $env:AEGIS_TEST_METADATA_ROOT $env:AEGIS_TEST_PROVIDER_NAME ([guid]$env:AEGIS_TEST_PROVIDER) | ConvertTo-Json -Compress
+''', environment={
+                'AEGIS_TEST_METADATA_ROOT': str(directory),
+                'AEGIS_TEST_PROVIDER_NAME': name,
+                'AEGIS_TEST_PROVIDER': str(provider),
+            }, helpers=('Get-FixtureManifestTools', 'Invoke-FixtureCompiler', 'New-FixtureEventManifest'))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = json.loads(result.stdout)
+            manifest = Path(output['manifest'])
+            resource_file = Path(output['resource'])
+            self.assertEqual(manifest.parent, directory)
+            self.assertEqual(resource_file.parent, directory)
+            provider_xml = ET.parse(manifest).find('.//{*}provider')
+            self.assertEqual(provider_xml.attrib['guid'], '{' + str(provider) + '}')
+            self.assertEqual(provider_xml.attrib['resourceFileName'], str(resource_file))
+            self.assertEqual(provider_xml.attrib['messageFileName'], str(resource_file))
+            # LOAD_LIBRARY_AS_DATAFILE | LOAD_LIBRARY_AS_IMAGE_RESOURCE: no code runs.
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel.LoadLibraryExW.argtypes = (ctypes.c_wchar_p, ctypes.c_void_p, ctypes.c_uint32)
+            kernel.LoadLibraryExW.restype = ctypes.c_void_p
+            kernel.FindResourceW.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_wchar_p)
+            kernel.FindResourceW.restype = ctypes.c_void_p
+            kernel.SizeofResource.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+            kernel.SizeofResource.restype = ctypes.c_uint32
+            kernel.LoadResource.argtypes = (ctypes.c_void_p, ctypes.c_void_p)
+            kernel.LoadResource.restype = ctypes.c_void_p
+            kernel.LockResource.argtypes = (ctypes.c_void_p,)
+            kernel.LockResource.restype = ctypes.c_void_p
+            kernel.FreeLibrary.argtypes = (ctypes.c_void_p,)
+            module = kernel.LoadLibraryExW(str(resource_file), None, 0x22)
+            self.assertTrue(module, 'Generated metadata DLL could not load as data')
+            try:
+                resource = kernel.FindResourceW(module, 1, 'WEVT_TEMPLATE')
+                self.assertTrue(resource, 'Manifest references a PE without its metadata resource')
+                payload = ctypes.string_at(kernel.LockResource(kernel.LoadResource(module, resource)),
+                                           kernel.SizeofResource(module, resource))
+                self.assertIn(provider.bytes_le, payload)
+                self.assertIn((name + '/Operational').encode('utf-16-le'), payload)
+            finally:
+                kernel.FreeLibrary(module)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows manifest fixture contract')
+    def test_manifest_build_fails_closed_when_installed_toolchain_is_missing(self):
+        with tempfile.TemporaryDirectory(prefix='aegis-event-no-tools-') as temporary:
+            directory = Path(temporary).resolve() / 'metadata'
+            result = self.fixture_helpers(r'''
+function Get-FixtureManifestTools { throw 'fixture_metadata_tools_missing' }
+try { New-FixtureEventManifest $env:AEGIS_TEST_METADATA_ROOT ('AEGIS-Test-'+[guid]::NewGuid().ToString('N')+'-Read') ([guid]::NewGuid()); throw 'unexpected_success' }
+catch { if($_.Exception.Message -cne 'fixture_metadata_tools_missing'){throw}; @{code=$_.Exception.Message}|ConvertTo-Json -Compress }
+''', environment={'AEGIS_TEST_METADATA_ROOT': str(directory)}, helpers=('New-FixtureEventManifest',))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout), {'code': 'fixture_metadata_tools_missing'})
+            self.assertFalse(directory.exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows metadata ACL contract')
+    def test_metadata_acl_preserves_existing_rules_and_cannot_inherit_into_private_siblings(self):
+        result = self.fixture_helpers(r'''
+$sid=[Security.Principal.SecurityIdentifier]::new('S-1-5-80-1-2-3-4-5')
+$original=[Security.AccessControl.DirectorySecurity]::new()
+$original.SetSecurityDescriptorSddlForm('O:BAG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FR;;;S-1-5-80-9-8-7-6-5)')
+$before=$original.GetSecurityDescriptorSddlForm('All')
+$rows=@()
+foreach($traverseOnly in @($true,$false)){
+    $updated=Get-FixtureMetadataReadAcl $original $sid $traverseOnly
+    $rules=@($updated.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]))
+    $grant=@($rules|Where-Object{$_.IdentityReference -eq $sid})
+    if($grant.Count -ne 1 -or @($rules|Where-Object{$_.IdentityReference -ne $sid}).Count -ne 3){throw 'unexpected_acl_change'}
+    $rows+=@{rights=[int]$grant[0].FileSystemRights;inheritance=[int]$grant[0].InheritanceFlags;propagation=[int]$grant[0].PropagationFlags;allow=$grant[0].AccessControlType -eq 'Allow';owner=$updated.GetOwner([Security.Principal.SecurityIdentifier]).Value;protected=$updated.AreAccessRulesProtected}
+    $updated.RemoveAccessRuleSpecific($grant[0])
+    if($updated.GetSecurityDescriptorSddlForm('All') -cne $before){throw 'existing_acl_changed'}
+}
+@{original_unchanged=$original.GetSecurityDescriptorSddlForm('All') -ceq $before;rows=$rows}|ConvertTo-Json -Depth 4 -Compress
+''', helpers=('Get-FixtureMetadataReadAcl',))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = json.loads(result.stdout)
+        self.assertTrue(data['original_unchanged'])
+        self.assertEqual(data['rows'], [
+            dict(rights=0x100020, inheritance=0, propagation=0, allow=True,
+                 owner='S-1-5-32-544', protected=True),
+            dict(rights=0x1200A9, inheritance=3, propagation=0, allow=True,
+                 owner='S-1-5-32-544', protected=True),
+        ])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows fixture diagnostics contract')
+    def test_channel_setup_diagnostics_accept_only_fixed_codes(self):
+        result = self.fixture_helpers(r'''
+$rows=@()
+foreach($message in @('fixture_metadata_tools_missing','fixture_metadata_compile_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed','synthetic-private/key.pem token=value','FIXTURE_EVENT_NOT_OBSERVED')){
+    try { throw $message } catch { $rows+=@(Get-FixtureSetupFailure $_) }
+}
+ConvertTo-Json -InputObject $rows -Compress
+''', helpers=('Get-FixtureSetupFailure',))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), [
+            'fixture_metadata_tools_missing', 'fixture_metadata_compile_failed',
+            'fixture_provider_metadata_invalid', 'fixture_channel_configuration_invalid',
+            'fixture_event_write_failed', 'fixture_event_not_observed', None, None,
+        ])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows gate diagnostic boundary')
+    def test_outer_gate_accepts_known_setup_failures_and_rejects_unbounded_or_private_codes(self):
+        result = self.fixture_helpers(r'''
+$known=@('native_fixture_setup_failed','fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed')
+Assert-GateFixtureFailureCodes $known
+$rejected=0
+foreach($case in @(@('synthetic-private/key.pem token=value'),@(1),(@('native_fixture_setup_failed')*65))){
+    try { Assert-GateFixtureFailureCodes $case; throw 'unexpected_acceptance' }
+    catch { if($_.Exception.Message -cne 'fixture_result_invalid'){throw};$rejected++ }
+}
+@{accepted=$known.Count;rejected=$rejected}|ConvertTo-Json -Compress
+''', helpers=('Assert-GateFixtureFailureCodes',))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'accepted': 11, 'rejected': 3})
+
     @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell stream contract')
     def test_ps51_origin_fixture_retains_internet_zone_and_inert_file(self):
         """Extract only the stream helper; never execute the elevated fixture."""

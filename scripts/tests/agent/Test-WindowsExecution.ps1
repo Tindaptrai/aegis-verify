@@ -15,6 +15,11 @@ function Get-GateError($Record) {
     if($type -cnotin @('RuntimeException','ArgumentException','InvalidOperationException','UnauthorizedAccessException','Win32Exception','IOException','ItemNotFoundException','ParameterBindingException','CommandNotFoundException')){$type='OtherException'}
     return [pscustomobject]@{code=$code;exception_type=$type;hresult=$Record.Exception.HResult}
 }
+function Assert-GateFixtureFailureCodes($Failures) {
+    $allowed=@('native_fixture_setup_failed','native_fixture_cleanup_failed','native_fixture_assertion_failed','service_primary_identity','state_write_and_immutable_denial','ordinary_user_private_denial','program_files_immutable_loader','program_data_immutable_loader','effective_service_query','effective_channel_read','unrelated_channel_denied','source_mutation_rights_denied','actual_origin_metadata_denial','production_missing_vendor_refuses','actual_scm_grandchild_started','actual_scm_stop_tree_cleanup',
+        'fixture_metadata_tools_missing','fixture_metadata_input_invalid','fixture_metadata_compile_timeout','fixture_metadata_compile_failed','fixture_metadata_acl_failed','fixture_channel_registration_failed','fixture_provider_metadata_invalid','fixture_channel_configuration_invalid','fixture_event_write_failed','fixture_event_not_observed')
+    if(@($Failures).Count -gt 64 -or @($Failures|Where-Object{$_ -isnot [string] -or $_ -cnotin $allowed}).Count){throw 'fixture_result_invalid'}
+}
 function Invoke-GateProcess([string]$Executable,[string[]]$Arguments,[int]$Seconds=300) {
     $start=[Diagnostics.ProcessStartInfo]::new();$start.FileName=$Executable
     $start.Arguments=($Arguments|ForEach-Object{ConvertTo-AgentNativeArgument $_}) -join ' '
@@ -75,8 +80,7 @@ try {
     Assert-AgentClosedRecord $fixtureReport.diagnostics @('stage','exception_type','hresult','line')
     if($fixtureReport.diagnostics.stage -cnotin @('prerequisites','import','target_validation','fixture_roots','harness_copy','fixture_assets','local_user','fixture_service','channels','source_descriptors','denied_service','allowed_grants','allowed_service','restore_grants','complete') -or $fixtureReport.diagnostics.exception_type -cnotin @($null,'RuntimeException','ArgumentException','InvalidOperationException','UnauthorizedAccessException','Win32Exception','IOException','ItemNotFoundException','ParameterBindingException','CommandNotFoundException','OtherException') -or ($null -ne $fixtureReport.diagnostics.hresult -and $fixtureReport.diagnostics.hresult -isnot [int]) -or ($null -ne $fixtureReport.diagnostics.line -and ($fixtureReport.diagnostics.line -isnot [int] -or $fixtureReport.diagnostics.line -lt 1))){throw 'fixture_result_invalid'}
     $diagnostics.fixture=$fixtureReport.diagnostics
-    $allowedFailures=@('native_fixture_setup_failed','native_fixture_cleanup_failed','native_fixture_assertion_failed','service_primary_identity','state_write_and_immutable_denial','ordinary_user_private_denial','program_files_immutable_loader','program_data_immutable_loader','effective_service_query','effective_channel_read','unrelated_channel_denied','source_mutation_rights_denied','actual_origin_metadata_denial','production_missing_vendor_refuses','actual_scm_grandchild_started','actual_scm_stop_tree_cleanup')
-    if(@($fixtureReport.failures).Count -gt 64 -or @($fixtureReport.failures|Where-Object{$_ -isnot [string] -or $_ -cnotin $allowedFailures}).Count){throw 'fixture_result_invalid'}
+    Assert-GateFixtureFailureCodes $fixtureReport.failures
     $diagnostics.failure_codes=@($fixtureReport.failures)
     foreach($entry in $fixtureReport.categories.PSObject.Properties){Add-GateCounts $entry.Name $entry.Value}
     if($fixture.code -ne 0 -or @($fixtureReport.failures).Count){throw 'native_provisioning_failed'}
