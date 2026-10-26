@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import sys
 import unittest
 
@@ -93,8 +94,19 @@ def safe_diagnostic(test, err):
         for name in ("minimal_environment_returncode", "library_environment_returncode"):
             value = runtime.get(name)
             if type(value) is int and -255 <= value <= 255: runtime_status[name] = value
+    cleanup = getattr(test, "gate_cleanup_status", None)
+    cleanup_status = {}
+    if type(cleanup) is dict:
+        for name, allowed in (("role", ("root", "source", "python", "private", "unit", "other")),
+                              ("operation", ("unlink", "rmdir", "open", "scandir", "lstat", "other"))):
+            value = cleanup.get(name)
+            if type(value) is str and value in allowed: cleanup_status[name] = value
+        for name, maximum in (("owner_uid", 2147483647), ("mode", 4095)):
+            value = cleanup.get(name)
+            if type(value) is int and 0 <= value <= maximum: cleanup_status[name] = value
     return dict(test_id=diagnostic_id(test), exception_class=exception, frames=frames[-8:],
-                stage=stage, codes=codes, service_status=service_status, runtime_status=runtime_status)
+                stage=stage, codes=codes, service_status=service_status, runtime_status=runtime_status,
+                cleanup_status=cleanup_status)
 
 
 def category_for(identity):
@@ -214,7 +226,70 @@ def write_report(path, value):
         stream.write("\n")
 
 
+def verify_source_commit(workspace, requested, *, run=None):
+    """Read only the exact resolved checkout, with trust lasting one Git command."""
+    if type(requested) is not str or re.fullmatch(r"[0-9a-f]{40}", requested) is None:
+        return None, "invalid_gate_metadata"
+    try:
+        path = Path(workspace)
+        if not path.is_absolute(): return None, "source_workspace_invalid"
+        resolved = path.resolve(strict=True)
+        if resolved != ROOT or not resolved.is_dir(): return None, "source_workspace_invalid"
+    except (OSError, ValueError):
+        return None, "source_workspace_invalid"
+    try:
+        command = ["git", "-c", "safe.directory=", "-c", "safe.directory=" + resolved.as_posix(),
+                   "-C", resolved.as_posix(), "rev-parse", "--verify", "HEAD"]
+        result = (run or subprocess.run)(command, capture_output=True, text=True, timeout=15, check=False)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None, "source_git_unavailable"
+    if result.returncode != 0: return None, "source_git_verification_failed"
+    lines = result.stdout.splitlines()
+    if len(lines) != 1 or re.fullmatch(r"[0-9a-f]{40}", lines[0]) is None:
+        return None, "source_head_invalid"
+    if lines[0] != requested: return None, "source_commit_mismatch"
+    return lines[0], None
+
+
+def verify_source_main(argv):
+    """Stdlib-only early CI check; refusals also get an uploadable artifact."""
+    parser = argparse.ArgumentParser(description=verify_source_main.__doc__)
+    parser.add_argument("--workspace", type=Path, required=True)
+    parser.add_argument("--requested-commit", required=True)
+    parser.add_argument("--github-env", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--run-url", required=True)
+    args = parser.parse_args(argv)
+    requested = args.requested_commit if re.fullmatch(r"[0-9a-f]{40}", args.requested_commit) else None
+    url = args.run_url if re.fullmatch(r"https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+/actions/runs/[0-9]+", args.run_url) else None
+    errors, head = [], None
+    if requested is None or url is None: errors.append("invalid_gate_metadata")
+    if not args.github_env.is_absolute(): errors.append("source_environment_invalid")
+    try:
+        if not errors:
+            head, code = verify_source_commit(args.workspace, requested)
+            if code is not None: errors.append(code)
+            if not errors:
+                # Only the independently verified exact SHA enters later steps.
+                with args.github_env.open("a", encoding="ascii", newline="\n") as stream:
+                    stream.write("AEGIS_MANAGER_SOURCE_COMMIT=" + head + "\n")
+    except Exception:
+        errors.append("source_verification_failed")
+    value = dict(schema_version=1, kind="ci_source_verification", required=True,
+                 requested_source_commit=requested, source_commit=head if not errors else None,
+                 run_url=url, result="failed" if errors else "passed", blocking_codes=sorted(set(errors)))
+    try:
+        write_report(args.output, value)
+    except (OSError, ValueError):
+        print("source_verification_artifact_failed", file=sys.stderr)
+        return 1
+    print(json.dumps(value, sort_keys=True))
+    return 1 if errors else 0
+
+
 def main(argv=None):
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    if arguments[:1] == ["--verify-source"]: return verify_source_main(arguments[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--require", action="append", choices=CATEGORIES, required=True)
     parser.add_argument("--settings", choices=("aegis_manager.test_settings", "aegis_manager.ci_settings"), required=True)
@@ -222,7 +297,7 @@ def main(argv=None):
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--run-url", required=True)
     parser.add_argument("labels", nargs="+")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     result = GateResult(io.StringIO(), True, 0)
     runner = None
     execution_error = None

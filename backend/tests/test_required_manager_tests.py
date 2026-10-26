@@ -2,7 +2,9 @@
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 
@@ -121,6 +123,7 @@ def test_diagnostics_accept_only_closed_stage_status_and_code_values():
     case.gate_service_status = dict(ActiveState="failed", SubState="dead", Result="exit-code", ExecMainStatus=127,
                                     private="PRIVATE_PATH")
     case.gate_runtime_status = dict(minimal_environment_returncode=127, library_environment_returncode=0, private="PRIVATE_KEY")
+    case.gate_cleanup_status = dict(role="private", operation="unlink", owner_uid=0, mode=384, private="PRIVATE_DESCENDANT")
     try:
         raise AssertionError("PRIVATE_CREDENTIAL")
     except AssertionError:
@@ -130,16 +133,19 @@ def test_diagnostics_accept_only_closed_stage_status_and_code_values():
     assert diagnostic["codes"] == ["worker_process_failed"]
     assert diagnostic["service_status"] == dict(ActiveState="failed", SubState="dead", Result="exit-code", ExecMainStatus=127)
     assert diagnostic["runtime_status"] == dict(minimal_environment_returncode=127, library_environment_returncode=0)
+    assert diagnostic["cleanup_status"] == dict(role="private", operation="unlink", owner_uid=0, mode=384)
     assert "PRIVATE" not in json.dumps(diagnostic)
     case.gate_stage = "PRIVATE_STAGE"
     case.gate_service_status = dict(ActiveState="PRIVATE", ExecMainStatus=True)
     case.gate_runtime_status = dict(minimal_environment_returncode="PRIVATE", library_environment_returncode=999999)
+    case.gate_cleanup_status = dict(role="PRIVATE", operation="PRIVATE", owner_uid=True, mode=999999)
     try:
         raise AssertionError("PRIVATE")
     except AssertionError:
         result.addFailure(case, sys.exc_info())
     last = report(result)["diagnostics"][-1]
     assert last["stage"] is None and last["service_status"] == {} and last["runtime_status"] == {}
+    assert last["cleanup_status"] == {}
 
 
 def test_diagnostics_are_bounded_and_external_frames_custom_classes_are_withheld(tmp_path):
@@ -196,12 +202,71 @@ def test_release_workflow_installs_git_before_checkout_and_checks_pure_mode():
     gate = next(step["run"] for step in steps if "--require postgres_execution" in step.get("run", ""))
     assert '--source-commit "$AEGIS_MANAGER_SOURCE_COMMIT"' in gate
     assert '$(git rev-parse HEAD)' not in gate
-    source = next(step["run"] for step in steps if "git rev-parse --verify HEAD" in step.get("run", ""))
-    assert 'test "$source_commit" = "$REQUESTED_SOURCE_COMMIT"' in source
-    assert 'AEGIS_MANAGER_SOURCE_COMMIT=$source_commit' in source and '"$GITHUB_ENV"' in source
+    source = next(step["run"] for step in steps if "--verify-source" in step.get("run", ""))
+    assert '--workspace "$GITHUB_WORKSPACE"' in source
+    assert '--requested-commit "$REQUESTED_SOURCE_COMMIT"' in source
+    assert '--github-env "$GITHUB_ENV"' in source
+    assert '--output "$RUNNER_TEMP/manager-postgres-source.json"' in source
+    artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@"))
+    assert artifact["if"] == "always()" and "manager-postgres-source.json" in artifact["with"]["path"]
     agent = yaml.safe_load((ROOT / ".github/workflows/agent-connection.yml").read_text())
     script = next(step["run"] for step in agent["jobs"]["native-connection"]["steps"]
                   if "Test-InstallerContracts.ps1" in step.get("run", ""))
     assert "Test-InstallerContracts.ps1 -Pure" in script
     assert script.count("Test-InstallerContracts.ps1") == 2
     assert "Test-InstallerContracts.ps1 -Pure\n  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in script
+
+
+def test_source_verifier_uses_only_command_scoped_exact_resolved_workspace_trust():
+    gate = gate_module()
+    source = ROOT.resolve().as_posix()
+    expected = subprocess.check_output(["git", "-c", "safe.directory=", "-c", "safe.directory=" + source,
+                                       "-C", source, "rev-parse", "--verify", "HEAD"], text=True).strip()
+    environment = dict(os.environ, GIT_TEST_ASSUME_DIFFERENT_OWNER="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+    refused = subprocess.run(["git", "-c", "safe.directory=", "-C", source, "rev-parse", "--verify", "HEAD"],
+                             env=environment, capture_output=True, text=True)
+    assert refused.returncode == 128, "Git ownership guard must be exercised without changing OS ownership"
+    calls = []
+    def run(arguments, **kwargs):
+        calls.append(arguments)
+        return subprocess.run(arguments, env=environment, **kwargs)
+    head, code = gate.verify_source_commit(ROOT, expected, run=run)
+    assert (head, code) == (expected, None)
+    assert calls == [["git", "-c", "safe.directory=", "-c", "safe.directory=" + source,
+                      "-C", source, "rev-parse", "--verify", "HEAD"]]
+    head, code = gate.verify_source_commit(ROOT, "a" * 40 if expected != "a" * 40 else "b" * 40, run=run)
+    assert head is None and code == "source_commit_mismatch"
+
+
+def test_source_refusal_writes_failed_artifact_and_never_propagates_unverified_sha(tmp_path, monkeypatch, capsys):
+    gate = gate_module()
+    monkeypatch.setattr(gate, "verify_source_commit", lambda *args, **kwargs: (None, "source_git_verification_failed"))
+    path, environment = tmp_path / "source.json", tmp_path / "github-env"
+    result = gate.verify_source_main(["--workspace", str(ROOT), "--requested-commit", "a" * 40,
+        "--github-env", str(environment), "--output", str(path),
+        "--run-url", "https://github.com/example/project/actions/runs/1"])
+    value = json.loads(path.read_text())
+    assert result == 1 and value["kind"] == "ci_source_verification" and value["result"] == "failed"
+    assert value["source_commit"] is None and value["blocking_codes"] == ["source_git_verification_failed"]
+    assert not environment.exists()
+    assert str(ROOT) not in capsys.readouterr().out
+
+
+def test_source_verifier_rejects_other_workspaces_and_invalid_metadata_without_git(tmp_path):
+    gate = gate_module()
+    def forbidden(*args, **kwargs): raise AssertionError("Git must not run outside the exact checkout")
+    assert gate.verify_source_commit(tmp_path, "a" * 40, run=forbidden) == (None, "source_workspace_invalid")
+    assert gate.verify_source_commit(tmp_path / "absent", "a" * 40, run=forbidden) == (None, "source_workspace_invalid")
+    assert gate.verify_source_commit(ROOT, "PRIVATE_INVALID_SHA", run=forbidden) == (None, "invalid_gate_metadata")
+
+
+def test_verified_source_propagates_exact_sha_and_preserves_environment_file(tmp_path, monkeypatch):
+    gate = gate_module()
+    monkeypatch.setattr(gate, "verify_source_commit", lambda *args, **kwargs: ("a" * 40, None))
+    path, environment = tmp_path / "source.json", tmp_path / "github-env"
+    environment.write_text("EXISTING=preserved\n")
+    result = gate.verify_source_main(["--workspace", str(ROOT), "--requested-commit", "a" * 40,
+        "--github-env", str(environment), "--output", str(path),
+        "--run-url", "https://github.com/example/project/actions/runs/1"])
+    assert result == 0 and json.loads(path.read_text())["source_commit"] == "a" * 40
+    assert environment.read_text() == "EXISTING=preserved\nAEGIS_MANAGER_SOURCE_COMMIT=" + "a" * 40 + "\n"

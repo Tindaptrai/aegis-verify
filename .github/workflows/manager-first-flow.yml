@@ -116,10 +116,7 @@ jobs:
         env:
           REQUESTED_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
-          source_commit=$(git rev-parse --verify HEAD)
-          test "$source_commit" = "$REQUESTED_SOURCE_COMMIT"
-          python -c 'import re,sys; sys.exit(0 if re.fullmatch("[0-9a-f]{40}",sys.argv[1]) else 1)' "$source_commit"
-          echo "AEGIS_MANAGER_SOURCE_COMMIT=$source_commit" >> "$GITHUB_ENV"
+          python scripts/run_required_manager_tests.py --verify-source --workspace "$GITHUB_WORKSPACE" --requested-commit "$REQUESTED_SOURCE_COMMIT" --github-env "$GITHUB_ENV" --output "$RUNNER_TEMP/manager-postgres-source.json" --run-url "$AEGIS_EXECUTION_GATE_URL"
       - name: Install isolated test runtime
         run: |
           apt-get update
@@ -141,7 +138,9 @@ jobs:
         if: always()
         with:
           name: Manager-PostgreSQL-required-${{ github.run_id }}
-          path: ${{ runner.temp }}/manager-postgres-results.json
+          path: |
+            ${{ runner.temp }}/manager-postgres-source.json
+            ${{ runner.temp }}/manager-postgres-results.json
           if-no-files-found: error
 
 
