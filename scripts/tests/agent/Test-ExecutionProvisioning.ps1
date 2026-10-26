@@ -108,6 +108,61 @@ function Assert-FixtureSeedExit([int]$Code) {
         default {throw 'fixture_event_writer_failed'}
     }
 }
+function ConvertTo-FixtureSeedIdentity($Event,[guid]$Provider,[string]$Channel) {
+    # Never serialize the record or any source strings, including its payload.
+    $version=if($Event.Version -is [byte]){[int]$Event.Version}else{$null}
+    $idMatch=$Event.Id -is [int] -and $Event.Id -eq 1
+    $versionMatch=$null -ne $version -and $version -eq 0
+    $providerMatch=$Event.ProviderId -is [guid] -and $Event.ProviderId -eq $Provider
+    $channelMatch=$Event.LogName -is [string] -and $Event.LogName -ceq $Channel
+    return [ordered]@{
+        id_present=$null -ne $Event.Id;version_present=$null -ne $Event.Version
+        provider_present=$null -ne $Event.ProviderId;channel_present=$null -ne $Event.LogName
+        id_match=$idMatch;version_match=$versionMatch;provider_match=$providerMatch;channel_match=$channelMatch
+        all_identity_match=$idMatch -and $versionMatch -and $providerMatch -and $channelMatch;event_version=$version
+    }
+}
+function Read-FixtureSeedDiagnosticSample($Reader,[guid]$Provider,[string]$Channel,[scriptblock]$Expired) {
+    $sample=[ordered]@{wildcard_observed=$false;exact_identity_observed=$false;examined_count=0;reader_error_code=$null;events=@()}
+    try {
+        while($sample.examined_count -lt 8 -and !(& $Expired)){
+            $record=$Reader.ReadEvent([TimeSpan]::FromMilliseconds(250))
+            if($null -eq $record){break}
+            try {
+                if(& $Expired){break}
+                $sample.wildcard_observed=$true;$sample.examined_count++
+                $identity=ConvertTo-FixtureSeedIdentity $record $Provider $Channel
+                $sample.events+=@($identity)
+                if($identity.all_identity_match){$sample.exact_identity_observed=$true}
+            } finally { $record.Dispose() }
+        }
+    } catch { $sample.reader_error_code=[int]$_.Exception.GetBaseException().HResult }
+    return $sample
+}
+function Save-FixtureSeedDiagnostic([guid]$Provider,[string]$Channel,[int]$Code,[string]$OutputRoot) {
+    if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows'){throw 'disposable_ci_required'}
+    if($Provider -eq [guid]::Empty -or $Channel -cnotmatch '^AEGIS-Test-[0-9a-f]{32}-(Read|Denied)/Operational$'){throw 'fixture_metadata_input_invalid'}
+    $sample=[ordered]@{wildcard_observed=$false;exact_identity_observed=$false;examined_count=0;reader_error_code=$null;events=@()}
+    $watch=[Diagnostics.Stopwatch]::StartNew();$reader=$null
+    try {
+        # Inspect only the same generated channel, once, with no identity filter.
+        $query=[Diagnostics.Eventing.Reader.EventLogQuery]::new($Channel,[Diagnostics.Eventing.Reader.PathType]::LogName,'*')
+        $query.ReverseDirection=$true
+        $reader=[Diagnostics.Eventing.Reader.EventLogReader]::new($query)
+        $sample=Read-FixtureSeedDiagnosticSample $reader $Provider $Channel {$watch.Elapsed.TotalSeconds -ge 3}
+    } catch { $sample.reader_error_code=[int]$_.Exception.GetBaseException().HResult }
+    finally { if($null -ne $reader){$reader.Dispose()} }
+    $source=if($env:AEGIS_CONNECTION_SOURCE_COMMIT -cmatch '^[0-9a-f]{40}$'){$env:AEGIS_CONNECTION_SOURCE_COMMIT}else{$null}
+    $result=[ordered]@{schema_version=1;kind='windows_fixture_seed_diagnostic';source_commit=$source;child_exit_code=$Code;sample=$sample}
+    $bytes=[Text.Encoding]::UTF8.GetBytes(($result|ConvertTo-Json -Depth 5 -Compress))
+    $stream=[IO.FileStream]::new((Join-Path $OutputRoot 'seed-diagnostic.json'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try{$stream.Write($bytes,0,$bytes.Length)}finally{$stream.Dispose()}
+}
+function Complete-FixtureSeed([int]$Code,[guid]$Provider,[string]$Channel,[string]$OutputRoot) {
+    # Best-effort diagnosis must preserve the native result even if it fails.
+    if($Code -ne 0){try{Save-FixtureSeedDiagnostic $Provider $Channel $Code $OutputRoot}catch{}}
+    Assert-FixtureSeedExit $Code
+}
 function Record-Check([string]$Category,[scriptblock]$Action) {
     if(!$categories.ContainsKey($Category)){$categories[$Category]=[ordered]@{executed=0;passed=0;failed=0;skipped=0}}
     $item=$categories[$Category];$item.executed++
@@ -180,7 +235,8 @@ try {
         $installedManifests+=$manifest;$channels+=$channelName;$providers+=$provider
         Assert-FixtureChannelMetadata $providerName ([guid]$provider) $channelName $compiled.resource
         & $hostExe --provisioning-event $provider 1 $channelName 2>$null | Out-Null
-        Assert-FixtureSeedExit $LASTEXITCODE
+        $seedExit=$LASTEXITCODE
+        Complete-FixtureSeed $seedExit ([guid]$provider) $channelName $OutputRoot
         # Independently read the writer's observed seed as administrator before
         # evaluating service ACLs. EventWrite success alone is never seed proof.
         # Do not inspect, emit or clear a real vendor channel here.

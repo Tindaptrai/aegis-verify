@@ -226,5 +226,6 @@ jobs:
             ${{ runner.temp }}/connection-verification/*.json
             ${{ runner.temp }}/connection-verification/builders.xml
             ${{ runner.temp }}/connection-execution-native/execution-native-results.json
+            ${{ runner.temp }}/connection-execution-native/fixtures/seed-diagnostic.json
           if-no-files-found: error
           retention-days: 14

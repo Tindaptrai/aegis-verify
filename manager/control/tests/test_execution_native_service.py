@@ -162,6 +162,126 @@ ConvertTo-Json -InputObject $rows -Compress
         ])
 
     @unittest.skipUnless(os.name == 'nt', 'Windows fixture diagnostics contract')
+    def test_seed_diagnostic_projects_only_bounded_identity_fields(self):
+        result = self.fixture_helpers(r'''
+$provider=[guid]'62e52a21-b4f7-4e76-baba-f9ed5c198bea'
+$channel='AEGIS-Test-0123456789abcdef0123456789abcdef-Read/Operational'
+$rows=@()
+foreach($record in @(
+    [pscustomobject]@{Id=1;Version=[byte]0;ProviderId=$provider;LogName=$channel;Message='private-payload'},
+    [pscustomobject]@{Id=1;Version=$null;ProviderId=$provider;LogName=$channel},
+    [pscustomobject]@{Id=2;Version=[byte]1;ProviderId=[guid]::Empty;LogName='private-channel'},
+    [pscustomobject]@{Id=$null;Version=$null;ProviderId=$null;LogName=$null},
+    [pscustomobject]@{Id='private-id';Version='private-version';ProviderId='private-provider';LogName=7}
+)){$rows+=ConvertTo-FixtureSeedIdentity $record $provider $channel}
+ConvertTo-Json -InputObject $rows -Compress
+''', helpers=('ConvertTo-FixtureSeedIdentity',))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = json.loads(result.stdout)
+        fields = {'id_present', 'version_present', 'provider_present', 'channel_present',
+                  'id_match', 'version_match', 'provider_match', 'channel_match',
+                  'all_identity_match', 'event_version'}
+        self.assertTrue(all(set(row) == fields for row in rows))
+        self.assertEqual(rows[0], dict.fromkeys(fields - {'event_version'}, True) | {'event_version': 0})
+        self.assertFalse(rows[1]['version_present'])
+        self.assertIsNone(rows[1]['event_version'])
+        self.assertFalse(rows[1]['all_identity_match'])
+        self.assertEqual(rows[2]['event_version'], 1)
+        self.assertTrue(all(not rows[2][key] for key in fields if key.endswith('match')))
+        self.assertEqual(rows[3], dict.fromkeys(fields - {'event_version'}, False) | {'event_version': None})
+        self.assertIsNone(rows[4]['event_version'])
+        self.assertFalse(rows[4]['all_identity_match'])
+        self.assertNotIn('private-', result.stdout)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows fixture diagnostics contract')
+    def test_seed_diagnostic_sample_bounds_reads_and_disposes_records(self):
+        result = self.fixture_helpers(r'''
+$provider=[guid]'62e52a21-b4f7-4e76-baba-f9ed5c198bea'
+$channel='AEGIS-Test-0123456789abcdef0123456789abcdef-Read/Operational'
+$rows=@()
+foreach($mode in @('full','empty','error','expired','late')){
+    $script:reads=0;$script:disposed=0;$script:expired=$mode -eq 'expired'
+    $reader=[pscustomobject]@{Mode=$mode;Provider=$provider;Channel=$channel}
+    $reader|Add-Member ScriptMethod ReadEvent {
+        param($timeout)
+        if($timeout.TotalMilliseconds -le 0 -or $timeout.TotalMilliseconds -gt 250){throw 'invalid_timeout'}
+        $script:reads++
+        if($this.Mode -eq 'empty'){return $null}
+        if($this.Mode -eq 'error'){throw [InvalidOperationException]::new('private-reader-message')}
+        if($this.Mode -eq 'late'){$script:expired=$true}
+        $record=[pscustomobject]@{Id=1;Version=[byte]0;ProviderId=$this.Provider;LogName=$this.Channel}
+        $record|Add-Member ScriptMethod Dispose {$script:disposed++}
+        return $record
+    }
+    $sample=Read-FixtureSeedDiagnosticSample $reader $provider $channel {$script:expired}
+    $rows+=@{mode=$mode;reads=$script:reads;disposed=$script:disposed;sample=$sample}
+}
+ConvertTo-Json -InputObject $rows -Depth 5 -Compress
+''', helpers=('ConvertTo-FixtureSeedIdentity', 'Read-FixtureSeedDiagnosticSample'))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {row['mode']: row for row in json.loads(result.stdout)}
+        full = rows['full']
+        self.assertEqual((full['reads'], full['disposed'], full['sample']['examined_count']), (8, 8, 8))
+        self.assertTrue(full['sample']['wildcard_observed'])
+        self.assertTrue(full['sample']['exact_identity_observed'])
+        self.assertEqual(len(full['sample']['events']), 8)
+        self.assertIsNone(full['sample']['reader_error_code'])
+        self.assertEqual(rows['empty']['reads'], 1)
+        self.assertFalse(rows['empty']['sample']['wildcard_observed'])
+        self.assertEqual(rows['error']['sample']['reader_error_code'], -2146233079)
+        self.assertEqual(rows['expired']['reads'], 0)
+        self.assertEqual((rows['late']['reads'], rows['late']['disposed']), (1, 1))
+        self.assertFalse(rows['late']['sample']['wildcard_observed'])
+        self.assertNotIn('private-reader-message', result.stdout)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows fixture diagnostics contract')
+    def test_seed_diagnostic_refuses_owner_host_and_preserves_original_exit(self):
+        with tempfile.TemporaryDirectory(prefix='aegis-seed-diagnostic-') as temporary:
+            result = self.fixture_helpers(r'''
+$provider=[guid]'62e52a21-b4f7-4e76-baba-f9ed5c198bea'
+$channel='AEGIS-Test-0123456789abcdef0123456789abcdef-Read/Operational'
+$refused=0
+foreach($case in @(@('','github-hosted','Windows'),@('true','self-hosted','Windows'),@('true','github-hosted','Linux'))){
+    $env:GITHUB_ACTIONS=$case[0];$env:RUNNER_ENVIRONMENT=$case[1];$env:RUNNER_OS=$case[2]
+    try { Save-FixtureSeedDiagnostic $provider $channel 23 $env:AEGIS_TEST_DIAGNOSTIC_ROOT;throw 'diagnostic_did_not_refuse' }
+    catch { if($_.Exception.Message -cne 'disposable_ci_required'){throw};$refused++ }
+}
+$env:GITHUB_ACTIONS='true';$env:RUNNER_ENVIRONMENT='github-hosted';$env:RUNNER_OS='Windows'
+$invalid=0
+foreach($case in @(@([guid]::Empty,$channel),@($provider,'System'),@($provider,($channel+"'")))){
+    try { Save-FixtureSeedDiagnostic $case[0] $case[1] 23 $env:AEGIS_TEST_DIAGNOSTIC_ROOT;throw 'diagnostic_did_not_refuse' }
+    catch { if($_.Exception.Message -cne 'fixture_metadata_input_invalid'){throw};$invalid++ }
+}
+$script:diagnosticCalls=0
+function Save-FixtureSeedDiagnostic {$script:diagnosticCalls++;$global:LASTEXITCODE=0;throw 'private-diagnostic-error'}
+$codes=@()
+foreach($code in @(0,20,21,22,23,24,25,26,99)){
+    try { Complete-FixtureSeed $code $provider $channel $env:AEGIS_TEST_DIAGNOSTIC_ROOT;$codes+=@{exit=$code;failure=$null} }
+    catch { $codes+=@{exit=$code;failure=$_.Exception.Message} }
+}
+@{refused=$refused;invalid=$invalid;diagnostic_calls=$script:diagnosticCalls;codes=$codes}|ConvertTo-Json -Depth 4 -Compress
+''', environment={'GITHUB_ACTIONS': '', 'RUNNER_ENVIRONMENT': '', 'RUNNER_OS': '',
+                  'AEGIS_TEST_DIAGNOSTIC_ROOT': temporary},
+                helpers=('Save-FixtureSeedDiagnostic', 'Complete-FixtureSeed', 'Assert-FixtureSeedExit'))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+        output = json.loads(result.stdout)
+        self.assertEqual(output['refused'], 3)
+        self.assertEqual(output['invalid'], 3)
+        self.assertEqual(output['diagnostic_calls'], 8)
+        self.assertEqual(output['codes'], [
+            {'exit': 0, 'failure': None},
+            {'exit': 20, 'failure': 'fixture_event_registration_failed'},
+            {'exit': 21, 'failure': 'fixture_event_not_enabled'},
+            {'exit': 22, 'failure': 'fixture_event_write_failed'},
+            {'exit': 23, 'failure': 'fixture_event_not_observed'},
+            {'exit': 24, 'failure': 'fixture_event_query_failed'},
+            {'exit': 25, 'failure': 'fixture_event_read_failed'},
+            {'exit': 26, 'failure': 'fixture_event_read_timeout'},
+            {'exit': 99, 'failure': 'fixture_event_writer_failed'},
+        ])
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows fixture diagnostics contract')
     def test_channel_setup_diagnostics_accept_only_fixed_codes(self):
         result = self.fixture_helpers(r'''
 $rows=@()
