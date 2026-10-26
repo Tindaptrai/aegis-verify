@@ -37,9 +37,19 @@ Windows acceptance gate remains mandatory; review approval alone does not satisf
   from prepared to promoted: `File.Replace` received an empty backup-path string
   instead of CLR null. The narrow correction passes an explicit CLR null and retains
   atomic replacement. New tests exercise real record writes and failed replacement.
-- Next: review the control-record correction and run exact-source Agent and Manager
-  CI. Hosted installation remains unverified after this correction. Do not merge,
-  deploy or claim Ready before required gates and human lab review.
+- The control-record correction at `b9dd54807f78637d668c61bc75c1790e78d8ada9`
+  passed actual installation, Running status and mTLS presence in Agent run
+  [40306550573](https://github.com/Tindaptrai/aegis-verify/actions/runs/40306550573).
+  Linux Agent and all four Manager jobs in
+  [40306550424](https://github.com/Tindaptrai/aegis-verify/actions/runs/40306550424)
+  passed at that same source. Windows subsequently failed the MissingVendor test;
+  its original fixed error label was missing from the diagnostic allowlist.
+- Test-only follow-up preserves those fixed labels and corrects Cleanup to validate
+  preserved identity using the verified package CLI after uninstall removes the
+  installed CLI. UUID, marker, package and deletion-path checks remain mandatory.
+- Next: exact-source hosted CI must identify the remaining MissingVendor failure
+  and verify cleanup. Do not merge, deploy or claim Ready before required gates
+  and human lab review.
 - Detailed decisions, local verification and fresh CI results are recorded in
   `.superpowers/sdd/2026-10-25-windows-web-job/progress.md`; the latest delivered
   evidence bundle is the portable counterpart. No live VM/scenario work was done.

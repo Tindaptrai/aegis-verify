@@ -146,6 +146,8 @@ if ($Pure) {
 }
 & (Join-Path $PSScriptRoot 'Test-ControlRecord.ps1')
 if(!$?){throw 'control_record_contract_failed'}
+& (Join-Path $PSScriptRoot 'Test-WindowsServiceCleanup.ps1')
+if(!$?){throw 'windows_service_cleanup_contract_failed'}
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('aegis-install-contract-' + [Guid]::NewGuid().ToString('N'))
 $passed = 0
 function Assert-Rejected([scriptblock]$Action, [string]$Name) {

@@ -414,6 +414,30 @@ $zone=[string](Get-Content -LiteralPath $env:AEGIS_TEST_ORIGIN_FILE -Stream Zone
 
 
 class PublishedDiagnosticTests(SimpleTestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows native diagnostic contract')
+    def test_missing_vendor_diagnostic_retains_reviewed_fixed_failures(self):
+        codes = ('vendor_free_fixture_required', 'fresh_fixture_required', 'configuration_fixture_failed',
+                 'fixture_cleanup_path_invalid', 'execution_configuration_invalid',
+                 'execution_path_invalid', 'execution_paths_required')
+        result = NativeGateRefusalTests.fixture_helpers(self, r'''
+. (Join-Path (Split-Path -Parent $env:AEGIS_TEST_WRAPPER_SCRIPT) 'InstallerDiagnostics.ps1')
+$rows=@()
+foreach($code in ($env:AEGIS_TEST_FIXED_FAILURES|ConvertFrom-Json)){
+    try { throw $code } catch { $rows+=Get-AgentErrorDiagnostic $_ 'helper' }
+}
+ConvertTo-Json -InputObject $rows -Compress
+''', environment={'AEGIS_TEST_FIXED_FAILURES': json.dumps(codes)})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        diagnostics = json.loads(result.stdout)
+        self.assertEqual(diagnostics, [dict(stage='helper', code=code) for code in codes])
+        for diagnostic in diagnostics:
+            child = subprocess.CompletedProcess([], 1, 'private-output', json.dumps(diagnostic))
+            with self.assertRaises(AssertionError) as caught:
+                presence.assert_native_result('MissingVendor', child)
+            row = published_failure_diagnostic('missingvendor', caught.exception)
+            self.assertEqual((row['native_stage'], row['native_code']), ('helper', diagnostic['code']))
+            self.assertNotIn('private', json.dumps(row))
+
     def test_published_failure_projects_only_closed_native_diagnostic(self):
         error = AssertionError('Native Install failed [installer:service_operation_failed]; output withheld')
         self.assertEqual(published_failure_diagnostic('install', error, 'published_native_install',

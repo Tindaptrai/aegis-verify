@@ -16,8 +16,8 @@ $binaryRoot = Join-Path $env:ProgramFiles 'AEGIS Agent'
 $stateDirectory = Join-Path $env:ProgramData 'AEGIS/Agent'
 $binary = Join-Path $binaryRoot 'bin/aegis-agent.exe'
 $stateFile = Join-Path $stateDirectory 'state.json'
-function Read-NativeStatus {
-    $json = & $binary status --state-dir $stateDirectory
+function Read-NativeStatus([string]$Executable=$binary) {
+    $json = & $Executable status --state-dir $stateDirectory
     if ($LASTEXITCODE -ne 0) { throw 'status_failed' }
     $value = $json | ConvertFrom-Json
     if ($ExpectedDeviceId -and $value.device_id -cne $ExpectedDeviceId) { throw 'ci_identity_conflict' }
@@ -145,7 +145,11 @@ if ($Action -eq 'Install') {
     if($nativeMarker){$nativeMarker.device_id=$status.device_id;Write-AgentControlRecord (Join-Path (Get-AgentControlRoot) 'native-fixture.json') $nativeMarker}
 } else {
     if ($Action -ne 'Status' -and !$ExpectedDeviceId) { throw 'expected_device_id_required_for_mutation' }
-    $status=Read-NativeStatus
+    if($Action -eq 'Cleanup'){
+        # Uninstall removed the installed binary; validate preserved state with the verified package CLI.
+        $null=Get-VerifiedAgentPackage $PackageRoot
+        $status=Read-NativeStatus (Join-Path $PackageRoot 'bin/aegis-agent.exe')
+    } else {$status=Read-NativeStatus}
     if ($Action -eq 'Restart' -or $Action -eq 'Reinstall') {
         $id=$status.device_id; $keyHash=Get-NativeKeyHash
         $watch=[Diagnostics.Stopwatch]::StartNew()
