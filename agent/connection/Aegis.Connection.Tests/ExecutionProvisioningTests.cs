@@ -11,9 +11,60 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text;
+using System.Security.AccessControl;
 
 internal static partial class Program
 {
+    private static void ExecutionProvisioningContracts()
+    {
+        Test("provisioning contract event descriptor matches manifest channel keyword",()=>{
+            // Windows SDK mc.exe on our single-channel manifest emits exactly
+            // {0x1,0x0,0x10,0x4,0x0,0x0,0x8000000000000000}.
+            var descriptor=ProvisionFixtureEvent(1);
+            Check(descriptor.Id==1 && descriptor.Version==0 && descriptor.Channel==16 && descriptor.Level==4 &&
+                descriptor.Opcode==0 && descriptor.Task==0 && descriptor.Keyword==0x8000000000000000UL,"manifest descriptor mismatch");
+        });
+        if(!OperatingSystem.IsWindows())return;
+        Test("provisioning contract immutable owner and object-specific permissions",()=>{
+            if(!OperatingSystem.IsWindows())return;
+            const string ti="S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464";
+            DirectorySecurity Acl(string owner,string rules){if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException();var acl=new DirectorySecurity();acl.SetSecurityDescriptorSddlForm("O:"+owner+"D:(A;;FA;;;SY)(A;;FA;;;BA)"+rules);return acl;}
+            void Reject(DirectorySecurity acl,bool ancestor){if(!OperatingSystem.IsWindows())throw new PlatformNotSupportedException();try{ExecutionProfile.ValidateImmutableAcl(acl,ancestor);}catch(ConnectionException){return;}throw new Exception("unsafe ACL accepted");}
+            ExecutionProfile.ValidateImmutableAcl(Acl("SY","(A;;FR;;;BU)"),false);
+            ExecutionProfile.ValidateImmutableAcl(Acl(ti,"(A;;FA;;;"+ti+")"),true);
+            Reject(Acl(ti,""),false);
+            Reject(Acl("BU",""),true);
+            foreach(var right in new[]{"GW","GA","0x10000","0x40","WD","WO"})
+            {
+                Reject(Acl("SY","(A;;"+right+";;;BU)"),false);
+                Reject(Acl("SY","(A;;"+right+";;;BU)"),true);
+            }
+            ExecutionProfile.ValidateImmutableAcl(Acl("SY","(A;;0x6;;;BU)(A;OICIIO;GA;;;BU)"),true);
+            ExecutionProfile.ValidateImmutableAcl(Acl("SY","(A;CI;0x116;;;BU)"),true);
+            foreach(var right in new[]{"0x10","0x100","0x116"})Reject(Acl("SY","(A;;"+right+";;;BU)"),false);
+            Reject(Acl("SY","(A;;0x6;;;BU)"),false);
+            Reject(Acl("SY","(A;ID;GW;;;BU)"),false);
+            Reject(Acl("SY","(A;;FA;;;"+ti+")"),false);
+        });
+        Test("provisioning contract OS ancestor classification is exact",()=>{
+            if(!OperatingSystem.IsWindows())return;
+            foreach(var folder in new[]{Environment.SpecialFolder.ProgramFiles,Environment.SpecialFolder.ProgramFilesX86,Environment.SpecialFolder.CommonApplicationData})
+            {
+                var known=Environment.GetFolderPath(folder);if(string.IsNullOrEmpty(known))continue;
+                Check(ExecutionProfile.IsKnownOsAncestor(known) && ExecutionProfile.IsKnownOsAncestor(Path.GetPathRoot(known)!),"known OS ancestor rejected");
+                Check(!ExecutionProfile.IsKnownOsAncestor(known+"-foreign") && !ExecutionProfile.IsKnownOsAncestor(Path.Combine(known,"untrusted")),"arbitrary path trusted");
+            }
+        });
+        foreach(var folder in new[]{Environment.SpecialFolder.ProgramFiles,Environment.SpecialFolder.CommonApplicationData})
+            Test("provisioning contract readonly actual OS ancestor "+folder,()=>{
+                if(!OperatingSystem.IsWindows())return;
+                var path=Environment.GetFolderPath(folder);
+                ExecutionProfile.ValidateImmutableAcl(new DirectoryInfo(path).GetAccessControl(),ExecutionProfile.IsKnownOsAncestor(path));
+                var root=Path.GetPathRoot(path)!;
+                ExecutionProfile.ValidateImmutableAcl(new DirectoryInfo(root).GetAccessControl(),ExecutionProfile.IsKnownOsAncestor(root));
+            });
+    }
+    private static FixtureEvent ProvisionFixtureEvent(ushort id)=>new(){Id=id,Channel=16,Level=4,Keyword=0x8000000000000000UL};
     private sealed record ProvisionInput(string Output, string ProgramFilesAsset, string ProgramDataAsset,
         string State, string FixtureService, string FixtureChannel, string DeniedChannel, string Mode,
         string User, string Password, string ZoneFile);
@@ -46,7 +97,7 @@ internal static partial class Program
                 if(Environment.GetEnvironmentVariable("GITHUB_ACTIONS")!="true" || Environment.GetEnvironmentVariable("RUNNER_ENVIRONMENT")!="github-hosted")return 3;
                 var provider=Guid.Parse(args[1]);
                 if(EventRegister(ref provider,0,0,out var handle)!=0)return 3;
-                try { var descriptor=new FixtureEvent { Id=ushort.Parse(args[2]),Channel=16,Level=4 }; return EventWrite(handle,ref descriptor,0,0)==0 ? 0 : 3; }
+                try { var descriptor=ProvisionFixtureEvent(ushort.Parse(args[2])); return EventWrite(handle,ref descriptor,0,0)==0 ? 0 : 3; }
                 finally { EventUnregister(handle); }
             }
             if(args.Length==2 && args[0]=="--provisioning-journal")

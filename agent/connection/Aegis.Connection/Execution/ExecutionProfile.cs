@@ -100,12 +100,41 @@ public static class ExecutionProfile
         {
             var isDirectory = directory || current != path;
             FileSystemSecurity acl = isDirectory ? new DirectoryInfo(current).GetAccessControl() : new FileInfo(current).GetAccessControl();
-            var administrators = new HashSet<string>(StringComparer.Ordinal) { "S-1-5-18", "S-1-5-32-544" };
-            if (acl.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner || !administrators.Contains(owner.Value)) throw new ConnectionException("execution_invalid");
-            foreach (FileSystemAccessRule rule in acl.GetAccessRules(true,true,typeof(SecurityIdentifier)))
-                if (rule.AccessControlType == AccessControlType.Allow && !administrators.Contains(rule.IdentityReference.Value) && GrantsMutation(rule.FileSystemRights))
-                    throw new ConnectionException("execution_invalid");
+            // Walk from the existing strict leaf outward: a known OS ancestor
+            // is considered only after its existing protected descendant has
+            // passed. Denied Delete/DeleteChild/control rights keep that child
+            // present, so this ancestor cannot become an empty reparse target.
+            ValidateImmutableAcl(acl,current!=path && IsKnownOsAncestor(current));
             if (Path.GetPathRoot(current) == current) break;
         }
+    }
+    internal static bool IsKnownOsAncestor(string path)
+    {
+        if(!OperatingSystem.IsWindows())return false;
+        foreach(var folder in new[]{Environment.SpecialFolder.ProgramFiles,Environment.SpecialFolder.ProgramFilesX86,Environment.SpecialFolder.CommonApplicationData})
+        {
+            var known=Environment.GetFolderPath(folder);
+            if(!string.IsNullOrEmpty(known) && (string.Equals(path,known,StringComparison.OrdinalIgnoreCase) || string.Equals(path,Path.GetPathRoot(known),StringComparison.OrdinalIgnoreCase)))return true;
+        }
+        return false;
+    }
+    [SupportedOSPlatform("windows")]
+    internal static void ValidateImmutableAcl(FileSystemSecurity acl,bool osAncestor)
+    {
+        var administrators=new HashSet<string>(StringComparer.Ordinal){"S-1-5-18","S-1-5-32-544"};
+        // Windows servicing owns only these resolved OS ancestors. Never extend
+        // this exception to a pin, dedicated asset root or arbitrary directory.
+        if(osAncestor)administrators.Add("S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464");
+        if(acl.GetOwner(typeof(SecurityIdentifier)) is not SecurityIdentifier owner || !administrators.Contains(owner.Value))throw new ConnectionException("execution_invalid");
+        var forbidden=FileSystemRights.Write|FileSystemRights.Delete|FileSystemRights.DeleteSubdirectoriesAndFiles|FileSystemRights.ChangePermissions|FileSystemRights.TakeOwnership;
+        // Only for the known OS ancestors in the validated outward walk: new
+        // siblings and directory metadata cannot rewrite the protected child.
+        // A reparse point cannot be set on this nonempty directory. Leaf and
+        // dedicated asset-directory metadata remain strictly immutable.
+        if(osAncestor)forbidden &= ~FileSystemRights.Write;
+        const uint genericMutation=0x40000000u|0x10000000u;
+        foreach(FileSystemAccessRule rule in acl.GetAccessRules(true,true,typeof(SecurityIdentifier)))
+            if(rule.AccessControlType==AccessControlType.Allow && (rule.PropagationFlags&PropagationFlags.InheritOnly)==0 && !administrators.Contains(rule.IdentityReference.Value) &&
+                (((uint)rule.FileSystemRights&genericMutation)!=0 || (rule.FileSystemRights&forbidden)!=0))throw new ConnectionException("execution_invalid");
     }
 }

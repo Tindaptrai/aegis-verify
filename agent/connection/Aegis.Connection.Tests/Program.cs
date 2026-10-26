@@ -25,6 +25,7 @@ internal static partial class Program
         ExecutionClientTests();
         ExecutionSupervisorTests();
         ExecutionPreflightTests();
+        ExecutionProvisioningContracts();
         TransportTests();
         NetworkTests();
         LoopTests();

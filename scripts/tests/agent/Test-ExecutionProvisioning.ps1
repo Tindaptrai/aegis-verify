@@ -81,6 +81,17 @@ try {
         & "$env:SystemRoot/System32/wevtutil.exe" im $manifest 2>$null | Out-Null;if($LASTEXITCODE -ne 0){throw 'fixture_channel_registration_failed'}
         $installedManifests+=$manifest;$channels+=$channelName;$providers+=$provider
         & $hostExe --provisioning-event $provider 1 2>$null | Out-Null;if($LASTEXITCODE -ne 0){throw 'fixture_event_write_failed'}
+        # EventWrite success alone does not prove a routed/persisted event. Read
+        # this generated channel as administrator before evaluating service ACLs.
+        # Do not inspect, emit or clear a real vendor channel here.
+        $seeded=$false;$seedWatch=[Diagnostics.Stopwatch]::StartNew()
+        while(!$seeded -and $seedWatch.Elapsed.TotalSeconds -lt 5){
+            $query=[Diagnostics.Eventing.Reader.EventLogQuery]::new($channelName,[Diagnostics.Eventing.Reader.PathType]::LogName,'*[System[(EventID=1)]]')
+            $reader=[Diagnostics.Eventing.Reader.EventLogReader]::new($query)
+            try{$event=$reader.ReadEvent();if($event){try{$seeded=$event.Id -eq 1}finally{$event.Dispose()}}}finally{$reader.Dispose()}
+            if(!$seeded){Start-Sleep -Milliseconds 100}
+        }
+        if(!$seeded){throw 'fixture_event_not_observed'}
     }
     $diagnostics.stage='source_descriptors'
     $beforeService=Get-AgentSourceDescriptor 'service' $fixtureService;$beforeChannel=Get-AgentSourceDescriptor 'channel' $channels[0]
