@@ -144,6 +144,8 @@ if ($Pure) {
     Write-Output "$checks pure installer contracts passed; no files, ACLs or SCM changed"
     return
 }
+& (Join-Path $PSScriptRoot 'Test-ControlRecord.ps1')
+if(!$?){throw 'control_record_contract_failed'}
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('aegis-install-contract-' + [Guid]::NewGuid().ToString('N'))
 $passed = 0
 function Assert-Rejected([scriptblock]$Action, [string]$Name) {

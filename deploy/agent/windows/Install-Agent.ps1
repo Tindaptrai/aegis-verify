@@ -77,7 +77,8 @@ function Write-AgentControlRecord([string]$Path,$Value) {
     $temporary=Join-Path $root ('.control-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     $stream=[IO.FileStream]::new($temporary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None,4096,[IO.FileOptions]::WriteThrough)
     try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
-    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary,$Path,$null) } else { [IO.File]::Move($temporary,$Path) }
+    # PowerShell 5.1 coerces $null to an empty string; File.Replace requires a CLR null to omit the backup.
+    if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary,$Path,[System.Management.Automation.Language.NullString]::Value) } else { [IO.File]::Move($temporary,$Path) }
 }
 function Read-AgentControlRecord([string]$Path) {
     Assert-AgentNoLinks $Path

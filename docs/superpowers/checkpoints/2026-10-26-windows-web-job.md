@@ -26,8 +26,20 @@ Windows acceptance gate remains mandatory; review approval alone does not satisf
 - The same run exposed an existing supervisor test handshake cancellation race.
   The test now covers cancellation both during and after its handshake with
   deterministic synchronization. Production supervisor behavior is unchanged.
-- Next: independent review of this correction, then exact-source Agent and Manager
-  CI. Do not merge, deploy or claim Ready before required gates and human lab review.
+- Correction `6f1a6e7ed6ced11697d05683d4182a396ae78278` passed all four Manager
+  jobs in [40302509376](https://github.com/Tindaptrai/aegis-verify/actions/runs/40302509376)
+  and the Linux Agent job in [40302503525](https://github.com/Tindaptrai/aegis-verify/actions/runs/40302503525).
+  Windows completed all five fixture categories; published installation then failed.
+- Closed diagnostics at source `f3e0f0c6d17f88992b3702108f49fbebabb448fc`, run
+  [40304689562](https://github.com/Tindaptrai/aegis-verify/actions/runs/40304689562),
+  locate the failure at installation with HRESULT -2147024809. An ordinary-file
+  PowerShell 5.1 regression reproduced that error when updating the control record
+  from prepared to promoted: `File.Replace` received an empty backup-path string
+  instead of CLR null. The narrow correction passes an explicit CLR null and retains
+  atomic replacement. New tests exercise real record writes and failed replacement.
+- Next: review the control-record correction and run exact-source Agent and Manager
+  CI. Hosted installation remains unverified after this correction. Do not merge,
+  deploy or claim Ready before required gates and human lab review.
 - Detailed decisions, local verification and fresh CI results are recorded in
   `.superpowers/sdd/2026-10-25-windows-web-job/progress.md`; the latest delivered
   evidence bundle is the portable counterpart. No live VM/scenario work was done.
