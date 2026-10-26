@@ -191,9 +191,14 @@ function Assert-AgentProvisionRecord($Record) {
 }
 function Restore-AgentProvision([string]$Binary,[string]$State,$Record) {
     Assert-AgentProvisionRecord $Record
-    Stop-AgentService
     $service=Get-CimInstance Win32_Service -Filter "Name='AegisAgent'"
-    if (!$service -or $service.StartName -ine 'NT SERVICE\AegisAgent' -or $service.PathName -cnotin @((Get-AgentServiceCommand $Binary $State $Record.old_execution),(Get-AgentServiceCommand $Binary $State $Record.new_execution))) { throw 'service_configuration_conflict' }
+    $commands=@((Get-AgentServiceCommand $Binary $State $Record.old_execution),(Get-AgentServiceCommand $Binary $State $Record.new_execution))
+    if (!$service -or $service.StartName -ine 'NT SERVICE\AegisAgent' -or $service.PathName -cnotin $commands) { throw 'service_configuration_conflict' }
+    if((Get-AgentServiceCommand $Binary $State (Get-AgentInstalledExecution)) -cnotin $commands){throw 'provision_configuration_conflict'}
+    # Validate every source before any recovery mutation. A later descriptor
+    # conflict must not stop an unrelated service or partially undo other grants.
+    foreach($entry in $Record.grants){if((Get-AgentSourceDescriptor $entry.kind $entry.name) -cnotin @($entry.before,$entry.after)){throw 'source_descriptor_conflict'}}
+    Stop-AgentService
     Invoke-AgentSc @('config','AegisAgent','start=','disabled')
     foreach ($entry in @($Record.grants)[3..0]) {
         $current=Get-AgentSourceDescriptor $entry.kind $entry.name

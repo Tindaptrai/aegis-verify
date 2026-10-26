@@ -38,6 +38,10 @@ class NativeGateRefusalTests(SimpleTestCase):
             self.assertEqual({row['name'] for row in data['categories']}, set(CATEGORIES))
             self.assertTrue(all(row['executed'] == row['passed'] == 0 for row in data['categories']))
             self.assertTrue(all(value == 'not_executed' for value in data['lab_gates'].values()))
+            self.assertEqual(data['diagnostics']['stage'], 'prerequisites')
+            self.assertEqual(data['diagnostics']['code'], 'required_native_prerequisites_missing')
+            self.assertIsNone(data['diagnostics']['child_exit_code'])
+            self.assertNotIn(str(output), json.dumps(data['diagnostics']))
 
 
 class ExecutionPublishedNativeTests(TransactionTestCase):

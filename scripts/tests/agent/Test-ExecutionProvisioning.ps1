@@ -2,8 +2,8 @@
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$PackageRoot,[Parameter(Mandatory=$true)][string]$OutputRoot)
 $ErrorActionPreference='Stop'
-. (Join-Path $PackageRoot 'Install-Agent.ps1')
 $categories=@{};$failureCodes=@();$createdService=$false;$fixtureCreated=$false;$userCreated=$false;$installedManifests=@();$ownedRoots=$false
+$diagnostics=[ordered]@{stage='prerequisites';exception_type=$null;hresult=$null;line=$null}
 $id=[Guid]::NewGuid().ToString('N');$fixtureService='AegisFixture-'+$id;$user='AegisT'+$id.Substring(0,12)
 $binaryRoot=Join-Path $env:ProgramFiles ('AEGIS-Test-'+$id)
 $dataRoot=Join-Path $env:ProgramData ('AEGIS-Test-'+$id)
@@ -23,7 +23,10 @@ function Wait-ServiceResult([string]$Path,[bool]$Complete) {
 }
 try {
     if($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hosted' -or $env:RUNNER_OS -ne 'Windows'){throw 'disposable_ci_required'}
+    $diagnostics.stage='import'
+    . (Join-Path $PackageRoot 'Install-Agent.ps1')
     Assert-AgentAdministrator
+    $diagnostics.stage='target_validation'
     if((Get-Service AegisAgent -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'AEGIS Agent')) -or (Test-Path -LiteralPath (Join-Path $env:ProgramData 'AEGIS/Agent'))){throw 'ci_target_already_exists'}
     foreach($path in @($OutputRoot,$binaryRoot,$dataRoot)){Assert-AgentNoLinks $path}
     if(!(Test-Path -LiteralPath $OutputRoot)){New-Item -ItemType Directory -Path $OutputRoot | Out-Null}
@@ -31,6 +34,7 @@ try {
     $testExe=$env:AEGIS_EXECUTION_NATIVE_TEST_EXE
     if(!$testExe -or !(Test-Path -LiteralPath $testExe -PathType Leaf) -or [IO.Path]::GetExtension($testExe) -cne '.exe'){throw 'native_test_apphost_required'}
     $sid=Get-AgentServiceSid
+    $diagnostics.stage='fixture_roots'
     if((Test-Path -LiteralPath $binaryRoot) -or (Test-Path -LiteralPath $dataRoot)){throw 'fresh_fixture_required'}
     New-Item -ItemType Directory -Path $binaryRoot,$dataRoot | Out-Null
     Set-AgentServiceTreeAcl $binaryRoot $sid 'Binary';Set-AgentServiceTreeAcl $dataRoot $sid 'Binary'
@@ -39,22 +43,27 @@ try {
     try{$markerStream.Write($markerBytes,0,$markerBytes.Length);$markerStream.Flush($true)}finally{$markerStream.Dispose()};$ownedRoots=$true
     # The private CI fixture copies only the built test harness directory, never
     # contributes this tree to the public agent archive.
+    $diagnostics.stage='harness_copy'
     Copy-Item -LiteralPath ([IO.Path]::GetDirectoryName($testExe)) -Destination (Join-Path $binaryRoot 'harness') -Recurse
     Set-AgentServiceTreeAcl $binaryRoot $sid 'Binary'
     $hostExe=Join-Path $binaryRoot ('harness/'+[IO.Path]::GetFileName($testExe))
+    $diagnostics.stage='fixture_assets'
     $programAsset=Join-Path $binaryRoot 'immutable.txt';$dataAsset=Join-Path $dataRoot 'immutable.txt'
     [IO.File]::WriteAllText($programAsset,'synthetic immutable');[IO.File]::WriteAllText($dataAsset,'synthetic immutable')
     $state=Join-Path $dataRoot 'state';New-Item -ItemType Directory -Path $state | Out-Null;Set-AgentServiceTreeAcl $state $sid 'State'
     $zone=Join-Path $dataRoot 'origin.ps1';[IO.File]::WriteAllText($zone,'# inert policy-origin fixture');[IO.File]::WriteAllText(($zone+':Zone.Identifier'),"[ZoneTransfer]`r`nZoneId=3`r`n")
     $password=[Guid]::NewGuid().ToString('N')+'aA!4'
+    $diagnostics.stage='local_user'
     $secure=ConvertTo-SecureString $password -AsPlainText -Force
     New-LocalUser -Name $user -Password $secure -AccountNeverExpires -Description 'Disposable AEGIS native ACL fixture' | Out-Null;$userCreated=$true
+    $diagnostics.stage='fixture_service'
     $fixtureCommand=(ConvertTo-AgentNativeArgument $hostExe)+' --provisioning-idle '+$fixtureService
     Invoke-AgentSc @('create',$fixtureService,'binPath=',$fixtureCommand,'start=','demand');$fixtureCreated=$true
     Invoke-AgentSc @('sdset',$fixtureService,'O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)')
     Invoke-AgentSc @('start',$fixtureService)
     (Get-Service $fixtureService).WaitForStatus('Running',[TimeSpan]::FromSeconds(20))
     $channels=@();$providers=@()
+    $diagnostics.stage='channels'
     foreach($suffix in @('Read','Denied')){
         $provider=[Guid]::NewGuid().ToString();$channelName='AEGIS-Test-'+$id+'-'+$suffix+'/Operational';$providerName='AEGIS-Test-'+$id+'-'+$suffix
         $manifest=Join-Path $dataRoot ($suffix+'.man')
@@ -66,13 +75,16 @@ try {
         $installedManifests+=$manifest;$channels+=$channelName;$providers+=$provider
         & $hostExe --provisioning-event $provider 1 2>$null | Out-Null;if($LASTEXITCODE -ne 0){throw 'fixture_event_write_failed'}
     }
+    $diagnostics.stage='source_descriptors'
     $beforeService=Get-AgentSourceDescriptor 'service' $fixtureService;$beforeChannel=Get-AgentSourceDescriptor 'channel' $channels[0]
     $afterService=Get-AgentReadDescriptor $beforeService $sid 4;$afterChannel=Get-AgentReadDescriptor $beforeChannel $sid 1
     foreach($mode in @('denied','allowed')){
         if($mode -eq 'allowed'){
+            $diagnostics.stage='allowed_grants'
             Set-AgentSourceDescriptor 'service' $fixtureService $beforeService $afterService
             Set-AgentSourceDescriptor 'channel' $channels[0] $beforeChannel $afterChannel
         }
+        $diagnostics.stage=if($mode -eq 'denied'){'denied_service'}else{'allowed_service'}
         $output=Join-Path $state ($mode+'.json');$input=Join-Path $dataRoot ($mode+'-input.json')
         $inputJson=[ordered]@{Output=$output;ProgramFilesAsset=$programAsset;ProgramDataAsset=$dataAsset;State=$state;FixtureService=$fixtureService;FixtureChannel=$channels[0];DeniedChannel=$channels[1];Mode=$mode;User=$user;Password=$password;ZoneFile=$zone}|ConvertTo-Json -Compress
         [IO.File]::WriteAllText($input,$inputJson,[Text.UTF8Encoding]::new($false))
@@ -96,12 +108,19 @@ try {
         }
         $failureCodes+=@($final.failures)
     }
+    $diagnostics.stage='restore_grants'
     Record-Check 'service_channel_grants' {
         Set-AgentSourceDescriptor 'service' $fixtureService $afterService $beforeService
         Set-AgentSourceDescriptor 'channel' $channels[0] $afterChannel $beforeChannel
         if((Get-AgentSourceDescriptor 'service' $fixtureService) -cne $beforeService -or (Get-AgentSourceDescriptor 'channel' $channels[0]) -cne $beforeChannel){throw 'restore_failed'}
     }
-} catch {$failureCodes+='native_fixture_setup_failed'}
+    $diagnostics.stage='complete'
+} catch {
+    $failureCodes+='native_fixture_setup_failed'
+    $type=$_.Exception.GetType().Name
+    if($type -cnotin @('RuntimeException','ArgumentException','InvalidOperationException','UnauthorizedAccessException','Win32Exception','IOException','ItemNotFoundException','ParameterBindingException','CommandNotFoundException')){$type='OtherException'}
+    $diagnostics.exception_type=$type;$diagnostics.hresult=$_.Exception.HResult;$diagnostics.line=$_.InvocationInfo.ScriptLineNumber
+}
 finally {
     try{
         if($createdService){$actual=Get-CimInstance Win32_Service -Filter "Name='AegisAgent'";if(!$ownedRoots -or $actual.PathName -cne $command){throw 'fixture_service_ownership_invalid'};Stop-AgentService;Invoke-AgentSc @('delete','AegisAgent')}
@@ -117,7 +136,7 @@ finally {
         }
     }catch{$failureCodes+='native_fixture_cleanup_failed'}
     $password=$null;$secure=$null
-    if(Test-Path -LiteralPath $OutputRoot){[ordered]@{schema_version=1;kind='execution_provisioning_gate';categories=$categories;failures=$failureCodes}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath $resultPath -Encoding UTF8}
+    if(Test-Path -LiteralPath $OutputRoot){[ordered]@{schema_version=1;kind='execution_provisioning_gate';categories=$categories;failures=$failureCodes;diagnostics=$diagnostics}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath $resultPath -Encoding UTF8}
 }
 if($failureCodes.Count -or !$categories.Count -or @($categories.Values|Where-Object{$_.failed -gt 0}).Count){exit 1}
 exit 0
