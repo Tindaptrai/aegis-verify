@@ -57,11 +57,12 @@ try {
     $grants=@()
     foreach($target in @(@('service',$sysmon,4),@('service','WazuhSvc',4),@('channel','Microsoft-Windows-Sysmon/Operational',1),@('channel','Microsoft-Windows-PowerShell/Operational',1))){
         $before=Get-AgentSourceDescriptor $target[0] $target[1]
-        $after=Get-AgentReadDescriptor $before $sid $target[2]
+        $after=Get-AgentProvisionDescriptor $before $sid $target[2]
         $grants += [pscustomobject]@{kind=$target[0];name=$target[1];before=$before;after=$after}
     }
     $record=[pscustomobject]@{schema_version=1;phase='prepared';old_execution=$old;new_execution=$paths;was_running=[bool]($service.State -eq 'Running');grants=$grants}
     Assert-AgentProvisionRecord $record
+    foreach($entry in $grants){Assert-AgentSourceMutationSupported $entry.kind $entry.name $entry.before $entry.after}
     Write-AgentControlRecord $recordPath $record
     try {
         Stop-AgentService

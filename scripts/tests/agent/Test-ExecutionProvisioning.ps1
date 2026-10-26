@@ -215,6 +215,9 @@ try {
     $fixtureCommand=(ConvertTo-AgentNativeArgument $hostExe)+' --provisioning-idle '+$fixtureService
     Invoke-AgentSc @('create',$fixtureService,'binPath=',$fixtureCommand,'start=','demand');$fixtureCreated=$true
     Invoke-AgentSc @('sdset',$fixtureService,'O:BAD:(A;;GA;;;SY)(A;;GA;;;BA)')
+    Record-Check 'service_channel_grants' {
+        if((Get-AgentSourceProtection $fixtureService) -ne 0){throw 'fixture_service_protection_mismatch'}
+    }
     Invoke-AgentSc @('start',$fixtureService)
     (Get-Service $fixtureService).WaitForStatus('Running',[TimeSpan]::FromSeconds(20))
     $channels=@();$providers=@()

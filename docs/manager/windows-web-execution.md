@@ -52,8 +52,17 @@ $PublicPin = '<ABSOLUTE_SEPARATE_V2_PUBLIC_KEY_PEM>'
 After owner review, invoke the same command without `-VerifyOnly` to provision.
 The owner must first install and protect the reviewed immutable trust assets;
 the scripts validate those existing prerequisites without copying or protecting them.
-Provisioning adds only missing minimal service-status query/channel-read grants
-for the exact service SID. The scripts preserve prior descriptors
+Provisioning preserves a service descriptor when applicable existing read grants
+already cover the virtual service account through its SID, Everyone,
+Authenticated Users or SERVICE. This conservative no-op proof applies only to
+service-status query; channel-read grants remain explicit for the exact service
+SID. It rejects ambiguous denies and unsupported/inherit-only access proofs.
+Protected services such as Sysmon retain their protection and descriptor. If a
+service still needs a DACL change, unknown protection state or any protected
+launch level refuses it before the provisioning journal or Agent stop. Recovery
+also checks pending service writes before stopping; the native setter rechecks
+protection on its own handle. Existing explicit-grant journals remain valid.
+The scripts preserve prior descriptors
 and fail closed on denies or conflicting changes. They do not grant Security-log,
 clear/config/start-stop access or broad group membership. The service retains
 Automatic (Delayed Start).

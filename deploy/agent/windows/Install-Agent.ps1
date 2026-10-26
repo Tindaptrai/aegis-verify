@@ -47,6 +47,30 @@ function Get-AgentReadDescriptor([string]$Sddl,[string]$ServiceSid,[int]$Mask) {
     }
     return $descriptor.GetSddlForm([Security.AccessControl.AccessControlSections]::All)
 }
+function Get-AgentProvisionDescriptor([string]$Sddl,[string]$ServiceSid,[int]$Mask) {
+    # Keep the legacy explicit grant derivation for old journal validation.
+    $replacement=Get-AgentReadDescriptor $Sddl $ServiceSid $Mask
+    if($Mask -ne 4){return $replacement}
+    $descriptor=[Security.AccessControl.RawSecurityDescriptor]::new($Sddl)
+    # These groups are present in the existing unrestricted virtual service
+    # account token. No membership is inferred for arbitrary users/groups.
+    $readers=@($ServiceSid,'S-1-1-0','S-1-5-11','S-1-5-6')
+    $allowed=0
+    foreach($ace in $descriptor.DiscretionaryAcl){
+        $rights=$ace.AccessMask
+        if(($rights -band 0x80000000) -or ($rights -band 0x10000000)){$rights=$rights -bor 4}
+        if(([int]$ace.AceFlags) -band ([int][Security.AccessControl.AceFlags]::InheritOnly)){
+            if($ace.SecurityIdentifier.Value -ceq $ServiceSid -and ($rights -band 4)){throw 'source_descriptor_unsupported'}
+            continue
+        }
+        # Conservative for other token memberships: never infer effective read
+        # in the presence of any deny that could cover this operation.
+        if($ace.AceQualifier -eq 'AccessDenied' -and ($rights -band 4)){throw 'source_access_denied'}
+        if($ace.AceQualifier -eq 'AccessAllowed' -and $ace.SecurityIdentifier.Value -in $readers){$allowed=$allowed -bor $rights}
+    }
+    if($allowed -band 4){return $Sddl}
+    return $replacement
+}
 function Assert-AgentClosedRecord($Value,[string[]]$Names) {
     if (!$Value -or @($Value.PSObject.Properties.Name).Count -ne $Names.Count -or @(Compare-Object @($Value.PSObject.Properties.Name | Sort-Object) @($Names | Sort-Object)).Count) { throw 'control_record_invalid' }
 }
@@ -165,7 +189,18 @@ function Get-AgentSourceDescriptor([string]$Kind,[string]$Name) {
     $channel=[Diagnostics.Eventing.Reader.EventLogConfiguration]::new($Name)
     try { return $channel.SecurityDescriptor } finally { $channel.Dispose() }
 }
+function Get-AgentSourceProtection([string]$Name) {
+    Initialize-AgentServiceSecurity
+    return [Aegis.Agent.ServiceSecurity]::ReadProtection($Name)
+}
+function Assert-AgentSourceMutationSupported([string]$Kind,[string]$Name,[string]$Expected,[string]$Replacement) {
+    if($Kind -ine 'service' -or $Expected -ceq $Replacement){return}
+    $protection=Get-AgentSourceProtection $Name
+    if($null -eq $protection -or $protection -notin @(0,1,2,3)){throw 'source_protection_query_failed'}
+    if($protection -ne 0){throw 'source_service_protected'}
+}
 function Set-AgentSourceDescriptor([string]$Kind,[string]$Name,[string]$Expected,[string]$Replacement) {
+    Assert-AgentSourceMutationSupported $Kind $Name $Expected $Replacement
     if ((Get-AgentSourceDescriptor $Kind $Name) -cne $Expected) { throw 'source_descriptor_conflict' }
     if ($Kind -eq 'service') { [Aegis.Agent.ServiceSecurity]::WriteDacl($Name,$Expected,$Replacement) }
     elseif ($Kind -eq 'channel') {
@@ -187,7 +222,10 @@ function Assert-AgentProvisionRecord($Record) {
         if (($entry.kind -eq 'service' -and $entry.name -notin @('Sysmon','Sysmon64','WazuhSvc')) -or ($entry.kind -eq 'channel' -and $entry.name -notin @('Microsoft-Windows-Sysmon/Operational','Microsoft-Windows-PowerShell/Operational')) -or $entry.kind -notin @('service','channel') -or $seen.ContainsKey($entry.name)) { throw 'provision_record_invalid' }
         $seen[$entry.name]=$true
         $mask=if($entry.kind -eq 'service'){4}else{1}
-        if ((Get-AgentReadDescriptor $entry.before (Get-AgentServiceSid) $mask) -cne $entry.after) { throw 'provision_record_invalid' }
+        if ((Get-AgentReadDescriptor $entry.before (Get-AgentServiceSid) $mask) -cne $entry.after) {
+            if($entry.kind -ine 'service' -or $entry.before -cne $entry.after -or
+                (Get-AgentProvisionDescriptor $entry.before (Get-AgentServiceSid) $mask) -cne $entry.after){throw 'provision_record_invalid'}
+        }
     }
 }
 function Restore-AgentProvision([string]$Binary,[string]$State,$Record) {
@@ -198,7 +236,11 @@ function Restore-AgentProvision([string]$Binary,[string]$State,$Record) {
     if((Get-AgentServiceCommand $Binary $State (Get-AgentInstalledExecution)) -cnotin $commands){throw 'provision_configuration_conflict'}
     # Validate every source before any recovery mutation. A later descriptor
     # conflict must not stop an unrelated service or partially undo other grants.
-    foreach($entry in $Record.grants){if((Get-AgentSourceDescriptor $entry.kind $entry.name) -cnotin @($entry.before,$entry.after)){throw 'source_descriptor_conflict'}}
+    foreach($entry in $Record.grants){
+        $current=Get-AgentSourceDescriptor $entry.kind $entry.name
+        if($current -cnotin @($entry.before,$entry.after)){throw 'source_descriptor_conflict'}
+        Assert-AgentSourceMutationSupported $entry.kind $entry.name $current $entry.before
+    }
     Stop-AgentService
     Invoke-AgentSc @('config','AegisAgent','start=','disabled')
     foreach ($entry in @($Record.grants)[3..0]) {
@@ -366,6 +408,9 @@ namespace Aegis.Agent {
         [DllImport("advapi32.dll", ExactSpelling=true, SetLastError=true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool SetServiceObjectSecurity(IntPtr service, uint information, byte[] descriptor);
+        [DllImport("advapi32.dll", ExactSpelling=true, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryServiceConfig2W(IntPtr service, uint information, byte[] buffer, uint length, out uint needed);
         [DllImport("advapi32.dll", ExactSpelling=true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool CloseServiceHandle(IntPtr handle);
@@ -391,6 +436,29 @@ namespace Aegis.Agent {
                 if (manager!=IntPtr.Zero) CloseServiceHandle(manager);
             }
         }
+        private static uint ReadProtectionHandle(IntPtr service) {
+            byte[] buffer=new byte[4]; uint needed;
+            if(!QueryServiceConfig2W(service,12,buffer,4,out needed)) {
+                int error=Marshal.GetLastWin32Error();
+                throw new InvalidOperationException("source_protection_query_failed",new System.ComponentModel.Win32Exception(error));
+            }
+            uint protection=BitConverter.ToUInt32(buffer,0);
+            if(protection>3) throw new InvalidOperationException("source_protection_query_failed");
+            return protection;
+        }
+        public static uint ReadProtection(string name) {
+            IntPtr manager=IntPtr.Zero, service=IntPtr.Zero;
+            try {
+                manager=OpenSCManagerW(null,null,1);
+                if(manager==IntPtr.Zero) throw new InvalidOperationException("source_protection_query_failed",new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
+                service=OpenServiceW(manager,name,1); // SERVICE_QUERY_CONFIG only; no mutation
+                if(service==IntPtr.Zero) throw new InvalidOperationException("source_protection_query_failed",new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error()));
+                return ReadProtectionHandle(service);
+            } finally {
+                if(service!=IntPtr.Zero) CloseServiceHandle(service);
+                if(manager!=IntPtr.Zero) CloseServiceHandle(manager);
+            }
+        }
         public static void WriteDacl(string name, string expected, string replacement) {
             // Optimistic compare avoids overwriting an unrelated administrator edit.
             if (Read(name) != expected) throw new InvalidOperationException("source_descriptor_conflict");
@@ -398,8 +466,9 @@ namespace Aegis.Agent {
             try {
                 manager=OpenSCManagerW(null,null,1);
                 if(manager==IntPtr.Zero) throw new InvalidOperationException("source_descriptor_unavailable");
-                service=OpenServiceW(manager,name,0x40000);
+                service=OpenServiceW(manager,name,0x40001); // WRITE_DAC | SERVICE_QUERY_CONFIG
                 if(service==IntPtr.Zero) throw new InvalidOperationException("source_descriptor_unavailable");
+                if(ReadProtectionHandle(service)!=0) throw new InvalidOperationException("source_service_protected");
                 RawSecurityDescriptor descriptor=new RawSecurityDescriptor(replacement);
                 byte[] buffer=new byte[descriptor.BinaryLength]; descriptor.GetBinaryForm(buffer,0);
                 if(!SetServiceObjectSecurity(service,4,buffer)) throw new InvalidOperationException("source_descriptor_write_failed");
