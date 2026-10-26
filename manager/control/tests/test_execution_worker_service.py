@@ -6,11 +6,12 @@ from hashlib import sha256
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import secrets
 import shutil
 import ssl
+import stat
 import subprocess
 import sys
 import tempfile
@@ -120,6 +121,54 @@ def safe_systemd_status(output):
     return result
 
 
+def safe_cleanup_status(root, path, operation):
+    """Classify a denied owned descendant; never return its path or name."""
+    root, path = Path(root), Path(path)
+    try:
+        if not root.is_absolute() or not path.is_absolute() or '..' in path.parts: return {}
+        relative = path.relative_to(root)
+        if not path.resolve().is_relative_to(root.resolve()): return {}
+        first = relative.parts[0] if relative.parts else None
+        role = ('root' if first is None else first if first in ('source', 'python', 'private')
+                else 'unit' if relative.parts == (root.name+'.service',) else 'other')
+        result = dict(role=role, operation=operation if operation in ('unlink', 'rmdir', 'open', 'scandir', 'lstat') else 'other')
+        try:
+            metadata = path.lstat()
+            result.update(owner_uid=metadata.st_uid, mode=stat.S_IMODE(metadata.st_mode))
+        except OSError:
+            pass
+        return result
+    except (OSError, ValueError):
+        return {}
+
+
+def remove_fixture_children(root, *, onexc):
+    """Remove owned contents without unlinking an entry in a privileged parent."""
+    root = Path(root)
+    if not root.is_absolute() or root.is_symlink() or root.resolve() != root:
+        raise ValueError('unsafe_fixture_cleanup_root')
+    for child in root.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child, onexc=onexc)
+        else:
+            try: child.unlink()
+            except OSError as error: onexc(os.unlink, child, error)
+
+
+def fixture_root_removal_command(*, root, unit_name, resolved, is_symlink, owner_uid, current_uid):
+    """Authorize one empty-only rmdir; never form a recursive privileged delete."""
+    if not all(type(value) is str for value in (root, unit_name, resolved)):
+        raise ValueError('unsafe_fixture_root_removal')
+    selected = PurePosixPath(root)
+    if (selected.parent != PurePosixPath('/var/lib') or selected.as_posix() != root
+            or not re.fullmatch(r'aegis-worker-ci-[0-9a-f]{32}', selected.name)
+            or unit_name != selected.name+'.service' or resolved != root or is_symlink is not False
+            or type(owner_uid) is not int or type(current_uid) is not int
+            or current_uid <= 0 or owner_uid != current_uid):
+        raise ValueError('unsafe_fixture_root_removal')
+    return ['sudo', '-n', 'rmdir', '--', root]
+
+
 class TestIndexer:
     """Local TEST HTTPS source: authenticated, verified TLS, zero fabricated events."""
     def __init__(self, root):
@@ -215,6 +264,103 @@ class TestIndexer:
 
 
 class WorkerServiceHarnessTests(SimpleTestCase):
+    def test_final_removal_command_refuses_wrong_root_owner_or_symlink(self):
+        build = globals().get('fixture_root_removal_command')
+        self.assertTrue(callable(build), 'guarded final removal command is missing')
+        path = '/var/lib/aegis-worker-ci-' + 'a'*32
+        facts = dict(root=path, unit_name='aegis-worker-ci-'+'a'*32+'.service',
+            resolved=path, is_symlink=False, owner_uid=1001, current_uid=1001)
+        self.assertEqual(build(**facts), ['sudo', '-n', 'rmdir', '--', path])
+        for changed in (dict(root='/tmp/aegis-worker-ci-'+'a'*32), dict(owner_uid=1002),
+                        dict(is_symlink=True), dict(resolved='/var/lib/other'),
+                        dict(unit_name='aegis-manager.service'), dict(current_uid=True)):
+            with self.assertRaises(ValueError): build(**(facts | changed))
+
+    def test_descendant_cleanup_failure_rethrows_without_privileged_fallback(self):
+        with tempfile.TemporaryDirectory(prefix='aegis-cleanup-denial-') as directory:
+            case = RegisteredWorkerSystemdTests('test_actual_enabled_unit_lifecycle_fresh_health_independent_loop_and_os_lock')
+            case.root = Path(directory).resolve()
+            private = case.root/'private'; private.mkdir()
+            child = private/'owned-fixture'; child.write_bytes(b'disposable')
+            case.command = lambda args: self.fail('privileged_fallback_is_forbidden')
+            error = PermissionError('controlled-denial')
+            with self.assertRaises(PermissionError) as caught:
+                case.record_cleanup_failure(os.unlink, child, error)
+            self.assertIs(caught.exception, error)
+            self.assertEqual(case.gate_cleanup_status['role'], 'private')
+            self.assertEqual(case.gate_cleanup_status['operation'], 'unlink')
+            self.assertTrue(child.is_file())
+
+    def test_owned_children_are_removed_but_parent_owned_root_entry_is_preserved(self):
+        remove = globals().get('remove_fixture_children')
+        self.assertTrue(callable(remove), 'owned-child cleanup is missing')
+        # POSIX removal checks the containing directory, independently of the
+        # removed entry's owner/mode: /var/lib=uid0/0755, fixture=uid1001/0700.
+        actor, parent_owner, parent_mode = 1001, 0, 0o755
+        parent_write = bool(parent_mode & (stat.S_IWUSR if actor == parent_owner else stat.S_IWOTH))
+        self.assertFalse(parent_write)
+        with tempfile.TemporaryDirectory(prefix='aegis-owned-root-') as directory:
+            root = Path(directory).resolve()/'owned-fixture'; root.mkdir(mode=0o700)
+            source = root/'source'; source.mkdir(mode=0o700)
+            (source/'worker.py').write_bytes(b'# disposable source\n')
+            evidence = root/'private/evidence'; evidence.mkdir(parents=True, mode=0o700)
+            (evidence/'.worker.lock').write_bytes(b'0')
+            bundle = evidence/'interrupted-test'; bundle.mkdir(mode=0o700)
+            (bundle/'INCOMPLETE').write_bytes(b'Disposable test only\n')
+            (root/'fixture.service').write_bytes(b'# disposable unit\n')
+
+            def denied(function, path, error): raise error
+
+            remove(root, onexc=denied)
+            self.assertTrue(root.is_dir())
+            self.assertEqual(list(root.iterdir()), [])
+            # Only the empty root entry remains for the exact privileged rmdir.
+            root.rmdir()
+            self.assertFalse(root.exists())
+
+    def test_cleanup_diagnostic_reports_static_role_without_private_path(self):
+        inspect = globals().get('safe_cleanup_status')
+        self.assertTrue(callable(inspect), 'safe cleanup diagnostic is missing')
+        with tempfile.TemporaryDirectory(prefix='aegis-owned-cleanup-') as directory:
+            root = Path(directory)
+            child = root/'python'; child.mkdir()
+            result = inspect(root, child, 'rmdir')
+            self.assertEqual(result['role'], 'python')
+            self.assertEqual(result['operation'], 'rmdir')
+            self.assertEqual(set(result), {'role', 'operation', 'owner_uid', 'mode'})
+            self.assertEqual(result['owner_uid'], child.stat().st_uid)
+            self.assertEqual(result['mode'], stat.S_IMODE(child.stat().st_mode))
+            self.assertNotIn(str(root), json.dumps(result))
+            self.assertEqual(inspect(root, root.parent/'outside-test-root', 'unlink'), {})
+            self.assertEqual(inspect(root, root/'..'/'outside-test-root', 'unlink'), {})
+
+    def test_original_and_cleanup_failures_are_both_recorded(self):
+        stages = []
+
+        class Result(unittest.TestResult):
+            def addError(self, test, error):
+                stages.append(test.gate_stage)
+                super().addError(test, error)
+
+        class Failures(RegisteredWorkerSystemdTests):
+            def setUp(self):
+                self.unit_enabled = False
+                self.addCleanup(self.cleanup_failure)
+
+            def tearDown(self): pass
+
+            def cleanup_failure(self): raise PermissionError('fixture-cleanup')
+
+            def test_controlled(self):
+                self.gate_stage = 'worker_health'
+                raise ValueError('fixture-original')
+
+        result = Result()
+        Failures('test_controlled').run(result)
+        self.assertEqual(result.testsRun, 1)
+        self.assertEqual(len(result.errors), 2)
+        self.assertEqual(stages, ['worker_health', 'fixture_cleanup'])
+
     def test_service_diagnostics_preserve_only_known_states_and_bounded_exit_status(self):
         parse = globals().get('safe_systemd_status')
         self.assertTrue(callable(parse), 'safe systemd diagnostic parser is missing')
@@ -536,7 +682,17 @@ class RegisteredWorkerSystemdTests(ExecutionCollectionFixture, TransactionTestCa
             self.command(['sudo', '-n', 'systemctl', 'daemon-reload'])
         if self.root_created and self.root.exists():
             if self.root.stat().st_uid != os.getuid(): raise AssertionError('fixture_root_owner_changed')
-            shutil.rmtree(self.root)
+            remove_fixture_children(self.root, onexc=self.record_cleanup_failure)
+            # The runner owns the contents but /var/lib owns the root entry.
+            # Recheck before the exact, empty-only privileged directory removal.
+            self.gate_cleanup_status = safe_cleanup_status(self.root, self.root, 'rmdir')
+            self.command(fixture_root_removal_command(root=str(self.root), unit_name=self.unit_name,
+                resolved=str(self.root.resolve()), is_symlink=self.root.is_symlink(),
+                owner_uid=self.root.lstat().st_uid, current_uid=os.getuid()))
+
+    def record_cleanup_failure(self, function, path, error):
+        self.gate_cleanup_status = safe_cleanup_status(self.root, path, getattr(function, '__name__', 'other'))
+        raise error
 
     def test_actual_enabled_unit_lifecycle_fresh_health_independent_loop_and_os_lock(self):
         self.gate_stage = 'unit_start'
