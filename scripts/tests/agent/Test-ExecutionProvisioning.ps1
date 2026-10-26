@@ -8,6 +8,13 @@ $id=[Guid]::NewGuid().ToString('N');$fixtureService='AegisFixture-'+$id;$user='A
 $binaryRoot=Join-Path $env:ProgramFiles ('AEGIS-Test-'+$id)
 $dataRoot=Join-Path $env:ProgramData ('AEGIS-Test-'+$id)
 $resultPath=Join-Path $OutputRoot 'provisioning-results.json'
+function Set-FixtureInternetOrigin([string]$Path) {
+    # Windows PowerShell 5.1 uses .NET Framework, whose File.WriteAllText rejects
+    # the ADS colon syntax. Its filesystem provider supports named streams.
+    $zone="[ZoneTransfer]`r`nZoneId=3`r`n"
+    Set-Content -LiteralPath $Path -Stream Zone.Identifier -Value $zone -Encoding ASCII -NoNewline
+    if((Get-Content -LiteralPath $Path -Stream Zone.Identifier -Raw) -cne $zone){throw 'fixture_origin_stream_invalid'}
+}
 function Record-Check([string]$Category,[scriptblock]$Action) {
     if(!$categories.ContainsKey($Category)){$categories[$Category]=[ordered]@{executed=0;passed=0;failed=0;skipped=0}}
     $item=$categories[$Category];$item.executed++
@@ -51,7 +58,7 @@ try {
     $programAsset=Join-Path $binaryRoot 'immutable.txt';$dataAsset=Join-Path $dataRoot 'immutable.txt'
     [IO.File]::WriteAllText($programAsset,'synthetic immutable');[IO.File]::WriteAllText($dataAsset,'synthetic immutable')
     $state=Join-Path $dataRoot 'state';New-Item -ItemType Directory -Path $state | Out-Null;Set-AgentServiceTreeAcl $state $sid 'State'
-    $zone=Join-Path $dataRoot 'origin.ps1';[IO.File]::WriteAllText($zone,'# inert policy-origin fixture');[IO.File]::WriteAllText(($zone+':Zone.Identifier'),"[ZoneTransfer]`r`nZoneId=3`r`n")
+    $zone=Join-Path $dataRoot 'origin.ps1';[IO.File]::WriteAllText($zone,'# inert policy-origin fixture');Set-FixtureInternetOrigin $zone
     $password=[Guid]::NewGuid().ToString('N')+'aA!4'
     $diagnostics.stage='local_user'
     $secure=ConvertTo-SecureString $password -AsPlainText -Force

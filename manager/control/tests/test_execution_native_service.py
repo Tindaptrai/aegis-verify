@@ -18,6 +18,39 @@ CATEGORIES = (
 
 
 class NativeGateRefusalTests(SimpleTestCase):
+    @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell stream contract')
+    def test_ps51_origin_fixture_retains_internet_zone_and_inert_file(self):
+        """Extract only the stream helper; never execute the elevated fixture."""
+        with tempfile.TemporaryDirectory(prefix='aegis-origin-fixture-') as temporary:
+            path = Path(temporary).resolve() / 'origin.ps1'
+            body = b'# inert policy-origin fixture'
+            path.write_bytes(body)
+            environment = os.environ | {
+                'AEGIS_TEST_ORIGIN_FILE': str(path),
+                'AEGIS_TEST_ORIGIN_SCRIPT': str(ROOT / 'scripts/tests/agent/Test-ExecutionProvisioning.ps1'),
+            }
+            command = r'''
+$ErrorActionPreference='Stop'
+$tokens=$null;$errors=$null
+$ast=[Management.Automation.Language.Parser]::ParseFile($env:AEGIS_TEST_ORIGIN_SCRIPT,[ref]$tokens,[ref]$errors)
+if($errors.Count){throw 'fixture_parse_failed'}
+$definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Set-FixtureInternetOrigin'},$false)
+if(!$definition){throw 'fixture_origin_helper_missing'}
+. ([scriptblock]::Create($definition.Extent.Text))
+Set-FixtureInternetOrigin $env:AEGIS_TEST_ORIGIN_FILE
+$zone=[string](Get-Content -LiteralPath $env:AEGIS_TEST_ORIGIN_FILE -Stream Zone.Identifier -Raw)
+@{major=$PSVersionTable.PSVersion.Major;zone=$zone}|ConvertTo-Json -Compress
+'''
+            result = subprocess.run([
+                str(Path(os.environ['SystemRoot']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'),
+                '-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command,
+            ], env=environment, capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data['major'], 5)
+            self.assertEqual(data['zone'], '[ZoneTransfer]\r\nZoneId=3\r\n')
+            self.assertEqual(path.read_bytes(), body)
+
     @unittest.skipUnless(os.name == 'nt', 'Windows script contract')
     def test_required_gate_fails_without_disposable_prerequisites_and_writes_zero_counts(self):
         """No host mutation: remove CI authorization before invoking the wrapper."""
