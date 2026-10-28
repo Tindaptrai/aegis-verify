@@ -328,6 +328,15 @@ class ProtocolTests(TestCase):
                 job.refresh_from_db()
                 self.assertEqual(job.execution_state,state)
                 self.assertEqual(job.receipt["state"],"execution_unknown")
+                prior_bytes=job.receipt_bytes
+                blocked=self.job()
+                with self.assertRaises(ValueError): approve_job(blocked.pk,self.owner)
+                blocked.refresh_from_db()
+                self.assertEqual(blocked.execution_state,'draft')
+                reconcile_job(job.pk,self.owner)
+                job.refresh_from_db()
+                self.assertEqual(job.receipt_bytes,prior_bytes)
+                self.assertTrue(AuditEntry.objects.filter(job=job,action='leased').exists())
 
     def test_unknown_receipt_for_approved_but_never_leased_job_denied(self):
         job=self.job(); approve_job(job.pk,self.owner)

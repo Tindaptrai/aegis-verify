@@ -10,6 +10,16 @@ on:
       - 'scripts/agent_connection_runtime_files.json'
       - 'scripts/tests/agent/**'
       - 'backend/tests/test_agent_connection_packaging.py'
+      - 'backend/tests/test_required_manager_tests.py'
+      - 'scripts/run_required_manager_tests.py'
+      - 'backend/app/**'
+      - 'connectors/wazuh/**'
+      - 'scenarios/**'
+      - 'tests/fixtures/**'
+      - 'pyproject.toml'
+      - 'demos/scn-001/**'
+      - 'detections/wazuh/scn-001/**'
+      - 'scripts/prepare_scn001_kit.py'
       - 'docs/manager/**'
       - '.github/workflows/agent-connection.yml'
   push:
@@ -22,6 +32,16 @@ on:
       - 'scripts/agent_connection_runtime_files.json'
       - 'scripts/tests/agent/**'
       - 'backend/tests/test_agent_connection_packaging.py'
+      - 'backend/tests/test_required_manager_tests.py'
+      - 'scripts/run_required_manager_tests.py'
+      - 'backend/app/**'
+      - 'connectors/wazuh/**'
+      - 'scenarios/**'
+      - 'tests/fixtures/**'
+      - 'pyproject.toml'
+      - 'demos/scn-001/**'
+      - 'detections/wazuh/scn-001/**'
+      - 'scripts/prepare_scn001_kit.py'
       - 'docs/manager/**'
       - '.github/workflows/agent-connection.yml'
   workflow_dispatch:
@@ -35,9 +55,9 @@ concurrency:
 
 jobs:
   native-connection:
-    name: Presence TLS and native service (${{ matrix.runtime }})
+    name: Published agent and native gates (${{ matrix.runtime }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
@@ -49,10 +69,11 @@ jobs:
     defaults:
       run:
         shell: pwsh
+    env:
+      AEGIS_EXECUTION_GATE_URL: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          # Public packages identify the exact checked-out head, never a merge ref.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -61,6 +82,14 @@ jobs:
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: '10.0.x'
+      - name: Record exact source and explicit test harness paths
+        run: |
+          $commit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "AEGIS_CONNECTION_SOURCE_COMMIT=$commit" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $harnessRoot = Join-Path (Get-Location).Path 'agent/connection/Aegis.Connection.Tests/bin/Release/net10.0'
+          "AEGIS_EXECUTION_VECTOR_TEST_EXE=$(Join-Path $harnessRoot 'Aegis.Connection.Tests.dll')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          if ($IsWindows) { "AEGIS_EXECUTION_NATIVE_TEST_EXE=$(Join-Path $harnessRoot 'Aegis.Connection.Tests.exe')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
       - name: Require native systemd host and Ubuntu dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -91,66 +120,113 @@ jobs:
           done
           sudo apt-get update
           sudo apt-get install -y ca-certificates libc6 libgcc-s1 libgssapi-krb5-2 libicu74 libssl3t64 libstdc++6 tzdata zlib1g
-      - name: Test core, builders and installer contracts
+      - name: Test Release core, builders and installer contracts
         run: |
           python -m pip install -e '.[test]' -r manager/requirements.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          dotnet run --project agent/connection/Aegis.Connection.Tests -c Release
+          dotnet build agent/connection/Aegis.Connection.Tests -c Release
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $verification = Join-Path $env:RUNNER_TEMP 'connection-verification'
+          New-Item -ItemType Directory -Path $verification -ErrorAction Stop | Out-Null
+          $managedOutput = @(dotnet run --no-build --project agent/connection/Aegis.Connection.Tests -c Release)
+          $managedExit = $LASTEXITCODE
+          $managedOutput | Write-Output
+          $counts = [regex]::Matches(($managedOutput -join "`n"), '(?m)^(\d+)/(\d+) passed$')
+          $passed = 0; $executed = 0
+          if ($counts.Count -eq 1) { $passed = [int]$counts[0].Groups[1].Value; $executed = [int]$counts[0].Groups[2].Value }
+          $success = $managedExit -eq 0 -and $executed -gt 0 -and $passed -eq $executed
+          @{schema_version=1; kind='managed_connection'; source_commit=$env:AEGIS_CONNECTION_SOURCE_COMMIT; run_url=$env:AEGIS_EXECUTION_GATE_URL; executed=$executed; passed=$passed; failed=($executed-$passed); optional_platform_skips=@($managedOutput | Where-Object { $_ -match '^SKIP ' }).Count; result=$(if ($success) {'passed'} else {'failed'})} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $verification 'managed.json') -Encoding utf8
+          if (!$success) { throw 'managed_required_nonzero_gate_failed' }
           $base = Join-Path $env:RUNNER_TEMP 'connection-builder-tests'
           if (Test-Path -LiteralPath $base) { throw 'fresh_basetemp_required' }
-          python -m pytest backend/tests/test_agent_connection_packaging.py -q -p no:cacheprovider --basetemp $base
+          python -m pytest backend/tests/test_agent_connection_packaging.py backend/tests/test_required_manager_tests.py -q -p no:cacheprovider --basetemp $base --junitxml (Join-Path $verification 'builders.xml')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ($IsWindows) {
-            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File scripts/tests/agent/Test-InstallerContracts.ps1
+            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File scripts/tests/agent/Test-InstallerContracts.ps1 -Pure
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File scripts/tests/agent/Test-InstallerContracts.ps1
           } else {
             bash scripts/tests/agent/test-installer-contracts.sh
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Publish pinned self-contained client and deterministic public archive
+      - name: Require real Python to Release C# execution vectors
+        run: |
+          python scripts/run_required_manager_tests.py --require vectors --settings aegis_manager.test_settings --output (Join-Path $env:RUNNER_TEMP 'connection-verification/vectors.json') --source-commit $env:AEGIS_CONNECTION_SOURCE_COMMIT --run-url $env:AEGIS_EXECUTION_GATE_URL control.tests.test_execution_cross_language control.tests.test_execution_contracts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish pinned client and closed deterministic public archive
         run: |
           $build = Join-Path $env:RUNNER_TEMP 'connection-publish'
           $release = Join-Path $env:RUNNER_TEMP 'connection-release'
           $package = Join-Path $env:RUNNER_TEMP 'connection-package'
-          $commit = git rev-parse HEAD
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $commit = $env:AEGIS_CONNECTION_SOURCE_COMMIT
           dotnet publish agent/connection/Aegis.Connection -c Release -r '${{ matrix.runtime }}' --self-contained true -p:DebugSymbols=false -p:DebugType=None -o $build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/stage_agent_connection.py --source-root (Get-Location).Path --build-root $build --output-root $release --runtime '${{ matrix.runtime }}' --version 0.2.0 --commit $commit
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          New-Item -ItemType Directory -Path $package | Out-Null
+          $canonical = @()
           if ($IsWindows) {
-            Expand-Archive -LiteralPath (Join-Path $release 'AEGIS-Agent-Connection-0.2.0-win-x64.zip') -DestinationPath $package
+            $scenario = Join-Path $env:RUNNER_TEMP 'canonical-scn001.yaml'
+            python -c 'import pathlib,subprocess,sys; data=subprocess.check_output(["git","cat-file","blob",sys.argv[1]+":scenarios/SCN-001-powershell-execution.yaml"]); pathlib.Path(sys.argv[2]).open("xb").write(data)' $commit $scenario
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $canonical = @('--canonical-scenario', $scenario)
+          }
+          python scripts/stage_agent_connection.py --source-root (Get-Location).Path --build-root $build --output-root $release --runtime '${{ matrix.runtime }}' --version 0.3.0 --commit $commit @canonical
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Path $package -ErrorAction Stop | Out-Null
+          if ($IsWindows) {
+            Expand-Archive -LiteralPath (Join-Path $release 'AEGIS-Agent-Connection-0.3.0-win-x64.zip') -DestinationPath $package
             $executable = Join-Path $package 'bin/aegis-agent.exe'
           } else {
-            tar -xzf (Join-Path $release 'AEGIS-Agent-Connection-0.2.0-linux-x64.tar.gz') -C $package
+            tar -xzf (Join-Path $release 'AEGIS-Agent-Connection-0.3.0-linux-x64.tar.gz') -C $package
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
             $executable = Join-Path $package 'bin/aegis-agent'
           }
           "AEGIS_CONNECTION_TEST_EXE=$executable" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "AEGIS_CONNECTION_SERVICE_PACKAGE=$package" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "AEGIS_CONNECTION_RELEASE=$release" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "AEGIS_CONNECTION_SOURCE_COMMIT=$commit" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-      - name: Require actual published TLS enrollment and native service lifecycle
+      - name: Require disposable Windows execution categories
+        if: runner.os == 'Windows'
         run: |
-          if (!$env:AEGIS_CONNECTION_TEST_EXE -or !$env:AEGIS_CONNECTION_SERVICE_PACKAGE) { throw 'required_native_gate_inputs_missing' }
-          python manager/manage.py test devices.tests.test_connection_agent --settings=aegis_manager.test_settings --verbosity 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $summary = [ordered]@{
-            schema_version = '1.0'
-            source_commit = $env:AEGIS_CONNECTION_SOURCE_COMMIT
-            runtime = '${{ matrix.runtime }}'
-            checks = @('production-django-issuer-views', 'published-cli-ip-san-mtls', 'same-uuid-reconnect', 'network-2.1-service-account', 'legacy-404-fallback-old-state', 'manager-revoke', 'manager-archive-final-snapshot', 'native-service-account-start-stop', 'reinstall-identity-preserved', 'uninstall-identity-preserved')
-            result = 'passed'
-            reboot_before_login = 'owner-lab-gate-not-executed'
-            run_url = '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+          $nativeRoot = Join-Path $env:RUNNER_TEMP 'connection-execution-native'
+          & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File scripts/tests/agent/Test-WindowsExecution.ps1 -PackageRoot $env:AEGIS_CONNECTION_SERVICE_PACKAGE -OutputRoot $nativeRoot -RequireNative
+          $nativeExit = $LASTEXITCODE
+          $native = Get-Content -LiteralPath (Join-Path $nativeRoot 'execution-native-results.json') -Raw | ConvertFrom-Json
+          function Assert-ClosedGateFields($value, [string[]]$fields) {
+            $actual = @($value.PSObject.Properties.Name)
+            if ($actual.Count -ne $fields.Count -or @($actual | Where-Object { $_ -cnotin $fields }).Count -ne 0) { throw 'required_windows_schema_invalid' }
           }
-          $summary | ConvertTo-Json -Depth 4 | Out-File -LiteralPath (Join-Path $env:AEGIS_CONNECTION_RELEASE 'verification.json') -Encoding utf8
+          Assert-ClosedGateFields $native @('schema_version','kind','source_commit','required','platform','result','categories','lab_gates','run_url','diagnostics')
+          $expected = @('containment','service_identity_acl','service_channel_grants','immutable_default_ancestors','upgrade_rollback_journal','policy_denial','published_presence_mtls_missing_vendor')
+          if ($nativeExit -ne 0 -or ($native.schema_version -isnot [int] -and $native.schema_version -isnot [long]) -or $native.schema_version -ne 1 -or $native.kind -cne 'windows_execution_release_gate' -or $native.required -isnot [bool] -or !$native.required -or $native.platform -cne 'win-x64' -or $native.result -cne 'passed' -or $native.source_commit -cne $env:AEGIS_CONNECTION_SOURCE_COMMIT -or $native.run_url -cne $env:AEGIS_EXECUTION_GATE_URL) { throw 'required_windows_gate_failed' }
+          if (@($native.categories).Count -ne $expected.Count -or @($native.categories.name | Sort-Object -Unique).Count -ne $expected.Count) { throw 'required_windows_categories_invalid' }
+          foreach ($category in $native.categories) {
+            Assert-ClosedGateFields $category @('name','executed','passed','failed','skipped','result')
+            foreach ($field in @('executed','passed','failed','skipped')) { if ($category.$field -isnot [int] -and $category.$field -isnot [long]) { throw 'required_windows_count_type_invalid' } }
+            if ($category.name -cnotin $expected -or $category.executed -le 0 -or $category.passed -ne $category.executed -or $category.failed -ne 0 -or $category.skipped -ne 0 -or $category.result -cne 'passed') { throw 'required_windows_counts_invalid' }
+          }
+          Assert-ClosedGateFields $native.lab_gates @('real_vendor_readiness','scn001_detection','reboot_before_login')
+          foreach ($lab in @('real_vendor_readiness','scn001_detection','reboot_before_login')) { if ($native.lab_gates.$lab -ne 'not_executed') { throw 'lab_gate_must_remain_explicit' } }
+          Assert-ClosedGateFields $native.diagnostics @('stage','code','child_exit_code','exception_type','hresult','fixture','failure_codes','published')
+          if ($native.diagnostics.stage -cne 'complete' -or $null -ne $native.diagnostics.code -or $null -ne $native.diagnostics.exception_type -or $null -ne $native.diagnostics.hresult -or @($native.diagnostics.failure_codes).Count -ne 0 -or ($native.diagnostics.child_exit_code -isnot [int] -and $native.diagnostics.child_exit_code -isnot [long]) -or $native.diagnostics.child_exit_code -ne 0) { throw 'required_windows_diagnostics_inconsistent' }
+          if ($native.diagnostics.published -isnot [array] -or $native.diagnostics.published.Count -ne 0) { throw 'required_windows_published_diagnostics_inconsistent' }
+          if ($null -ne $native.diagnostics.fixture) {
+            Assert-ClosedGateFields $native.diagnostics.fixture @('stage','exception_type','hresult','line')
+            if ($native.diagnostics.fixture.stage -cne 'complete' -or $null -ne $native.diagnostics.fixture.exception_type -or $null -ne $native.diagnostics.fixture.hresult -or ($null -ne $native.diagnostics.fixture.line -and (($native.diagnostics.fixture.line -isnot [int] -and $native.diagnostics.fixture.line -isnot [long]) -or $native.diagnostics.fixture.line -lt 1))) { throw 'required_windows_fixture_diagnostics_inconsistent' }
+          }
+      - name: Require published TLS presence and actual native service lifecycle
+        run: |
+          $required = @('--require','published_presence','--require','published_service')
+          if (!$IsWindows) { $required += @('--require','linux_presence_only') }
+          python scripts/run_required_manager_tests.py @required --settings aegis_manager.test_settings --output (Join-Path $env:RUNNER_TEMP 'connection-verification/published-presence.json') --source-commit $env:AEGIS_CONNECTION_SOURCE_COMMIT --run-url $env:AEGIS_EXECUTION_GATE_URL devices.tests.test_connection_agent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
         with:
           name: AEGIS-Agent-Connection-${{ matrix.runtime }}-${{ github.run_id }}
-          path: ${{ runner.temp }}/connection-release/*
+          path: |
+            ${{ runner.temp }}/connection-release/*
+            ${{ runner.temp }}/connection-verification/*.json
+            ${{ runner.temp }}/connection-verification/builders.xml
+            ${{ runner.temp }}/connection-execution-native/execution-native-results.json
+            ${{ runner.temp }}/connection-execution-native/fixtures/seed-diagnostic.json
           if-no-files-found: error
           retention-days: 14

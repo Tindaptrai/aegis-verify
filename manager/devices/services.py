@@ -53,6 +53,9 @@ def revoke_pairing_code(*, actor, code_id):
 def revoke_device(*, actor, device_id):
     _lock_authority()
     actor = require_product_permission(actor, "manage_devices")
+    from control.execution_ownership import lock_dispatch, lock_device_ownership
+    lock_dispatch()
+    lock_device_ownership(device_id)
     try:
         device = Device.objects.select_for_update().get(pk=device_id)
     except (Device.DoesNotExist, ValueError):

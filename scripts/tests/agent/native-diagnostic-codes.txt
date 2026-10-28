@@ -24,6 +24,7 @@ command_runuser_failed
 command_sha256sum_failed
 command_stat_failed
 command_systemctl_failed
+configuration_fixture_failed
 configuration_invalid
 configuration_mismatch
 diagnostic_unknown
@@ -45,8 +46,13 @@ exception_propertynotfound
 exception_runtime
 exception_unauthorizedaccess
 exception_win32
+execution_configuration_invalid
+execution_path_invalid
+execution_paths_required
 expected_device_id_required_for_mutation
 file_type_invalid
+fixture_cleanup_path_invalid
+fresh_fixture_required
 identity_denied
 identity_expired
 identity_invalid
@@ -108,3 +114,4 @@ uninstall_left_service_or_binary
 untrusted_service_owner_installer_accepted
 untrusted_service_owner_uninstaller_accepted
 usage_invalid
+vendor_free_fixture_required

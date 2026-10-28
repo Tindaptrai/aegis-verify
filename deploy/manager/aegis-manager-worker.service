@@ -7,8 +7,10 @@ Type=simple
 User=aegis-manager
 Group=aegis-manager
 WorkingDirectory=/opt/aegis/current/manager
+# EnvironmentFile may explicitly select the registered v2-only worker instead.
+Environment="AEGIS_MANAGER_WORKER_ARGS=--config /var/lib/aegis-manager/wazuh-reader.json --output-root /var/lib/aegis-manager/evidence"
 EnvironmentFile=/etc/aegis-manager/manager.env
-ExecStart=/opt/aegis/venv/bin/python manage.py manager_worker --config /var/lib/aegis-manager/wazuh-reader.json --output-root /var/lib/aegis-manager/evidence
+ExecStart=/opt/aegis/venv/bin/python manage.py manager_worker $AEGIS_MANAGER_WORKER_ARGS
 Restart=on-failure
 UMask=0077
 NoNewPrivileges=true

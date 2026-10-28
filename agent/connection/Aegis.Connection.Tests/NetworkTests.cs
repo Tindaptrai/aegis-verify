@@ -14,10 +14,33 @@ internal static partial class Program
     private static IReadOnlyList<InterfaceAddresses> Interfaces(params string[] ips) => [new(true, ips.Select(IPAddress.Parse).ToArray())];
     private static NetworkInventory Inventory(Func<Task<IReadOnlyList<InterfaceAddresses>>> source) => new(source, (_, token) => Task.Delay(Timeout.InfiniteTimeSpan, token), new CollectionClock());
     private static void Snapshot(NetworkSnapshot value, string status, string[]? ips, bool truncated = false) =>
-        Check(value.CollectionStatus == status && (ips == null ? value.ReportedIps == null : value.ReportedIps != null && value.ReportedIps.SequenceEqual(ips)) && value.Truncated == truncated && value.AgentVersion == "0.2.0", "incorrect collection snapshot: " + JsonSerializer.Serialize(value));
+        Check(value.CollectionStatus == status && (ips == null ? value.ReportedIps == null : value.ReportedIps != null && value.ReportedIps.SequenceEqual(ips)) && value.Truncated == truncated && value.AgentVersion == "0.3.0", "incorrect collection snapshot: " + JsonSerializer.Serialize(value));
     private const string NetworkOk = "{\"protocol\":\"2.1\",\"server_time\":\"2026-10-24T01:02:03Z\",\"heartbeat_seconds\":15,\"offline_after_seconds\":60}";
     private static void NetworkTests()
     {
+        Test("network state 0.1 0.2 and 0.3 preserve creation identity and execution journal", () =>
+        {
+            foreach (var version in new[] { "0.1.0", "0.2.0", "0.3.0" })
+            {
+                using var temp = new Scratch(); using var ca = new Issuer();
+                IdentityState original;
+                using (var store = StateStore.Acquire(temp.Path))
+                {
+                    var pending = store.Prepare("https://manager.invalid", ca.Certificate.ExportCertificatePem());
+                    store.Promote(ca.Issue(pending)); original = store.Read()! with { AgentVersion = version };
+                }
+                var statePath = Path.Combine(temp.Path, "state.json");
+                File.WriteAllBytes(statePath, JsonSerializer.SerializeToUtf8Bytes(original, Protocol.Json));
+                var before = File.ReadAllBytes(statePath);
+                var (job, _) = ExecutionFixture();
+                var journal = new Aegis.Connection.Execution.ExecutionJournal(Path.Combine(temp.Path, "execution"));
+                var entry = Aegis.Connection.Execution.ExecutionJournalEntry.Received(job);
+                journal.Transition(entry.JobId, null, entry);
+                using var restored = StateStore.Acquire(temp.Path);
+                Check(restored.Read() == original && File.ReadAllBytes(statePath).SequenceEqual(before), "upgrade changed creation version, identity or key");
+                Check(journal.Entries().Single() == entry, "upgrade lost pending journal or signed bytes");
+            }
+        });
         Test("network TLS 0.1 and0.2 enrolled state preserved across DHCP unavailable and archived denial", async () =>
         {
             foreach (var version in new[] { "0.1.0", "0.2.0" })
@@ -26,7 +49,7 @@ internal static partial class Program
                 await using var endpoint = new TlsEndpoint(ca, (_, body) =>
                 {
                     using var doc = JsonDocument.Parse(body); var network = doc.RootElement.GetProperty("network");
-                    Check(network.EnumerateObject().Count() == 4 && network.GetProperty("agent_version").GetString() == "0.2.0", "network DTO/version incorrect");
+                    Check(network.EnumerateObject().Count() == 4 && network.GetProperty("agent_version").GetString() == "0.3.0", "network DTO/version incorrect");
                     if (++received <= 2) Check(network.GetProperty("reported_ips")[0].GetString() == (received == 1 ? "192.0.2.10" : "192.0.2.20"), "DHCP snapshot not refreshed");
                     else Check(network.GetProperty("reported_ips").ValueKind == JsonValueKind.Null && network.GetProperty("collection_status").GetString() == "unavailable", "failed sample kept stale IP");
                     return received == 4 ? new Reply(403,"{\"error\":{\"code\":\"identity_denied\"}}") : new Reply(200,NetworkOk);
@@ -73,13 +96,13 @@ internal static partial class Program
             await RejectedAsync(async () => await client.EnrollAsync(new string('a', 64), CancellationToken.None), "response_invalid");
             Check(endpoint.Requests.Count == 1 && endpoint.Requests.Single().Path == "/agent/v2/enroll", "enrollment fallback/retry");
             using var body = JsonDocument.Parse(endpoint.Requests.Single().Body);
-            Check(body.RootElement.GetProperty("agent_version").GetString() == "0.2.0", "old pending snapshot hid new binary enrollment version");
+            Check(body.RootElement.GetProperty("agent_version").GetString() == "0.3.0", "old pending snapshot hid new binary enrollment version");
         });
         Test("network payload rejects inconsistent unbounded or noncanonical snapshots while legacy arrays stay rejected", () =>
         {
             var state = new IdentityState("pending", "https://manager.invalid", "ca", "", "csr", "synthetic", "linux", "x64", "0.1.0");
             foreach (var invalid in new[] {
-                new NetworkSnapshot("unavailable", [], false, "0.2.0"), new("unavailable", null, true, "0.2.0"), new("ok", null, false, "0.2.0"), new("unknown", null, false, "0.2.0"), new("ok", [], true, "0.2.0"), new("ok", ["127.0.0.1"], false, "0.2.0"), new("ok", ["2001:db8::1%4"], false, "0.2.0"), new("ok", ["::ffff:192.0.2.1"], false, "0.2.0"), new("ok", ["192.0.2.2", "192.0.2.1"], false, "0.2.0"), new("ok", ["192.0.2.1", "192.0.2.1"], false, "0.2.0"), new("ok", [], false, "0.1.0"), new("ok", Enumerable.Range(1,33).Select(n => "192.0.2." + n).ToArray(), false, "0.2.0") })
+                new NetworkSnapshot("unavailable", [], false, "0.3.0"), new("unavailable", null, true, "0.3.0"), new("ok", null, false, "0.3.0"), new("unknown", null, false, "0.3.0"), new("ok", [], true, "0.3.0"), new("ok", ["127.0.0.1"], false, "0.3.0"), new("ok", ["2001:db8::1%4"], false, "0.3.0"), new("ok", ["::ffff:192.0.2.1"], false, "0.3.0"), new("ok", ["192.0.2.2", "192.0.2.1"], false, "0.3.0"), new("ok", ["192.0.2.1", "192.0.2.1"], false, "0.3.0"), new("ok", [], false, "0.1.0"), new("ok", Enumerable.Range(1,33).Select(n => "192.0.2." + n).ToArray(), false, "0.3.0") })
                 Denied(() => Protocol.NetworkHeartbeatRequest(state, invalid), "configuration_invalid");
             foreach (var invalid in new[] { "[]", "{\"protocol\":[]}", "{\"error\":{\"code\":[]}}" })
                 Denied(() => Protocol.Decode<HeartbeatResponse>(System.Text.Encoding.UTF8.GetBytes(invalid),16384,"response_invalid"), "response_invalid");
@@ -164,7 +187,7 @@ internal static partial class Program
             using var temp = new Scratch(); using var ca = new Issuer(); using var store = StateStore.Acquire(temp.Path);
             var state = store.Prepare("https://manager.invalid", ca.Certificate.ExportCertificatePem());
             using var body = JsonDocument.Parse(Protocol.EnrollmentRequest(state, new string('a', 64)));
-            Check(state.AgentVersion == "0.2.0" && body.RootElement.GetProperty("agent_version").GetString() == "0.2.0" && body.RootElement.GetProperty("protocol").GetString() == "2.0", "new enrollment version/protocol incorrect");
+            Check(state.AgentVersion == "0.3.0" && body.RootElement.GetProperty("agent_version").GetString() == "0.3.0" && body.RootElement.GetProperty("protocol").GetString() == "2.0", "new enrollment version/protocol incorrect");
         });
         Test("network TLS new heartbeat uses 2.1 and running version", async () =>
         {
@@ -174,7 +197,7 @@ internal static partial class Program
             await client.HeartbeatAsync(CancellationToken.None);
             using var body = JsonDocument.Parse(endpoint.Requests.Single().Body);
             Check(endpoint.Requests.Single().Path == "/agent/v2/network-heartbeat" && body.RootElement.GetProperty("protocol").GetString() == "2.1", "new route/protocol absent");
-            Check(body.RootElement.GetProperty("network").GetProperty("agent_version").GetString() == "0.2.0", "reported persisted version instead of binary version");
+            Check(body.RootElement.GetProperty("network").GetProperty("agent_version").GetString() == "0.3.0", "reported persisted version instead of binary version");
         });
         Test("network TLS 404 arbitrary body falls back once per process and restart probes again", async () =>
         {

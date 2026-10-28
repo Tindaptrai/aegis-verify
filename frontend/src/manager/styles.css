@@ -191,6 +191,40 @@ body { margin: 0; }
 .device-ips strong:not(:first-child) { margin-top: .5rem; }
 .device-ips button { justify-self: start; font-size: .75rem; }
 .device-uuid, .device-history { overflow-wrap: anywhere; }
+
+/* Reviewed Windows execution stays inside the existing Manager shell. */
+.execution-selection,.execution-parameters,.execution-job,.reviewed-providers { margin:20px 0; }
+.execution-target { display:grid; grid-template-columns:minmax(180px,1fr) auto auto; gap:8px 16px; align-items:center; border-top:1px solid var(--border); padding:18px 0; }
+.execution-target label { margin:0; display:flex; align-items:center; gap:10px; font-size:13px; overflow-wrap:anywhere; }
+.manager-app input[type=radio],.manager-app input[type=checkbox] { width:18px; height:18px; padding:0; flex-shrink:0; accent-color:var(--mint); }
+.execution-target p,.execution-target small { margin:0; grid-column:1/-1; overflow-wrap:anywhere; }
+.execution-target>button { justify-self:start; }
+.execution-parameters select,.execution-drawer select { width:100%; max-width:100%; padding:11px; font:inherit; color:var(--text); background:var(--surface); border:1px solid var(--border); border-radius:7px; }
+.execution-drawer { width:620px; }
+.execution-drawer summary,.reviewed-providers summary { cursor:pointer; padding:12px 0; }
+.execution-metadata { margin:20px 0; display:grid; gap:8px; }
+.execution-metadata dt { color:var(--muted); font-size:11px; }
+.execution-metadata dd { margin:0 0 10px; overflow-wrap:anywhere; }
+.execution-metadata code,.reviewed-providers code { overflow-wrap:anywhere; word-break:break-all; }
+.execution-stages { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.execution-stages article { border:1px solid var(--border); border-radius:9px; padding:16px; overflow-wrap:anywhere; }
+.execution-job>p { overflow-wrap:anywhere; }
+.reviewed-providers ul { padding-left:20px; }
+.reviewed-providers li { padding:12px 0; overflow-wrap:anywhere; }
+.execution-report { margin-top:24px; overflow-wrap:anywhere; }
+.execution-report .overview,.execution-report .run-charts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:16px 0; }
+.execution-report .stat,.execution-report .chart-panel,.execution-report .notice { padding:16px; border:1px solid var(--border); border-radius:8px; margin:12px 0; }
+.execution-report .stat-value { font-size:20px; }.execution-report .stat-of { font-size:12px; }
+.execution-report .tabs { display:flex; gap:8px; }.execution-report [aria-selected=true] { border-color:var(--mint); }
+.execution-report .table-wrap { overflow:auto; }.execution-report table { border-collapse:collapse; width:100%; font-size:12px; }
+.execution-report th,.execution-report td { padding:12px; text-align:left; border-bottom:1px solid var(--border); }
+.execution-report .badge { display:inline-block; border:1px solid var(--border); padding:3px 8px; border-radius:5px; }
+.execution-report .warn,.execution-report .fail { color:var(--amber); }.execution-report .ok { color:var(--mint); }
+.execution-report .timeline { padding-left:24px; }.execution-report .timeline li { border:1px solid var(--border); padding:14px; margin:12px 0; border-radius:8px; }
+.execution-report .timeline .highlight { border-color:var(--mint); }.execution-report .event-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.execution-report dd { margin:0; }.execution-report .muted,.execution-report .event-meta { color:var(--muted); }
+.execution-report svg { max-width:100%; height:auto; }.execution-report a,.execution-job>a { color:var(--mint); }
+@media (max-width:760px) { .execution-target { grid-template-columns:1fr; }.execution-stages,.execution-report .overview,.execution-report .run-charts { grid-template-columns:1fr; }.execution-drawer { width:100%; }.execution-report .event-fields { grid-template-columns:1fr; } }
 .device-history { display: grid; gap: 1rem; padding-left: 1.2rem; }
 .devices-table td { vertical-align: top; }
 @media (max-width: 700px) { .device-dialog { width: 100%; max-width: 100%; } .device-ips { min-width: 11rem; } }

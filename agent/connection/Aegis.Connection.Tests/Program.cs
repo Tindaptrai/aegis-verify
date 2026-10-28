@@ -10,15 +10,29 @@ internal static partial class Program
     private static readonly List<(string Name, Func<Task> Run)> Tests = [];
     private static async Task<int> Main(string[] args)
     {
+        if (args.Length > 0 && args[0].StartsWith("--provisioning-", StringComparison.Ordinal)) return ProvisioningEntry(args);
+        if (args.Length > 0 && args[0] == "--execution-child") return await ExecutionChild(args);
+        var nativeGate = args.Length > 0 && args[0] == "--execution-native";
+        var requireNative = nativeGate && args.Length == 2 && args[1] == "--require-native";
+        if (nativeGate && !(args.Length == 1 || requireNative)) return 2;
+        if (args.Length == 2 && args[0] == "--execution-vector") return ExecutionVector(args[1]);
         StateTests();
         ProtocolTests();
+        ExecutionProtocolTests();
+        ExecutionJournalTests();
+        ExecutionCoordinatorTests();
+        ExecutionNativeTests();
+        ExecutionClientTests();
+        ExecutionSupervisorTests();
+        ExecutionPreflightTests();
+        ExecutionProvisioningContracts();
         TransportTests();
         NetworkTests();
         LoopTests();
         CliTests();
         DurabilityTests();
         ServiceHostTests();
-        var selected = Tests.Where(t => args.Length == 0 || t.Name.Contains(args[0], StringComparison.OrdinalIgnoreCase)).ToArray();
+        var selected = Tests.Where(t => nativeGate ? t.Name.StartsWith("execution native ", StringComparison.Ordinal) : args.Length == 0 || t.Name.Contains(args[0], StringComparison.OrdinalIgnoreCase)).ToArray();
         int failed = 0;
         foreach (var test in selected)
         {
@@ -26,6 +40,8 @@ internal static partial class Program
             catch (Exception ex) { failed++; Console.WriteLine("FAIL " + test.Name + ": " + ex); }
         }
         Console.WriteLine($"{selected.Length - failed}/{selected.Length} passed");
+        if (nativeGate) Console.WriteLine(JsonSerializer.Serialize(new { kind = "execution_native_gate", required = requireNative,
+            executed = selected.Length, failed, platform_supported = OperatingSystem.IsWindowsVersionAtLeast(10) && System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.X64 }));
         return failed == 0 && selected.Length > 0 ? 0 : 1;
     }
     private static void Test(string name, Action action) => Tests.Add((name, () => { action(); return Task.CompletedTask; }));

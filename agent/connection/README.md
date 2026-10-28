@@ -1,8 +1,10 @@
 # Presence connection client
 
 `Aegis.Connection` is the .NET 10, dependency-free Windows x64 / Linux x64
-presence client for protocol `2.0`. The executable is `aegis-agent`. Its commands
-register an identity and send heartbeats; it has no scenario execution path.
+connection client, version `0.3.0`, for presence `2.0` and network heartbeat `2.1`.
+The executable is `aegis-agent`. Default installation registers an identity and
+sends heartbeats. Reviewed Windows execution v2 requires explicit local opt-in;
+Linux remains presence-only.
 This identity is independent of the legacy Windows v1 runner and its
 CurrentUser/My certificate provisioning.
 
@@ -119,3 +121,12 @@ Operational errors expose only fixed JSON error codes. Native boot/service,
 reboot-before-login, actual Django/nginx interoperability and Linux execution
 remain deployment/CI/lab gates; local harness TLS uses only synthetic temporary
 certificates and inert presence requests.
+
+## Paired Windows execution 0.3
+
+Presence remains the installation default; Linux is presence-only. Windows opt-in
+requires explicit protected profile/grant/separate exact RSA3072 execution public
+pin and fresh service-local readiness. Old 0.1/0.2 state creation versions,
+identity keys/certificates and durable journal entries are preserved. Follow
+[the reviewed setup/recovery guide](../../docs/manager/windows-web-execution.md).
+Execution receipts and health do not establish detection or collection completeness.

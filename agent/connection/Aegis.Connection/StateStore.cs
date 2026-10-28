@@ -37,6 +37,12 @@ public sealed class StateStore : IDisposable
     }
     private static readonly string EmptyStatus = JsonSerializer.Serialize(new { device_id = (string?)null, environment_id = (string?)null, generation = (int?)null, certificate_expires_at = (string?)null, manager_origin = (string?)null, last_acknowledged_at = (string?)null, state = "unconfigured" });
     public static StateStore Acquire(string directory) => Acquire(directory, new DirectoryDurability());
+    internal static IdentityState ReadExisting(string directory)
+    {
+        if (!Path.IsPathFullyQualified(directory)) throw new ConnectionException("state_invalid");
+        using var reader = new StateStore(Path.GetFullPath(directory), null, new DirectoryDurability());
+        return reader.Read() ?? throw new ConnectionException("identity_missing");
+    }
     internal static StateStore Acquire(string directory, IDirectoryDurability durability)
     {
         FileStream? held = null;
@@ -152,7 +158,7 @@ public sealed class StateStore : IDisposable
     {
         try
         {
-            if (state.Kind is not ("pending" or "enrolled") || Protocol.Origin(state.ManagerOrigin).GetLeftPart(UriPartial.Authority) != state.ManagerOrigin || state.Hostname.Length is < 1 or > 255 || state.Hostname.Any(char.IsControl) || state.Os is not ("windows" or "linux") || state.Architecture != "x64" || state.AgentVersion is not ("0.1.0" or "0.2.0") || state.Failure != null && !Failures.Contains(state.Failure) || state.LastAcknowledgedAt != null && !DateTimeOffset.TryParse(state.LastAcknowledgedAt, out _)) throw new CryptographicException();
+            if (state.Kind is not ("pending" or "enrolled") || Protocol.Origin(state.ManagerOrigin).GetLeftPart(UriPartial.Authority) != state.ManagerOrigin || state.Hostname.Length is < 1 or > 255 || state.Hostname.Any(char.IsControl) || state.Os is not ("windows" or "linux") || state.Architecture != "x64" || state.AgentVersion is not ("0.1.0" or "0.2.0" or "0.3.0") || state.Failure != null && !Failures.Contains(state.Failure) || state.LastAcknowledgedAt != null && !DateTimeOffset.TryParse(state.LastAcknowledgedAt, out _)) throw new CryptographicException();
             using var ca = Certificates.PublicPem(state.ServerCaPem);
             // Persisted expired trust/identity must still be readable for status and explicit retirement.
             if (!ca.Extensions.OfType<X509BasicConstraintsExtension>().Any(e => e.CertificateAuthority)) throw new CryptographicException();

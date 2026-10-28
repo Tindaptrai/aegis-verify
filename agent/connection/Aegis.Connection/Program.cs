@@ -18,16 +18,31 @@ internal static class Program
     {
         try
         {
-            if (args.Length == 0 || args[0] is not ("connect" or "run" or "status" or "retire" or "service")) throw new ConnectionException("usage_invalid");
+            if (args.Length == 0 || args[0] is not ("connect" or "run" or "status" or "retire" or "service" or "execution-validate" or "execution-status")) throw new ConnectionException("usage_invalid");
             var command = args[0];
             var expected = command switch { "connect" => new[] { "--manager", "--server-ca", "--state-dir" }, "retire" => ["--state-dir", "--device-id"], _ => ["--state-dir"] };
+            string[] executionOptions = ["--execution-profile", "--execution-grant", "--execution-key"];
+            var allowed = command is "run" or "service" or "execution-validate" ? expected.Concat(executionOptions).ToArray() : expected;
             var options = new Dictionary<string, string>(StringComparer.Ordinal);
             for (int i = 1; i < args.Length; i += 2)
-                if (i + 1 >= args.Length || !expected.Contains(args[i]) || !options.TryAdd(args[i], args[i + 1])) throw new ConnectionException("usage_invalid");
-            if (options.Count != expected.Length) throw new ConnectionException("usage_invalid");
+                if (i + 1 >= args.Length || !allowed.Contains(args[i]) || !options.TryAdd(args[i], args[i + 1])) throw new ConnectionException("usage_invalid");
+            var executionCount = executionOptions.Count(options.ContainsKey);
+            if (expected.Any(k => !options.ContainsKey(k)) || executionCount is not (0 or 3) ||
+                command == "execution-validate" && executionCount != 3 || executionCount > 0 && !OperatingSystem.IsWindows()) throw new ConnectionException("usage_invalid");
+            var paths = executionCount == 3 ? new Execution.ExecutionConfigurationPaths(options[executionOptions[0]], options[executionOptions[1]], options[executionOptions[2]]) : null;
             var directory = options["--state-dir"];
-            if (command == "service") return WindowsServiceHost.Run(directory);
-            if (command == "run") return await HeartbeatLoop.RunAsync(directory, token);
+            if (command == "execution-validate")
+            {
+                var result = Execution.ExecutionDiagnostics.ValidateConfiguration(directory, paths!);
+                Console.Out.WriteLine(JsonSerializer.Serialize(result, Protocol.Json)); return result.ConfigurationValid ? 0 : 3;
+            }
+            if (command == "execution-status")
+            {
+                var result = Execution.ExecutionDiagnostics.ReadStatus(directory);
+                Console.Out.WriteLine(JsonSerializer.Serialize(result, Protocol.Json)); return result.DrainState == "unknown" ? 3 : 0;
+            }
+            if (command == "service") return WindowsServiceHost.Run(directory, paths);
+            if (command == "run") return await Execution.AgentSupervisor.RunAsync(directory, paths, token);
             if (command == "status") { Console.Out.WriteLine(StateStore.Status(directory)); return 0; }
             using var store = StateStore.Acquire(directory);
             if (command == "retire") { store.Retire(options["--device-id"]); Console.Out.WriteLine(store.StatusJson()); return 0; }
