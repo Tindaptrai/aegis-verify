@@ -1,0 +1,21 @@
+[Unit]
+Description=AEGIS bounded collection worker
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=aegis-manager
+Group=aegis-manager
+WorkingDirectory=/opt/aegis/current/manager
+EnvironmentFile=/etc/aegis-manager/manager.env
+ExecStart=/opt/aegis/venv/bin/python manage.py manager_worker --config /var/lib/aegis-manager/wazuh-reader.json --output-root /var/lib/aegis-manager/evidence
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aegis-manager
+
+[Install]
+WantedBy=multi-user.target
