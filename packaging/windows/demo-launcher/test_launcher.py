@@ -42,12 +42,42 @@ def compile_launcher(destination, extra_source=None):
         raise AssertionError("Launcher must compile before its behavior can run:\n" + completed.stdout + completed.stderr)
 
 
+def open_status(path):
+    if not WINDOWS:
+        return Path(path).open("r", encoding="utf-8-sig")
+
+    import msvcrt
+
+    # WriteResult atomically replaces each snapshot. Ordinary Python file opens
+    # deny delete/rename sharing on Windows and can make the publisher fail.
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_ulong, ctypes.c_ulong,
+                                  ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_void_p]
+    kernel.CreateFileW.restype = ctypes.c_void_p
+    kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+    handle = kernel.CreateFileW(str(Path(path).absolute()), 0x80000000, 0x1 | 0x2 | 0x4,
+                                None, 3, 0x80, None)  # GENERIC_READ; OPEN_EXISTING
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY | os.O_NOINHERIT)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    try:
+        return os.fdopen(descriptor, "r", encoding="utf-8-sig")
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def wait_status(path, phase, process, timeout=90):
     deadline = time.monotonic() + timeout
     last = None
     while time.monotonic() < deadline:
         try:
-            last = json.loads(path.read_text(encoding="utf-8-sig"))
+            with open_status(path) as stream:
+                last = json.load(stream)
         except (OSError, ValueError):
             pass
         if last and last.get("phase") == phase:
@@ -107,6 +137,39 @@ class LauncherBuild:
 
 @unittest.skipUnless(WINDOWS and CSC.is_file(), "Windows .NET Framework compiler required")
 class LauncherTests(LauncherBuild, unittest.TestCase):
+    def test_open_status_allows_atomic_publishing_and_preserves_reader_snapshot(self):
+        case = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="status snapshot thử ")))
+        harness = case / "StatusWriter.cs"
+        harness.write_text(r'''
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using AegisDemo;
+class LauncherContracts {
+    public static int Main(string[] args) {
+        try {
+            typeof(LauncherSession).Assembly.GetType("AegisDemo.Program")
+                .GetMethod("WriteResult", BindingFlags.Static | BindingFlags.NonPublic)
+                .Invoke(null, new object[] { args[0], new Dictionary<string, object> { { "phase", "ready" } } });
+            return 0;
+        } catch (TargetInvocationException error) {
+            Console.Error.WriteLine(error.InnerException);
+            return 17;
+        }
+    }
+}
+''', encoding="utf-8")
+        writer = case / "StatusWriter.exe"
+        compile_launcher(writer, harness)
+        result = case / "status.json"
+        result.write_text('{"phase":"preparing"}', encoding="utf-8")
+        with open_status(result) as reader:
+            completed = subprocess.run([str(writer), str(result)], capture_output=True, text=True, timeout=10)
+            self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+            self.assertEqual(json.load(reader), {"phase": "preparing"})
+        with open_status(result) as reader:
+            self.assertEqual(json.load(reader), {"phase": "ready"})
+
     def test_missing_neighbor_executable_has_readable_persistent_error(self):
         with tempfile.TemporaryDirectory(prefix="missing executable ") as folder:
             case = Path(folder)
