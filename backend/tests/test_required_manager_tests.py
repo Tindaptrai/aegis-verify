@@ -73,6 +73,21 @@ def test_optional_cross_platform_skip_is_recorded_without_invalidating_required_
     assert value["categories"][0]["executed"] == 1
 
 
+def test_decorated_required_skip_cannot_hide_behind_another_success():
+    result = run_cases("pass")
+    class RequiredSkipped(unittest.TestCase):
+        def id(self):
+            return "control.tests.test_execution_cross_language.ExecutionCrossLanguageTests.test_decorated_skip"
+        @unittest.skip("synthetic required prerequisite unavailable")
+        def runTest(self): pass
+    RequiredSkipped().run(result)
+    value = report(result)
+    assert value["result"] == "failed"
+    assert value["totals"] == {"executed": 1, "passed": 1, "failed": 0, "skipped": 1}
+    assert value["categories"][0]["skipped"] == 1
+    assert value["categories"][0]["executed"] == 1
+
+
 def test_missing_prerequisites_produce_failed_zero_artifact(tmp_path):
     gate = gate_module()
     errors = gate.prerequisites(("postgres_execution", "nginx_execution", "vectors", "published_service"),

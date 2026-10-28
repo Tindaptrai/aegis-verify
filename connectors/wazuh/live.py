@@ -5,11 +5,13 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone, timedelta
 import hashlib
 import fnmatch
-from http.client import HTTPException
+from http.client import HTTPException, HTTPResponse, HTTPSConnection
+import io
 import json
 import os
 from pathlib import Path
 import re
+import socket
 import ssl
 import time
 from urllib.error import HTTPError, URLError
@@ -73,6 +75,91 @@ class _NoRedirect(HTTPRedirectHandler):
         return None
 
 
+_HTTP_REQUEST_SECONDS = 30
+
+
+def _remaining(deadline, code):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise LiveError(code)
+    return remaining
+
+
+class _DeadlineReader(io.RawIOBase):
+    """Enforce the absolute deadline below headers and chunk framing too."""
+    def __init__(self, raw, sock, deadline, code):
+        self._raw, self._sock = raw, sock
+        self._deadline, self._code = deadline, code
+
+    def readable(self):
+        return True
+
+    def readinto(self, target):
+        self._sock.settimeout(min(10, _remaining(self._deadline, self._code)))
+        count = self._raw.readinto(target)
+        _remaining(self._deadline, self._code)
+        return count
+
+    def close(self):
+        self._raw.close()
+        super().close()
+
+
+class _DeadlineSocket:
+    def __init__(self, sock, deadline, code):
+        self._sock, self._deadline, self._code = sock, deadline, code
+
+    def makefile(self, mode):
+        return io.BufferedReader(_DeadlineReader(self._sock.makefile(mode, buffering=0),
+                                                self._sock, self._deadline, self._code))
+
+
+class _DeadlineHTTPSConnection(HTTPSConnection):
+    def __init__(self, *args, deadline, deadline_code, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._deadline, self._deadline_code = deadline, deadline_code
+        self._create_connection = self._connect_until
+        self.response_class = lambda sock, **options: HTTPResponse(
+            _DeadlineSocket(sock, deadline, deadline_code), **options)
+
+    def send(self, data):
+        _remaining(self._deadline, self._deadline_code)
+        if self.sock is None:
+            self.connect()
+        self.sock.settimeout(min(10, _remaining(self._deadline, self._deadline_code)))
+        super().send(data)
+        _remaining(self._deadline, self._deadline_code)
+
+    def _connect_until(self, address, timeout=10, source_address=None):
+        # The OS resolver is synchronous and cannot be cancelled portably. Never
+        # start a socket, TLS handshake or HTTP request after a late DNS result.
+        addresses = socket.getaddrinfo(*address, 0, socket.SOCK_STREAM)
+        _remaining(self._deadline, self._deadline_code)
+        failure = None
+        for family, kind, protocol, _, target in addresses:
+            remaining = _remaining(self._deadline, self._deadline_code)
+            sock = socket.socket(family, kind, protocol)
+            try:
+                sock.settimeout(min(10, timeout, remaining))
+                if source_address:
+                    sock.bind(source_address)
+                sock.connect(target)
+                sock.settimeout(min(10, _remaining(self._deadline, self._deadline_code)))
+                return sock
+            except (OSError, LiveError) as error:
+                sock.close()
+                failure = error
+        _remaining(self._deadline, self._deadline_code)
+        raise failure or OSError('connection_failed')
+
+
+class _DeadlineHTTPSHandler(HTTPSHandler):
+    def https_open(self, request):
+        factory = lambda *args, **kwargs: _DeadlineHTTPSConnection(
+            *args, deadline=self.deadline, deadline_code=self.deadline_code, **kwargs)
+        return self.do_open(factory, request, context=self._context)
+
+
 class HttpsTransport:
     """TLS required, no ambient proxies or redirects, only this collector's routes."""
     def __init__(self, config):
@@ -81,7 +168,17 @@ class HttpsTransport:
             self.context = ssl.create_default_context(cafile=config.ca_file)
         except (OSError, ssl.SSLError):
             raise LiveError('invalid_ca') from None
-        self._opener = build_opener(ProxyHandler({}), HTTPSHandler(context=self.context), _NoRedirect())
+        self._handler = _DeadlineHTTPSHandler(context=self.context)
+        self._opener = build_opener(ProxyHandler({}), self._handler, _NoRedirect())
+        self._active_deadline = None
+
+    def _request_with_deadline(self, method, path, body, *, deadline, deadline_code):
+        previous = self._active_deadline
+        self._active_deadline = deadline, deadline_code
+        try:
+            return self.request(method, path, body)
+        finally:
+            self._active_deadline = previous
 
     def request(self, method, path, body):
         initial = f'/{self._config.index}/_search?scroll=1m'
@@ -95,28 +192,51 @@ class HttpsTransport:
                           data=json.dumps(body, allow_nan=False).encode(), method=method,
                           headers={'Authorization': 'Basic ' + auth, 'Content-Type': 'application/json',
                                    'Accept': 'application/json', 'Accept-Encoding': 'identity'})
+        deadline, deadline_code = time.monotonic() + _HTTP_REQUEST_SECONDS, 'request_deadline'
+        if self._active_deadline is not None and self._active_deadline[0] <= deadline:
+            deadline, deadline_code = self._active_deadline
+        self._handler.deadline, self._handler.deadline_code = deadline, deadline_code
         for attempt in range(3):
             try:
-                with self._opener.open(request, timeout=10) as response:
-                    raw = response.read(MAX_BYTES + 1)
+                with self._opener.open(request, timeout=min(10, _remaining(deadline, deadline_code))) as response:
+                    raw = bytearray()
+                    while len(raw) <= MAX_BYTES:
+                        _remaining(deadline, deadline_code)
+                        chunk = response.read1(min(64 * 1024, MAX_BYTES + 1 - len(raw)))
+                        _remaining(deadline, deadline_code)
+                        if not chunk:
+                            break
+                        raw.extend(chunk)
                 if len(raw) > MAX_BYTES:
                     raise LiveError('response_too_large')
-                return raw
+                return bytes(raw)
             except HTTPError as error:
                 status = error.code
                 retry_after = error.headers.get('Retry-After', '')
                 error.close()
+                remaining = _remaining(deadline, deadline_code)
                 if status == 429 and attempt < 2:
                     if retry_after and (not retry_after.isascii() or not retry_after.isdigit() or len(retry_after) > 2 or int(retry_after) > 10):
                         raise LiveError('rate_limited') from None
-                    time.sleep(max(2 ** attempt, int(retry_after or '0')))
+                    delay = max(2 ** attempt, int(retry_after or '0'))
+                    if delay >= remaining:
+                        raise LiveError(deadline_code) from None
+                    time.sleep(delay)
                     continue
                 code = {401: 'authentication_failed', 403: 'permission_denied', 429: 'rate_limited'}.get(status, 'http_error')
                 raise LiveError(code) from None
             except (ssl.SSLError, URLError, OSError, ValueError, HTTPException):
                 # A lost scroll response is ambiguous: replay could skip a page.
+                _remaining(deadline, deadline_code)
                 raise LiveError('connection_or_tls_failed') from None
         raise LiveError('rate_limited')
+
+
+def _request_until(transport, method, path, body, *, deadline, deadline_code):
+    bounded = getattr(transport, '_request_with_deadline', None)
+    if bounded is not None:
+        return bounded(method, path, body, deadline=deadline, deadline_code=deadline_code)
+    return transport.request(method, path, body)
 
 
 def _json(raw):
@@ -208,7 +328,20 @@ def _map(hit, config, ref, ingested_at):
         raise LiveError('unsupported_or_invalid_record') from None
 
 
-def collect(config, output, *, transport=None):
+@dataclass
+class _CollectionSetState:
+    started: float
+    response_bytes: int = 0
+    identities: set = field(default_factory=set)
+
+    def check(self):
+        if self.response_bytes > 16 * 1024 * 1024:
+            raise LiveError('batch_byte_limit')
+        if time.monotonic() - self.started >= 600:
+            raise LiveError('batch_deadline')
+
+
+def collect(config, output, *, transport=None, source_ref_prefix='', _batch=None):
     """Publish inputs only after all pages validate. Retain failures as INCOMPLETE.
 
     Raw responses are original bytes; hit files are explicitly JSON derivatives.
@@ -228,6 +361,9 @@ def collect(config, output, *, transport=None):
     total, byte_count, completed = None, 0, False
     ingested_at = datetime.now(timezone.utc).isoformat()
     started = time.monotonic()
+    deadline, deadline_code = started + 300, 'collection_deadline'
+    if _batch is not None and _batch.started + 600 <= deadline:
+        deadline, deadline_code = _batch.started + 600, 'batch_deadline'
     body = {'size': config.page_size, 'sort': ['_doc'], 'track_total_hits': True,
             'query': {'bool': {'filter': [
                 {'term': {'agent.id': config.agent_id}},
@@ -243,21 +379,32 @@ def collect(config, output, *, transport=None):
     path = f'/{config.index}/_search?scroll=1m'
     try:
         for page_no in range(1, config.max_pages + 1):
+            if _batch is not None:
+                _batch.check()
             if time.monotonic() - started > 300:
                 raise LiveError('collection_deadline')
-            raw = transport.request('POST', path, body)
+            raw = _request_until(transport, 'POST', path, body,
+                                 deadline=deadline, deadline_code=deadline_code)
             byte_count += len(raw)
-            if byte_count > 16 * 1024 * 1024:
-                raise LiveError('collection_byte_limit')
+            if _batch is not None:
+                _batch.response_bytes += len(raw)
             response_name = f'response-{page_no:04d}.json'
-            _write(output / response_name, raw)
-            responses.append({'path': response_name, 'sha256': _hash(raw)})
+            if (byte_count <= 16 * 1024 * 1024
+                    and (_batch is None or _batch.response_bytes <= 16 * 1024 * 1024)):
+                _write(output / response_name, raw)
+                responses.append({'path': response_name, 'sha256': _hash(raw)})
             doc = _json(raw)
             new_cursor = doc.get('_scroll_id')
             if type(new_cursor) is str and 0 < len(new_cursor) <= 16384:
                 cursor = new_cursor
             else:
                 raise LiveError('invalid_cursor')
+            # Discover the issued cursor before enforcing aggregate limits, so
+            # even the response that exhausts a budget receives bounded cleanup.
+            if _batch is not None:
+                _batch.check()
+            if byte_count > 16 * 1024 * 1024:
+                raise LiveError('collection_byte_limit')
             shards = doc.get('_shards', {})
             if (doc.get('timed_out') is not False or doc.get('terminated_early', False) is not False
                     or not isinstance(shards, dict)
@@ -290,14 +437,14 @@ def collect(config, output, *, transport=None):
                 if type(hit) is not dict or any(type(hit.get(k)) is not str or not hit[k] for k in ('_id', '_index')):
                     raise LiveError('invalid_identity')
                 identity = (hit['_index'], hit['_id'])
-                if identity in seen:
+                if identity in seen or (_batch is not None and identity in _batch.identities):
                     raise LiveError('duplicate_record')
                 seen.add(identity)
                 if len(seen) > total or len(seen) > config.max_records:
                     raise LiveError('count_limit_or_mismatch')
-                ref = f'hit-{len(files) + 1:06d}'
+                name = f'hit-{len(files) + 1:06d}.json'
+                ref = source_ref_prefix + name[:-5]
                 parser_id, derived, context, event = _map(hit, config, ref, ingested_at)
-                name = ref + '.json'
                 _write(output / name, derived)
                 files.append(dict(path=name, source_ref=ref, parser=parser_id, sha256=_hash(derived), context=context))
                 events.append(event.model_dump(mode='json'))
@@ -309,15 +456,25 @@ def collect(config, output, *, transport=None):
     finally:
         if cursor is not None:
             try:
-                cleared = _json(transport.request('DELETE', '/_search/scroll', {'scroll_id': [cursor]}))
+                # Cleanup receives a separate finite 30-second allowance even
+                # after the work deadline; it never permits late publication.
+                raw = _request_until(transport, 'DELETE', '/_search/scroll', {'scroll_id': [cursor]},
+                                     deadline=time.monotonic() + _HTTP_REQUEST_SECONDS,
+                                     deadline_code='cleanup_deadline')
+                if _batch is not None:
+                    _batch.response_bytes += len(raw)
+                cleared = _json(raw)
                 cleanup_failed = cleared.get('succeeded') is not True
             except LiveError:
                 cleanup_failed = True
             if cleanup_failed and not completed:
                 raise LiveError('cleanup_failed') from None
+        if _batch is not None:
+            _batch.check()
     summary = dict(schema_version='0.1.0', record_count=len(events), collection_assurance='unknown',
                    query_complete=True, cleanup_failed=cleanup_failed, index=config.index,
-                   agent_id=config.agent_id, start=config.start, end=config.end,
+                   agent_id=config.agent_id, environment_id=config.environment_id,
+                   start=config.start, end=config.end,
                    timestamp_basis='wazuh.timestamp', end_exclusive=True,
                    profiles=[name for name, _ in PROFILES.values()],
                    responses=responses, derivations=derivations)
@@ -330,10 +487,12 @@ def collect(config, output, *, transport=None):
         (output / 'INCOMPLETE').unlink()
     except OSError:
         raise LiveError('output_error') from None
+    if _batch is not None:
+        _batch.identities.update(seen)
     return summary
 
 
-def collect_adaptive(config, output, *, transport=None, max_attempts=63):
+def collect_adaptive(config, output, *, transport=None, max_attempts=63, namespace_sources=False):
     """Collect disjoint leaves; never merge them into an oversized intake bundle.
 
     Each leaf is a separate snapshot, not a single atomic batch snapshot.
@@ -350,19 +509,20 @@ def collect_adaptive(config, output, *, transport=None, max_attempts=63):
     except OSError:
         raise LiveError('output_error') from None
     _write(output / 'INCOMPLETE', b'Adaptive batch incomplete. Do not evaluate as a complete batch.\n')
-    started = time.monotonic()
+    batch = _CollectionSetState(started=time.monotonic())
     pending = [(config, 0)]
     leaves, attempts = [], 0
     while pending:
         if attempts >= max_attempts:
             raise LiveError('batch_attempt_limit')
-        if time.monotonic() - started >= 600:
-            raise LiveError('batch_deadline')
+        batch.check()
         current, depth = pending.pop()
         attempts += 1
         name = f'attempt-{attempts:04d}'
         try:
-            summary = collect(current, output / name, transport=transport)
+            summary = collect(current, output / name, transport=transport,
+                              source_ref_prefix=name + '-' if namespace_sources else '',
+                              _batch=batch)
         except LiveError as error:
             if str(error) != 'record_limit':
                 raise
@@ -378,19 +538,24 @@ def collect_adaptive(config, output, *, transport=None, max_attempts=63):
             continue
         try:
             collection_hash = _hash((output / name / 'collection.json').read_bytes())
+            inputs_hash = (_hash((output / name / 'inputs.json').read_bytes())
+                           if summary['record_count'] else None)
         except OSError:
             raise LiveError('output_error') from None
         leaves.append(dict(path=name, start=current.start, end=current.end,
                            record_count=summary['record_count'],
                            cleanup_failed=summary['cleanup_failed'],
-                           collection_sha256=collection_hash))
+                           collection_sha256=collection_hash, inputs_sha256=inputs_hash))
     result = dict(schema_version='0.1.0', start=config.start, end=config.end,
-                  agent_id=config.agent_id, index=config.index, collections=leaves,
+                  agent_id=config.agent_id, environment_id=config.environment_id,
+                  index=config.index, collections=leaves,
                   attempts=attempts, record_count=sum(x['record_count'] for x in leaves),
                   query_complete=True, collection_assurance='unknown',
                   snapshot_scope='per-collection',
                   cleanup_failed=any(x['cleanup_failed'] for x in leaves))
+    batch.check()
     _write(output / 'batch.json', _encode(result))
+    batch.check()
     try:
         (output / 'INCOMPLETE').unlink()
     except OSError:

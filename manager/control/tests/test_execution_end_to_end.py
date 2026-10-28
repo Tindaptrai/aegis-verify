@@ -18,26 +18,27 @@ class ExecutionEndToEndTests(ExecutionCollectionFixture,TransactionTestCase):
         raw=page(self.hits(detected=True))
         self.assertTrue(self.run_one(job,[raw,page([],total=2)]))
         job.refresh_from_db(); report=job.report; bundle=self.output/str(job.pk)
+        leaf=bundle/'attempt-0001'
         self.assertEqual((job.execution_state,job.collection_state),('succeeded','evaluated'))
         self.assertEqual(report['evaluation']['final_status'],'Detected')
-        self.assertEqual((bundle/'response-0001.json').read_bytes(),raw)
-        collection=json.loads((bundle/'collection.json').read_bytes())
+        self.assertEqual((bundle/'attempt-0001/response-0001.json').read_bytes(),raw)
+        collection=json.loads((leaf/'collection.json').read_bytes())
         self.assertEqual(collection['responses'][0]['sha256'],sha256(raw).hexdigest())
         self.assertEqual(collection['collection_assurance'],'unknown')
-        inputs=json.loads((bundle/'inputs.json').read_bytes())
+        inputs=json.loads((leaf/'inputs.json').read_bytes())
         evidence=report['evaluation']['evidence_index']; ids={row['event_id'] for row in evidence}
         self.assertEqual(len(ids),2)
         for row in evidence:
             ref,record=row['raw_event_ref'].split('#')
             self.assertEqual(record,'record=1')
             entry=next(item for item in inputs['files'] if item['source_ref']==ref)
-            actual=(bundle/entry['path']).read_bytes()
+            actual=(leaf/entry['path']).read_bytes()
             self.assertEqual(row['raw_event_hash'],sha256(actual).hexdigest())
             self.assertEqual(entry['sha256'],sha256(actual).hexdigest())
             self.assertEqual(json.loads(actual)['_source']['synthetic_unknown'],{'retained':'raw-only'})
             self.assertTrue(any(item['raw_event_ref']==row['raw_event_ref'] and item['event_id']==row['event_id']
                 for item in report['intake']['ledger']))
-        canonical=json.loads((bundle/'canonical.json').read_bytes())
+        canonical=json.loads((leaf/'canonical.json').read_bytes())
         for event in canonical:
             self.assertIsNone(event['src_ip']); self.assertIsNone(event['dst_ip']); self.assertIsNone(event['file_hash'])
         for assertion in report['evaluation']['assertions']:

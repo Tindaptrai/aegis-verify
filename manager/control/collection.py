@@ -14,8 +14,8 @@ from uuid import UUID
 
 from pydantic import ValidationError
 
-from aegis_verify.cli.service import evaluate_bundle
-from aegis_verify.connectors.wazuh.live import Config, LiveError, collect
+from aegis_verify.cli.service import evaluate_collection_set
+from aegis_verify.connectors.wazuh.live import Config, LiveError, collect_adaptive
 from aegis_verify.dashboard.operations_config import (
     OperationsError, read_windows_acl, validate_windows_acl,
 )
@@ -172,7 +172,7 @@ def collect_and_evaluate(spec, connection, output, *, transport=None):
             password=connection.password, ca_file=connection.ca_file, index=connection.index,
             collection_mode=connection.collection_mode, agent_id=spec.wazuh_agent_id,
             start=spec.start, end=spec.end, environment_id=spec.environment_id)
-        summary = collect(cfg, target, transport=transport)
+        summary = collect_adaptive(cfg, target, transport=transport, namespace_sources=True)
         if summary.get('query_complete') is not True or summary.get('collection_assurance') != 'unknown':
             return CollectionResult('failed', error_code='collection_incomplete')
         if summary.get('cleanup_failed') is not False:
@@ -182,9 +182,10 @@ def collect_and_evaluate(spec, connection, output, *, transport=None):
         _exclusive(target / 'scenario.yaml', scenario_raw)
         _exclusive(target / 'profile.json', profile_raw)
         _exclusive(target / 'context.json', _json_bytes(context.model_dump(mode='json')))
-        report = evaluate_bundle(target / 'scenario.yaml', target)
+        report = evaluate_collection_set(target / 'scenario.yaml', target)
         report['manager_metadata'] = dict(job_id=spec.job_id, run_binding='unknown',
             execution_receipt_is_detection_evidence=False, collection_assurance='unknown',
+            snapshot_scope='per-collection',
             query_time_basis='wazuh.timestamp_[start,end)',
             evaluation_time_basis='canonical_source_event_time_closed_window',
             limitation='No independent event-to-job binding or complete SCN-001 study acceptance.')

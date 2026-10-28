@@ -176,14 +176,18 @@ def counts(states):
 
 
 def build_report(result, required, source_commit, run_url, errors=()):
+    # Some unittest versions report decorator skips before startTest. Count
+    # those as skips, never as executions; a required skip must still fail.
+    outcomes = {identity: state for identity, state in result.outcomes.items()
+                if identity in result.started or state == "skipped"}
     categories = []
     for name in sorted(set(required)):
         if name not in CATEGORIES: raise ValueError("invalid_gate_category")
-        actual = counts(state for identity, state in result.outcomes.items()
-                        if identity in result.started and category_for(identity) == name)
+        actual = counts(state for identity, state in outcomes.items()
+                        if category_for(identity) == name)
         passed = actual["executed"] > 0 and actual["passed"] == actual["executed"] and actual["failed"] == actual["skipped"] == 0
         categories.append(dict(name=name, **actual, result="passed" if passed else "failed"))
-    totals = counts(state for identity, state in result.outcomes.items() if identity in result.started)
+    totals = counts(outcomes.values())
     # Setup/teardown failures may have no started test, but must still fail the gate.
     suite_failures = len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses) + len(result.expectedFailures)
     passed = bool(categories) and not errors and not suite_failures and totals["executed"] > 0 and totals["failed"] == 0 and all(c["result"] == "passed" for c in categories)

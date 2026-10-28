@@ -3,6 +3,10 @@ import json
 import os
 import ssl
 import io
+import socket
+import threading
+import time
+from contextlib import contextmanager
 from urllib.error import HTTPError, URLError
 from http.client import IncompleteRead
 from pathlib import Path
@@ -11,6 +15,7 @@ import pytest
 
 from aegis_verify.connectors.wazuh.live import Config, LiveError, collect, HttpsTransport
 from aegis_verify.connectors.wazuh import parse_wazuh_document
+from aegis_verify.connectors.wazuh import live
 from aegis_verify import private_fs
 from windows_acl import assert_owner_only
 
@@ -262,3 +267,143 @@ def test_transport_rejects_oversized_response(monkeypatch):
     monkeypatch.setattr(transport._opener, 'open', lambda *a, **kw: io.BytesIO(b'x'*(MAX_BYTES+1)))
     with pytest.raises(LiveError, match='^response_too_large$'):
         transport.request('POST', '/wazuh-alerts-*/_search?scroll=1m', {})
+
+
+@contextmanager
+def local_socket_response(monkeypatch, segments):
+    """Exercise real HTTP framing over a socket pair; never contact an endpoint."""
+    reader, writer = socket.socketpair()
+    reader.settimeout(1)
+    writer.settimeout(1)
+    stopped = threading.Event()
+    def respond():
+        try:
+            request = b''
+            while b'\r\n\r\n' not in request:
+                chunk = writer.recv(4096)
+                if not chunk:
+                    return
+                request += chunk
+            head, body = request.split(b'\r\n\r\n', 1)
+            length = next(int(line.split(b':', 1)[1]) for line in head.split(b'\r\n')
+                          if line.lower().startswith(b'content-length:'))
+            while len(body) < length:
+                chunk = writer.recv(4096)
+                if not chunk:
+                    return
+                body += chunk
+            for delay, data in segments:
+                if stopped.wait(delay):
+                    break
+                writer.sendall(data)
+        except OSError:
+            pass
+        finally:
+            writer.close()
+    sender = threading.Thread(target=respond)
+    sender.start()
+    def connect(connection):
+        connection.sock = reader
+    monkeypatch.setattr('http.client.HTTPSConnection.connect', connect)
+    try:
+        yield
+    finally:
+        stopped.set()
+        reader.close()
+        sender.join(timeout=1)
+        assert not sender.is_alive()
+
+
+@pytest.mark.parametrize('segments', [
+    [(0, b'HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n')]
+        + [(0.04, b'x')] * 10,
+    [(0, b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n'), (0.4, b'{}')],
+    [(0.01, bytes([char])) for char in b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}'],
+    [(0, b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n')]
+        + [(0.03, bytes([char])) for char in b'000000000002\r\n{}\r\n0\r\n\r\n'],
+], ids=['slow-body', 'stalled-body', 'slow-headers', 'slow-chunk-framing'])
+def test_absolute_transport_deadline_bounds_http_framing_and_reads(monkeypatch, segments):
+    transport = HttpsTransport(config())
+    monkeypatch.setattr(live, '_HTTP_REQUEST_SECONDS', 0.12, raising=False)
+    with local_socket_response(monkeypatch, segments):
+        started = time.monotonic()
+        with pytest.raises(LiveError, match='^request_deadline$'):
+            transport.request('POST', '/_search/scroll', {'scroll_id': 'test'})
+        assert time.monotonic() - started < 0.3
+
+
+def test_absolute_transport_deadline_clips_open_timeout(monkeypatch):
+    transport = HttpsTransport(config())
+    monkeypatch.setattr(live, '_HTTP_REQUEST_SECONDS', 0.12, raising=False)
+    timeouts = []
+    def respond(*args, **kwargs):
+        timeouts.append(kwargs['timeout'])
+        return io.BytesIO(b'{}')
+    monkeypatch.setattr(transport._opener, 'open', respond)
+    assert transport.request('POST', '/_search/scroll', {'scroll_id': 'test'}) == b'{}'
+    assert 0 < timeouts[0] <= 0.12
+
+
+@pytest.mark.parametrize('method', ['POST', 'DELETE'])
+def test_absolute_transport_deadline_bounds_rate_limit_retries(monkeypatch, method):
+    transport = HttpsTransport(config())
+    elapsed, waits, attempts = [0], [], []
+    monkeypatch.setattr(live, '_HTTP_REQUEST_SECONDS', 30, raising=False)
+    monkeypatch.setattr(live.time, 'monotonic', lambda: elapsed[0])
+    def sleep(seconds):
+        waits.append(seconds)
+        elapsed[0] += seconds
+    def fail(*args, **kwargs):
+        attempts.append(1)
+        elapsed[0] += 9
+        raise HTTPError('https://indexer.example.test', 429, 'test',
+                        {'Retry-After': '10'}, io.BytesIO(b'private'))
+    monkeypatch.setattr(live.time, 'sleep', sleep)
+    monkeypatch.setattr(transport._opener, 'open', fail)
+    with pytest.raises(LiveError, match='^request_deadline$'):
+        transport.request(method, '/_search/scroll', {'scroll_id': 'test'})
+    assert elapsed[0] == 28
+    assert waits == [10]
+    assert len(attempts) == 2
+
+
+def test_late_resolver_result_cannot_start_socket_or_http_activity(monkeypatch):
+    transport = HttpsTransport(config())
+    elapsed = [0]
+    monkeypatch.setattr(live.time, 'monotonic', lambda: elapsed[0])
+    def resolve(*args, **kwargs):
+        elapsed[0] = 31
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('unused.example.test', 443))]
+    monkeypatch.setattr(socket, 'getaddrinfo', resolve)
+    monkeypatch.setattr(socket, 'socket', lambda *a, **k: pytest.fail('late connection'))
+    with pytest.raises(LiveError, match='^request_deadline$'):
+        transport.request('POST', '/_search/scroll', {'scroll_id': 'test'})
+
+
+def test_late_tls_connection_cannot_send_http_after_deadline(monkeypatch):
+    transport = HttpsTransport(config())
+    elapsed = [0]
+    class LateSocket:
+        def settimeout(self, timeout):
+            pass
+        def sendall(self, data):
+            pytest.fail('late HTTP request')
+        def close(self):
+            pass
+    def connect(connection):
+        elapsed[0] = 31
+        connection.sock = LateSocket()
+    monkeypatch.setattr(live.time, 'monotonic', lambda: elapsed[0])
+    monkeypatch.setattr('http.client.HTTPSConnection.connect', connect)
+    with pytest.raises(LiveError, match='^request_deadline$'):
+        transport.request('POST', '/_search/scroll', {'scroll_id': 'test'})
+
+
+@pytest.mark.parametrize('response', [
+    b'HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}',
+    b'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\n\r\n',
+])
+def test_deadline_transport_accepts_complete_http_responses(monkeypatch, response):
+    transport = HttpsTransport(config())
+    with local_socket_response(monkeypatch, [(0, response)]):
+        assert transport.request('POST', '/_search/scroll', {'scroll_id': 'test'}) == b'{}'

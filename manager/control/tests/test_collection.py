@@ -90,7 +90,7 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(result.state, 'evaluated')
         self.assertEqual(result.report['evaluation']['final_status'], 'Inconclusive')
         self.assertEqual(len(result.report['evaluation']['evidence_index']), 2)
-        self.assertEqual((self.root / 'bundle/response-0001.json').read_bytes(), raw)
+        self.assertEqual((self.root / 'bundle/attempt-0001/response-0001.json').read_bytes(), raw)
         self.assertEqual(json.loads((self.root / 'bundle/context.json').read_bytes())['declarations'], [])
         self.assertEqual(result.summary['collection_assurance'], 'unknown')
         self.assertEqual(result.report['manager_metadata']['run_binding'], 'unknown')
@@ -125,6 +125,60 @@ class CollectionTests(unittest.TestCase):
         self.assertEqual(result.error_code, 'collection_failed')
         self.assertNotIn(self.reader_credential, repr(result))
         self.assertTrue((self.root / 'bundle/INCOMPLETE').exists())
+
+    def overflow_transport(self, *, detected=True, later_failure=False):
+        """174 synthetic records, with the witness in different half-open leaves."""
+        anchor, target = self.hits(detected=detected)
+        anchor['_source']['timestamp'] = '2026-01-01T00:00:02Z'
+        target['_source']['timestamp'] = '2026-01-01T00:00:04Z'
+        leaves = [[anchor], [target]]
+        for side, stamp in enumerate(('2026-01-01T00:00:02Z', '2026-01-01T00:00:04Z')):
+            for index in range(86):
+                noise = deepcopy(anchor)
+                noise['_id'] = f'synthetic-noise-{side}-{index}'
+                noise['_source']['timestamp'] = stamp
+                noise['_source']['data']['win']['system']['computer'] = 'synthetic-unrelated'
+                leaves[side].append(noise)
+        responses = [page([], total=174)]
+        for rows in leaves:
+            if later_failure and rows is leaves[1]:
+                responses.append(LiveError('connection_or_tls_failed'))
+                break
+            responses.extend(page(rows[i:i + 20], total=len(rows)) for i in range(0, len(rows), 20))
+            responses.append(page([], total=len(rows)))
+        return SyntheticTransport(responses)
+
+    def test_overflow_evaluates_all_174_records_once_with_cross_leaf_witness(self):
+        result = self.run_collection(self.overflow_transport(), end='2026-01-01T00:00:06Z')
+        self.assertEqual(result.state, 'evaluated')
+        self.assertEqual(result.summary['record_count'], 174)
+        self.assertEqual(result.summary['snapshot_scope'], 'per-collection')
+        self.assertEqual(result.report['counts']['parsed'], 174)
+        self.assertEqual(result.report['evaluation']['final_status'], 'Detected')
+        witnesses = result.report['evaluation']['assertions'][2]['witness_pairs']
+        self.assertEqual(len(witnesses), 1)
+        by_id = {row['event_id']: row['source_ref'] for row in result.report['intake']['ledger']}
+        self.assertTrue(by_id[witnesses[0]['anchor_event_id']].startswith('attempt-0002-'))
+        self.assertTrue(by_id[witnesses[0]['target_event_id']].startswith('attempt-0003-'))
+        self.assertEqual(result.report['comparison_inputs']['context']['declarations'], [])
+        self.assertEqual(result.report['manager_metadata']['collection_assurance'], 'unknown')
+        self.assertTrue((self.root / 'bundle/attempt-0001/INCOMPLETE').exists())
+        self.assertEqual(len(result.report['input_fingerprints']['inputs']), 64)
+
+    def test_overflow_missing_alert_does_not_infer_false_negative(self):
+        result = self.run_collection(self.overflow_transport(detected=False), end='2026-01-01T00:00:06Z')
+        self.assertEqual(result.state, 'evaluated')
+        self.assertEqual(result.report['counts']['parsed'], 174)
+        self.assertEqual(result.report['evaluation']['final_status'], 'Inconclusive')
+        self.assertEqual(result.report['manager_metadata']['run_binding'], 'unknown')
+
+    def test_overflow_later_failure_retains_all_attempts_and_never_reports(self):
+        result = self.run_collection(self.overflow_transport(later_failure=True), end='2026-01-01T00:00:06Z')
+        self.assertEqual(result.state, 'failed')
+        self.assertIsNone(result.report)
+        self.assertTrue((self.root / 'bundle/INCOMPLETE').exists())
+        self.assertTrue((self.root / 'bundle/attempt-0002/collection.json').exists())
+        self.assertFalse((self.root / 'bundle/report.json').exists())
 
     def test_changed_profile_is_rejected_before_contacting_source(self):
         spec = self.spec()
