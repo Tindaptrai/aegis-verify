@@ -1,5 +1,5 @@
-INSTALLED_APPS = ["accounts.apps.GuardedAdminConfig", "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "control", "accounts.apps.AccountsConfig", "devices"]
-MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware", "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware", "accounts.middleware.HumanSessionMiddleware", "django.contrib.messages.middleware.MessageMiddleware", "django.middleware.clickjacking.XFrameOptionsMiddleware"]
+INSTALLED_APPS = ["accounts.apps.GuardedAdminConfig", "django.contrib.auth", "django.contrib.contenttypes", "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles", "control", "accounts.apps.AccountsConfig", "devices", "catalog"]
+MIDDLEWARE = ["django.middleware.security.SecurityMiddleware", "django.contrib.sessions.middleware.SessionMiddleware", "django.middleware.common.CommonMiddleware", "catalog.upload.CatalogUploadMiddleware", "django.middleware.csrf.CsrfViewMiddleware", "django.contrib.auth.middleware.AuthenticationMiddleware", "accounts.middleware.HumanSessionMiddleware", "django.contrib.messages.middleware.MessageMiddleware", "django.middleware.clickjacking.XFrameOptionsMiddleware"]
 CSRF_FAILURE_VIEW = "accounts.views.csrf_failure"
 ROOT_URLCONF = "aegis_manager.urls"
 TEMPLATES = [{"BACKEND": "django.template.backends.django.DjangoTemplates", "APP_DIRS": True, "OPTIONS": {"context_processors": ["django.template.context_processors.request", "django.contrib.auth.context_processors.auth", "django.contrib.messages.context_processors.messages"]}}]
@@ -10,3 +10,5 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 DATA_UPLOAD_MAX_MEMORY_SIZE = 65536
 ENROLLMENT_CA_KEY = None
 ENROLLMENT_CA_CERT = None
+import os
+MANAGER_EXECUTION_SIGNING_KEY = os.environ.get('AEGIS_MANAGER_EXECUTION_SIGNING_KEY') or None

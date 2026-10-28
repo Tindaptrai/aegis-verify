@@ -13,10 +13,11 @@ internal interface IWindowsServiceApi
 
 public static class WindowsServiceHost
 {
-    public static int Run(string stateDirectory)
+    public static int Run(string stateDirectory) => Run(stateDirectory, null);
+    public static int Run(string stateDirectory, Execution.ExecutionConfigurationPaths? paths)
     {
         if (!OperatingSystem.IsWindows() || !Path.IsPathFullyQualified(stateDirectory)) return 3;
-        return Run(stateDirectory, new NativeServiceApi(), HeartbeatLoop.RunAsync);
+        return Run(stateDirectory, new NativeServiceApi(), (directory, token) => Execution.AgentSupervisor.RunAsync(directory, paths, token));
     }
     internal static int Run(string stateDirectory, IWindowsServiceApi api, Func<string, CancellationToken, Task<int>> loop)
     {

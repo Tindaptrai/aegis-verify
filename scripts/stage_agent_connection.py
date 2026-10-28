@@ -1,4 +1,4 @@
-"""Build deterministic public presence-agent archives from a closed runtime manifest.
+"""Build deterministic public agent archives from a closed runtime/public manifest.
 
 The runtime filename inventory is reviewed with each pinned runtime upgrade. It
 must never be learned from arbitrary build output or its dependency JSON.
@@ -22,7 +22,12 @@ def checked_path(value):
     if not path.is_absolute() or ".." in path.parts:
         raise ValueError()
     for part in (path, *path.parents):
-        if part.is_symlink() or (hasattr(part, "is_junction") and part.is_junction()):
+        try:
+            info = part.lstat()
+        except FileNotFoundError:
+            continue
+        # Inspect raw parents before resolve; Python 3.11 has no is_junction.
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError()
     return path.resolve()
 
@@ -35,7 +40,7 @@ def read_public(path):
     return path.read_bytes()
 
 
-def payload(source, build, runtime, version, commit):
+def payload(source, build, runtime, version, commit, canonical_scenario=None):
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*)?", version):
         raise ValueError()
     if not re.fullmatch(r"[0-9a-f]{40}", commit):
@@ -73,11 +78,20 @@ def payload(source, build, runtime, version, commit):
             raise ValueError()
         files["bin/" + name] = data
     files["bin/DOTNET-RUNTIME-NOTICES.json"] = (json.dumps(notices, indent=2, sort_keys=True) + "\n").encode()
-    platform = "windows" if runtime == "win-x64" else "linux"
-    scripts = ("Install-Agent.ps1", "Uninstall-Agent.ps1") if platform == "windows" else ("install.sh", "uninstall.sh", "aegis-agent.service")
-    for name in scripts:
-        files[name] = read_public(source / "deploy/agent" / platform / name)
-    files["AGENT_CONNECTION_RUNBOOK.md"] = read_public(source / "docs/manager/AGENT_CONNECTION_RUNBOOK.md")
+    for name, relative in inventory["public_files"][runtime].items():
+        if any(not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*", value)
+               or any(part in ("", ".", "..") for part in value.split("/")) for value in (name, relative)):
+            raise ValueError()
+        files[name] = read_public(source / relative)
+    if runtime == "win-x64":
+        if canonical_scenario is None:
+            raise ValueError()
+        scenario = read_public(canonical_scenario)
+        if len(scenario) != 887 or sha256(scenario).hexdigest() != "4f00335ddd0e39979d90852122642b945faa03ba50d7e9189fe282662bad84a9":
+            raise ValueError()
+        files["execution/SCN-001-powershell-execution.yaml"] = scenario
+    elif canonical_scenario is not None:
+        raise ValueError()
     files["version.json"] = (json.dumps({"schema_version": "1.0", "version": version, "source_commit": commit,
         "runtime": runtime, "dotnet_runtime": "10.0.13"}, indent=2, sort_keys=True) + "\n").encode()
     files["SHA256SUMS.txt"] = "".join(sha256(data).hexdigest() + "  " + name + "\n" for name, data in sorted(files.items())).encode()
@@ -103,11 +117,11 @@ def write_archive(path, files, runtime):
                     archive.addfile(entry, io.BytesIO(data))
 
 
-def stage_agent_connection(source_root, build_root, output_root, runtime, version, commit):
+def stage_agent_connection(source_root, build_root, output_root, runtime, version, commit, canonical_scenario=None):
     source, build, output = map(checked_path, (source_root, build_root, output_root))
     if output.exists() or any(output.is_relative_to(root) or root.is_relative_to(output) for root in (source, build)):
         raise ValueError()
-    files = payload(source, build, runtime, version, commit)
+    files = payload(source, build, runtime, version, commit, canonical_scenario)
     extension = ".zip" if runtime == "win-x64" else ".tar.gz"
     name = "AEGIS-Agent-Connection-" + version + "-" + runtime + extension
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -132,9 +146,11 @@ def main():
     parser.add_argument("--runtime", choices=("win-x64", "linux-x64"), required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
+    parser.add_argument("--canonical-scenario", type=Path,
+                        help="Windows only: explicit raw canonical scenario blob extracted from the source commit at build time")
     args = parser.parse_args()
     try:
-        stage_agent_connection(args.source_root, args.build_root, args.output_root, args.runtime, args.version, args.commit)
+        stage_agent_connection(args.source_root, args.build_root, args.output_root, args.runtime, args.version, args.commit, args.canonical_scenario)
     except (OSError, ValueError, TypeError, KeyError):
         print("agent_package_invalid", file=sys.stderr)
         return 1

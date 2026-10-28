@@ -128,6 +128,23 @@ public sealed class AgentClient : IHeartbeatTransport, IDisposable
         finally { CryptographicOperations.ZeroMemory(body); }
     }
     private sealed record ErrorEnvelope(ErrorCode Error);
+    internal async Task<byte[]?> SendExecutionAsync(string path, byte[] body, int responseLimit, bool allowEmpty, CancellationToken stop)
+    {
+        try
+        {
+            if (!path.StartsWith("/agent/v2/execution/", StringComparison.Ordinal) || body.Length > Execution.ExecutionProtocol.RequestLimit)
+                throw new ConnectionException("execution_invalid");
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stop); timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(origin, path));
+            request.Content = new ByteArrayContent(body); request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            return await Execution.ExecutionClient.ReadResponseAsync(response, responseLimit, allowEmpty, timeout.Token);
+        }
+        catch (OperationCanceledException) when (stop.IsCancellationRequested) { throw; }
+        catch (Exception e) when (e is HttpRequestException or IOException or OperationCanceledException or AuthenticationException)
+        { throw new ConnectionException("network_unavailable", transient: true); }
+        finally { CryptographicOperations.ZeroMemory(body); }
+    }
     private sealed class NetworkUnsupportedException : Exception;
     private sealed record ErrorCode(string Code);
     public void Dispose() { client.Dispose(); clientCertificate?.Dispose(); issuer?.Dispose(); serverCa.Dispose(); }

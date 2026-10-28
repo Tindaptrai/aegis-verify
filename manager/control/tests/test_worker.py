@@ -87,6 +87,23 @@ class WorkerTests(TransactionTestCase):
         self.assertEqual(list(AuditEntry.objects.filter(job=self.job).values_list('action',flat=True)),
             ['collection_started','collection_empty'])
 
+    def test_registered_execution_mode_skips_legacy_job_untouched(self):
+        from control.execution_models import RegisteredExecutionConnection
+        # This exact mode marker must cause a skip before any private resolver or
+        # v1 approval read. The legacy job above has a real valid v1 signature.
+        registered = RegisteredExecutionConnection(revision=1)
+        transport = SyntheticTransport([page([])])
+        self.assertFalse(self.worker.process_one(fixtures.CollectionTests.connection(self),self.output,
+            now=self.end+timedelta(seconds=30),transport=transport,execution_connection=registered))
+        self.job.refresh_from_db()
+        self.assertEqual(self.job.collection_state,'pending')
+        self.assertEqual(transport.calls,[])
+        self.assertFalse(AuditEntry.objects.filter(job=self.job).exists())
+        self.assertFalse((self.output/str(self.job.pk)).exists())
+        # Existing no-registration callers retain their independent v1 path.
+        self.assertTrue(self.run_one([page([])]))
+        self.job.refresh_from_db(); self.assertEqual(self.job.collection_state,'empty')
+
     def test_real_collector_and_engine_use_approval_snapshots(self):
         self.device.environment_id='mutated'; self.device.wazuh_agent_id='999'; self.device.save()
         rows=fixtures.CollectionTests.hits(self,detected=True)
@@ -147,6 +164,8 @@ class WorkerTests(TransactionTestCase):
         self.assertTrue(self.run_one([]))
         self.job.refresh_from_db()
         self.assertEqual(self.job.error_code,'invalid_approved_job')
+        self.assertEqual(list(AuditEntry.objects.filter(job=self.job).values_list('action',flat=True)),
+            ['collection_started','collection_failed'])
 
     def test_collection_runs_after_claim_transaction_commits(self):
         original=self.worker.collect_and_evaluate

@@ -57,6 +57,29 @@ def _contract(value, model_type, path):
         raise ValidationEngineError("invalid_input", (path,)) from None
 
 
+def _profile_relations(manifest, profile, manifest_fingerprint):
+    if (profile.scenario_id != manifest.id or profile.scenario_version != manifest.version or
+            profile.scenario_fingerprint != manifest_fingerprint):
+        raise ValidationEngineError("profile_binding", ("profile",))
+    rules = {rule.assertion_id: rule for rule in profile.rules}
+    if set(rules) != {assertion.id for assertion in manifest.assertions}:
+        raise ValidationEngineError("assertion_binding", ("rules",))
+    required_role = "detection" if manifest.expected_outcome == "detected" else "prevention"
+    if not any(rule.role == required_role for rule in profile.rules):
+        raise ValidationEngineError("assertion_binding", ("rules",))
+    return rules
+
+
+def validate_manifest_profile(manifest, profile):
+    """Check static compatibility without evidence, run bindings or evaluation."""
+    manifest = _contract(manifest, ScenarioManifest, "manifest")
+    profile = _contract(profile, EvaluationProfile, "profile")
+    rules = _profile_relations(manifest, profile, scenario_fingerprint(manifest))
+    for assertion in manifest.assertions:
+        validate_rule_source(rules[assertion.id], assertion.source)
+    return manifest, profile
+
+
 def validate_inputs(manifest, events, profile, context):
     manifest = _contract(manifest, ScenarioManifest, "manifest")
     profile = _contract(profile, EvaluationProfile, "profile")
@@ -71,15 +94,7 @@ def validate_inputs(manifest, events, profile, context):
     hashes = dict(scenario_fingerprint=scenario_fingerprint(manifest), profile_fingerprint=profile_fingerprint(profile),
                   scope_fingerprint=scope_fingerprint(context), context_fingerprint=fingerprint(context),
                   event_set_fingerprint=event_set_fingerprint(events))
-    if (profile.scenario_id != manifest.id or profile.scenario_version != manifest.version or
-            profile.scenario_fingerprint != hashes["scenario_fingerprint"]):
-        raise ValidationEngineError("profile_binding", ("profile",))
-    rules = {rule.assertion_id: rule for rule in profile.rules}
-    if set(rules) != {assertion.id for assertion in manifest.assertions}:
-        raise ValidationEngineError("assertion_binding", ("rules",))
-    required_role = "detection" if manifest.expected_outcome == "detected" else "prevention"
-    if not any(rule.role == required_role for rule in profile.rules):
-        raise ValidationEngineError("assertion_binding", ("rules",))
+    rules = _profile_relations(manifest, profile, hashes["scenario_fingerprint"])
     bindings = {binding.name: binding.value for binding in context.bindings}
     for assertion in manifest.assertions:
         rule = rules[assertion.id]

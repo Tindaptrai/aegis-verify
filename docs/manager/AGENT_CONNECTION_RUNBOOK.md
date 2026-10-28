@@ -1,6 +1,6 @@
 # Kết nối máy Windows / Ubuntu và tự chạy khi khởi động
 
-Hướng dẫn cho presence agent `0.2.0`: enrollment và legacy heartbeat `2.0`,
+Hướng dẫn cho presence agent `0.3.0`: enrollment và legacy heartbeat `2.0`,
 network heartbeat `2.1`. Windows 11, Windows 10
 LTSC/Enterprise còn hỗ trợ, hoặc Windows Server 2019/2022/2025 x64 có SCM và
 PowerShell 5.1; Ubuntu 24.04 LTS x64 có systemd
@@ -12,7 +12,9 @@ Các bản Windows cần còn được nhà cung cấp hỗ trợ/cập nhật t
 cho edition/build cụ thể. Windows 10 thông thường đã hết hỗ trợ không thuộc baseline này.
 
 Agent này đăng ký danh tính và heartbeat. **Online không có nghĩa là sẵn sàng chạy
-scenario.** Máy `paired_presence` không nhận lease/kịch bản. Legacy Windows v1 và
+scenario.** Mặc định `paired_presence` không nhận lease/kịch bản; Windows chỉ bật
+execution v2 khi đã provision profile/grant/public pin riêng và đạt readiness.
+Legacy Windows v1 và
 pilot 009 tiếp tục dùng quy trình, CA và CurrentUser certificate riêng của chúng.
 
 ## 1. Chuẩn bị Manager Linux
@@ -153,16 +155,15 @@ Get-ExecutionPolicy -List
 ```
 
 Các lệnh dưới gọi đúng Windows PowerShell 5.1 bằng đường dẫn hệ thống, với
-`-NoProfile -ExecutionPolicy Bypass -File` cho **một process con** chạy script vừa
-review. Lựa chọn này xử lý cả Restricted mặc định và dấu Internet của script
-unsigned khi Group Policy cho phép; nó hết hiệu lực khi process kết thúc, không
-lưu policy vào registry/user/machine. Chỉ dùng với gói đã xác minh ở trên, không
-dùng cho script khác. Xem [Microsoft về execution policy và ưu tiên scope](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1).
+`-NoLogo -NoProfile -NonInteractive -File`. Không thay đổi hoặc override policy;
+script chỉ chạy khi policy và nguồn file đã được tổ chức cho phép. Nếu Restricted,
+Group Policy hoặc dấu Internet chặn, dừng và dùng quy trình owner đã phê duyệt.
+Không tự sửa policy hay metadata. Xem [Microsoft về execution policy và ưu tiên scope](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/about/about_execution_policies?view=powershell-5.1).
 
 ```powershell
 $ManagerOrigin = 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>'
 $ServerCa = '<ABSOLUTE_PUBLIC_SERVER_CA_PEM>'
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File .\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
 ```
 
 Nhập mã khi prompt yêu cầu, không truyền mã như parameter. Installer tạo service
@@ -225,19 +226,19 @@ Revoke hoặc certificate hết hạn cần owner xử lý; agent không tự đ
 
 ## 6. Nâng cấp, gỡ cài và phục hồi
 
-Đợt 0.2.0: backup database và cấu hình private theo quy trình owner trước nâng.
+Đợt 0.3.0: backup database và cấu hình private theo quy trình owner trước nâng.
 Nâng **Manager + migrations + nginx trước**, kiểm tra heartbeat 0.1.0 vẫn hoạt động,
 rồi nâng agent từng máy và kiểm tra UI mới. Không init lại issuer hay đổi PKI khi
-nâng từ 0.1.0. Ghép nối mới bằng 0.2.0 cần Manager mới; enrollment vẫn protocol 2.0.
-Network heartbeat dùng 2.1 và báo phiên bản binary đang chạy 0.2.0; phiên bản ghi
-khi ghép nối vẫn được giữ riêng. State cũ 0.1.0 giữ UUID, generation, khóa, CSR,
+nâng từ 0.1/0.2. Ghép nối mới bằng 0.3.0 cần Manager mới; enrollment vẫn protocol 2.0.
+Network heartbeat dùng 2.1 và báo phiên bản binary đang chạy 0.3.0; phiên bản ghi
+khi ghép nối vẫn được giữ riêng. State cũ 0.1/0.2 giữ UUID, generation, khóa, CSR,
 certificate, origin và CA pin; không ghi IP vào protected state.
 
 Chỉ HTTP 404 tại route network cho phép fallback sang heartbeat 2.0 trong suốt
 process hiện tại; restart sẽ thử route mới lại. Fallback giữ presence nhưng không
 có IP agent khai báo. 403, lỗi TLS/trust, 429, 5xx hoặc response sai không bật
 fallback. Nếu rollback binary, 0.1.0 chỉ dùng state vốn được tạo bằng 0.1.0;
-không dùng nó để đọc state mới tạo bằng 0.2.0. Không rollback database để phục hồi
+không dùng nó để đọc state mới tạo bằng 0.2/0.3. Không rollback database để phục hồi
 identity đã revoked/archived, và không sửa version trong private state.
 
 IP khai báo là các địa chỉ interface Up agent thu được, tối đa 32; không suy đoán
@@ -256,7 +257,7 @@ Windows: trong mỗi shell Administrator mới, xác minh gói mới theo mục 
 theo mục 4, chuyển tới thư mục gói đã review. Nâng cấp/cài lại state enrolled:
 
 ```powershell
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\Install-Agent.ps1
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File .\Install-Agent.ps1
 ```
 
 Lệnh này dùng origin/CA đã pin và không cần mint code mới cho identity còn hợp lệ.
@@ -266,7 +267,7 @@ kể cả khi vừa mở shell Administrator mới.
 Gỡ service và binary, **giữ identity/config được bảo vệ**:
 
 ```powershell
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\Uninstall-Agent.ps1
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File .\Uninstall-Agent.ps1
 ```
 
 ```bash
@@ -323,7 +324,7 @@ $ManagerOrigin = 'https://<MANAGER_IP_OR_DNS>:<TLS_PORT>'
 $ServerCa = '<ABSOLUTE_PUBLIC_SERVER_CA_PEM>'
 Stop-Service AegisAgent
 & $Agent retire --state-dir $State --device-id '<CURRENT_DEVICE_UUID>'
-& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File .\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
+& "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -NonInteractive -File .\Install-Agent.ps1 -Manager $ManagerOrigin -ServerCa $ServerCa
 ```
 
 ```bash
@@ -355,6 +356,14 @@ owner review, không sửa trực tiếp private JSON.
   service không sửa binary, Windows virtual account thực sự dùng được Schannel key.
 
 CI native start/stop/configuration là bằng chứng cho các gate đó; **không chứng minh
-reboot trước login**. Kết quả owner lab 0.1.0 trước đây không thay cho gate 0.2.0.
+reboot trước login**. Kết quả owner lab 0.1.0 trước đây không thay cho gate 0.3.0.
 Chỉ đánh dấu reboot/network/expiry lab gate đã chạy khi có
 quan sát thực và owner review. Human review + lab validation bắt buộc trước merge.
+
+## Opt-in execution 0.3
+
+Cài đặt mặc định vẫn presence-only; Linux không thực thi scenario. Xem
+`WINDOWS_WEB_EXECUTION.md` trong gói (source: `docs/manager/windows-web-execution.md`) cho profile/grant/public pin v2
+riêng, policy/origin hợp lệ dưới service SID, worker đã đăng ký, recovery và các
+gate lab còn chờ. Nâng 0.3 giữ nguyên UUID/key/certificate, phiên bản tạo state
+0.1/0.2 và toàn bộ journal/unknown tombstone. Admin VerifyOnly không chứng minh Ready.

@@ -16,6 +16,23 @@ server {
     client_max_body_size 64k;
     server_tokens off;
 
+    # Browser session + CSRF route only. Package bytes remain limited to 20 MiB
+    # by Django before multipart spooling; 21m includes multipart overhead.
+    # Keep this exact location on the browser listener, never the agent listener.
+    location = /api/v1/catalog/import {
+        client_max_body_size 21m;
+        client_body_timeout 30s;
+        proxy_pass http://localhost:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Aegis-Client-Verify "";
+        proxy_set_header X-Aegis-Client-Cert "";
+        proxy_set_header X-Aegis-Peer-IP "";
+        proxy_redirect off;
+    }
+
     location = /agent/v2/enroll {
         client_max_body_size 16k;
         limit_req zone=aegis_enrollment burst=5 nodelay;
@@ -55,6 +72,23 @@ server {
         proxy_set_header X-Aegis-Peer-IP $remote_addr;
         proxy_redirect off;
     }
+
+    # Only exact closed execution paths receive verified identity headers.
+    location ~ "^/agent/v2/execution/(readiness|poll|receipt|jobs/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/start)$" {
+        if ($ssl_client_verify != SUCCESS) { return 403; }
+        client_max_body_size 64k;
+        proxy_pass http://localhost:8001;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-For "";
+        proxy_set_header Forwarded "";
+        proxy_set_header X-Aegis-Client-Verify $ssl_client_verify;
+        proxy_set_header X-Aegis-Client-Cert $ssl_client_escaped_cert;
+        proxy_set_header X-Aegis-Peer-IP "";
+        proxy_redirect off;
+    }
+    # The regex above wins over this prefix for exact supported paths only.
+    location /agent/v2/execution/ { return 404; }
 
     # optional at server level permits browser login without an agent cert;
     # this location requires nginx chain verification before proxying.

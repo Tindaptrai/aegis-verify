@@ -8,6 +8,7 @@ from control.models import Device
 from .contracts import DeviceError
 from .models import EnrollmentAudit
 from .services import _lock_authority
+from control.execution_ownership import lock_device_ownership, execution_job_blocks
 
 
 def archive_block_reason(device, jobs=None):
@@ -18,6 +19,9 @@ def archive_block_reason(device, jobs=None):
     if jobs is None:
         jobs = device.job_set.all()
     for job in jobs:
+        if job.protocol_family == 'windows_execution_v2':
+            if execution_job_blocks(job): return 'device_busy'
+            continue
         allowed = {"evaluated", "empty", "reconciled"}
         if job.execution_state in {"draft", "cancelled", "expired"}:
             allowed.add("pending")
@@ -33,6 +37,7 @@ def archive_device(*, actor, device_id):
     _lock_authority()
     actor = require_product_permission(actor, "manage_devices")
     lock_dispatch()
+    lock_device_ownership(device_id)
     try:
         device = Device.objects.select_for_update().get(pk=device_id)
     except Device.DoesNotExist:

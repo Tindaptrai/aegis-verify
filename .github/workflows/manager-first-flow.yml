@@ -11,6 +11,17 @@ on:
       - 'scripts/agent_connection_runtime_files.json'
       - 'scripts/tests/agent/**'
       - 'backend/tests/test_agent_connection_packaging.py'
+      - 'backend/tests/test_required_manager_tests.py'
+      - 'scripts/run_required_manager_tests.py'
+      - 'scripts/tests/manager/**'
+      - 'backend/app/**'
+      - 'connectors/wazuh/**'
+      - 'scenarios/**'
+      - 'tests/fixtures/**'
+      - 'pyproject.toml'
+      - 'demos/scn-001/**'
+      - 'detections/wazuh/scn-001/**'
+      - 'scripts/prepare_scn001_kit.py'
       - 'deploy/manager/**'
       - 'frontend/src/manager/**'
       - 'frontend/manager.html'
@@ -34,6 +45,17 @@ on:
       - 'scripts/agent_connection_runtime_files.json'
       - 'scripts/tests/agent/**'
       - 'backend/tests/test_agent_connection_packaging.py'
+      - 'backend/tests/test_required_manager_tests.py'
+      - 'scripts/run_required_manager_tests.py'
+      - 'scripts/tests/manager/**'
+      - 'backend/app/**'
+      - 'connectors/wazuh/**'
+      - 'scenarios/**'
+      - 'tests/fixtures/**'
+      - 'pyproject.toml'
+      - 'demos/scn-001/**'
+      - 'detections/wazuh/scn-001/**'
+      - 'scripts/prepare_scn001_kit.py'
       - 'deploy/manager/**'
       - 'frontend/src/manager/**'
       - 'frontend/manager.html'
@@ -80,23 +102,47 @@ jobs:
       AEGIS_MANAGER_DB_HOST: postgres
       AEGIS_MANAGER_DB_PORT: '5432'
       DJANGO_SETTINGS_MODULE: aegis_manager.ci_settings
+      AEGIS_EXECUTION_GATE_URL: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
     steps:
+      - name: Install Git before checkout in the slim container
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends git ca-certificates
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify and propagate exact checked-out source commit
+        env:
+          REQUESTED_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          python scripts/run_required_manager_tests.py --verify-source --workspace "$GITHUB_WORKSPACE" --requested-commit "$REQUESTED_SOURCE_COMMIT" --github-env "$GITHUB_ENV" --output "$RUNNER_TEMP/manager-postgres-source.json" --run-url "$AEGIS_EXECUTION_GATE_URL"
       - name: Install isolated test runtime
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends nginx
+          apt-get install -y --no-install-recommends nginx curl libicu-dev libssl-dev
           python -m pip install -e . -r manager/requirements.txt
           python -m pip check
-      - name: Verify migrations and real PostgreSQL suite
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build explicit Release execution vector harness
+        run: |
+          dotnet build agent/connection/Aegis.Connection.Tests -c Release
+          echo "AEGIS_EXECUTION_VECTOR_TEST_EXE=$GITHUB_WORKSPACE/agent/connection/Aegis.Connection.Tests/bin/Release/net10.0/Aegis.Connection.Tests.dll" >> "$GITHUB_ENV"
+      - name: Require real PostgreSQL races, nginx v2 isolation and execution vectors
         run: |
           python manager/manage.py makemigrations --check --dry-run --settings=aegis_manager.ci_settings
-          python manager/manage.py test accounts.tests control.tests devices.tests --settings=aegis_manager.ci_settings --verbosity 2
-      - name: Require real PostgreSQL authority, control and pairing concurrency
-        # SQLite skips never count as row-lock or concurrent-policy coverage.
-        run: python manager/manage.py test accounts.tests.test_postgres_concurrency control.tests.test_postgres_concurrency devices.tests.test_postgres_concurrency --settings=aegis_manager.ci_settings --verbosity 2
+          python scripts/run_required_manager_tests.py --settings aegis_manager.ci_settings --output "$RUNNER_TEMP/manager-postgres-results.json" --source-commit "$AEGIS_MANAGER_SOURCE_COMMIT" --run-url "$AEGIS_EXECUTION_GATE_URL" --require postgres_accounts --require postgres_control --require postgres_devices --require postgres_catalog --require postgres_execution --require nginx_execution --require vectors accounts.tests control.tests devices.tests catalog.tests
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Manager-PostgreSQL-required-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/manager-postgres-source.json
+            ${{ runner.temp }}/manager-postgres-results.json
+          if-no-files-found: error
+
 
   manager-ui:
     name: Standalone Manager public build
@@ -105,6 +151,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
@@ -132,9 +179,11 @@ jobs:
     timeout-minutes: 15
     env:
       DJANGO_SETTINGS_MODULE: aegis_manager.test_settings
+      AEGIS_EXECUTION_GATE_URL: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
@@ -147,13 +196,21 @@ jobs:
           dotnet --list-sdks
           dotnet run --project agent/windows/Aegis.Agent.Tests/Aegis.Agent.Tests.csproj
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Verify Manager and cross-language contract
+      - name: Build explicit Release paired vector harness
+        run: |
+          dotnet build agent/connection/Aegis.Connection.Tests -c Release
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $vector = Join-Path (Get-Location).Path 'agent/connection/Aegis.Connection.Tests/bin/Release/net10.0/Aegis.Connection.Tests.dll'
+          "AEGIS_EXECUTION_VECTOR_TEST_EXE=$vector" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Verify Manager and required cross-language contract
         run: |
           python -m pip install -e . -r manager/requirements.txt
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python manager/manage.py test accounts.tests control.tests devices.tests --settings=aegis_manager.test_settings --verbosity 2
+          $commit = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/run_required_manager_tests.py --settings aegis_manager.test_settings --output (Join-Path $env:RUNNER_TEMP 'manager-windows-results.json') --source-commit $commit --run-url $env:AEGIS_EXECUTION_GATE_URL --require vectors accounts.tests control.tests devices.tests catalog.tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish and verify self-contained agent
         run: |
@@ -163,3 +220,56 @@ jobs:
           $env:AEGIS_AGENT_TEST_EXE = Join-Path $buildOutput 'Aegis.Agent.exe'
           python manager/manage.py test control.tests.test_cross_language --verbosity 2
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Manager-Windows-required-${{ github.run_id }}
+          path: ${{ runner.temp }}/manager-windows-results.json
+          if-no-files-found: error
+
+  manager-worker-systemd:
+    name: Registered Manager worker actual systemd lifecycle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        ports: ['5432:5432']
+        env:
+          POSTGRES_DB: aegis_ci
+          POSTGRES_USER: aegis_ci
+          POSTGRES_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        options: >-
+          --health-cmd "pg_isready -U aegis_ci -d aegis_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      AEGIS_MANAGER_CI: '1'
+      AEGIS_MANAGER_DB_NAME: aegis_ci
+      AEGIS_MANAGER_DB_USER: aegis_ci
+      AEGIS_MANAGER_DB_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+      AEGIS_MANAGER_DB_HOST: localhost
+      AEGIS_MANAGER_DB_PORT: '5432'
+      AEGIS_MANAGER_REQUIRE_WORKER_SYSTEMD: '1'
+      AEGIS_MANAGER_DISPOSABLE_SYSTEMD_CI: '1'
+      DJANGO_SETTINGS_MODULE: aegis_manager.ci_settings
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.13'
+      - name: Install isolated Manager test runtime
+        run: |
+          python -m pip install -e . -r manager/requirements.txt
+          python -m pip check
+      - name: Require registered worker autostart, restart, health and exclusion
+        run: |
+          bash scripts/tests/manager/test-registered-worker-systemd.sh --output-root "$RUNNER_TEMP/manager-worker-native" --source-commit "$(git rev-parse HEAD)" --run-url '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' --require-native
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Manager-worker-systemd-required-${{ github.run_id }}
+          path: ${{ runner.temp }}/manager-worker-native/manager-worker-service.json
+          if-no-files-found: error

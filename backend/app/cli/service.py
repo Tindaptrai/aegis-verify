@@ -12,6 +12,7 @@ from ..intake import (
     check_collection,
     decode_config,
     load_bundle,
+    load_bundle_set,
     local_path,
     parse_manifest,
     read_local,
@@ -159,6 +160,53 @@ def evaluate_bundle(scenario, fixture, *, profile=None, context=None) -> dict:
         raise IntakeError("environment_mismatch", stage="context", field="environment_id")
 
     intake = load_bundle(root, bundle_manifest)
+    return _evaluate_report(
+        scenario_manifest, intake, selected_profile, selected_context,
+        fingerprints={
+            "scenario": sha256(scenario_raw).hexdigest(),
+            "inputs": sha256(inputs_raw).hexdigest(),
+            "profile": sha256(profile_raw).hexdigest(),
+            "context": sha256(context_raw).hexdigest(),
+        },
+    )
+
+
+def evaluate_collection_set(scenario, fixture, *, profile=None, context=None) -> dict:
+    """Verify and load all successful Wazuh leaves, then evaluate their union once."""
+    from aegis_verify.connectors.wazuh.batch import read_collection_set
+
+    scenario_manifest, scenario_raw = _scenario(scenario)
+    root = local_path(fixture, directory=True, stage="inputs")
+    collection_set = read_collection_set(root)
+    selected_profile, profile_raw = _selected_json(
+        profile if profile is not None else root / "profile.json",
+        stage="profile", model_type=EvaluationProfile,
+    )
+    selected_context, context_raw = _selected_json(
+        context if context is not None else root / "context.json",
+        stage="context", model_type=EvaluationContext,
+    )
+    if collection_set.environment_id != selected_context.environment_id:
+        raise IntakeError("environment_mismatch", stage="context", field="environment_id")
+    if (collection_set.start != selected_context.start
+            or collection_set.end != selected_context.end):
+        raise IntakeError("collection_conflict", stage="collection")
+    intake = load_bundle_set(root, collection_set.members)
+    if len(intake.events) != collection_set.record_count:
+        raise IntakeError("collection_conflict", stage="collection")
+    return _evaluate_report(
+        scenario_manifest, intake, selected_profile, selected_context,
+        fingerprints={
+            "scenario": sha256(scenario_raw).hexdigest(),
+            "inputs": collection_set.input_fingerprint,
+            "profile": sha256(profile_raw).hexdigest(),
+            "context": sha256(context_raw).hexdigest(),
+        },
+    )
+
+
+def _evaluate_report(scenario_manifest, intake, selected_profile, selected_context, *, fingerprints) -> dict:
+    """Build the ordinary report from one canonical event tuple."""
     check_collection(intake, selected_profile, selected_context)
     try:
         evaluation = evaluate_scenario(
@@ -200,10 +248,5 @@ def evaluate_bundle(scenario, fixture, *, profile=None, context=None) -> dict:
             "skipped": sum(item.status == "skipped" for item in intake.ledger),
             "referenced": len(evaluation.evidence_index),
         },
-        "input_fingerprints": {
-            "scenario": sha256(scenario_raw).hexdigest(),
-            "inputs": sha256(inputs_raw).hexdigest(),
-            "profile": sha256(profile_raw).hexdigest(),
-            "context": sha256(context_raw).hexdigest(),
-        },
+        "input_fingerprints": dict(fingerprints),
     }

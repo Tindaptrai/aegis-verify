@@ -16,12 +16,29 @@ from django.utils import timezone
 
 from control.jobs import approve_job
 from control.models import Device, DispatchLock, Job, RunnerRelease
+from accounts.models import AccountMutationLock
+
+
+class LegacyDispatchFixtureTests(TransactionTestCase):
+    """Fixture restoration only; this does not test SQLite row-lock behavior."""
+    def test_race_setup_restores_both_singletons_after_transactional_flush(self):
+        AccountMutationLock.objects.all().delete()
+        DispatchLock.objects.all().delete()
+        case = PostgreSQLDispatchTests('test_simultaneous_approvals_allow_only_one_active_job')
+        case.setUp()
+        self.assertTrue(AccountMutationLock.objects.filter(pk=1).exists())
+        self.assertTrue(DispatchLock.objects.filter(pk=1).exists())
 
 
 @unittest.skipUnless(connection.vendor == 'postgresql', 'Requires real PostgreSQL row locks')
 class PostgreSQLDispatchTests(TransactionTestCase):
-    def test_simultaneous_approvals_allow_only_one_active_job(self):
+    def setUp(self):
+        super().setUp()
+        # TransactionTestCase flushes data-migration seeds between test methods.
+        AccountMutationLock.objects.get_or_create(pk=1)
         DispatchLock.objects.get_or_create(pk=1)
+
+    def test_simultaneous_approvals_allow_only_one_active_job(self):
         with tempfile.TemporaryDirectory(prefix='aegis-pg-synthetic-') as folder:
             root = Path(folder)
             private_key = root / 'synthetic-key.pem'
