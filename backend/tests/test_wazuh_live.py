@@ -332,9 +332,11 @@ def test_absolute_transport_deadline_bounds_http_framing_and_reads(monkeypatch, 
         assert time.monotonic() - started < 0.3
 
 
-def test_absolute_transport_deadline_clips_open_timeout(monkeypatch):
+@pytest.mark.parametrize('started', [0.0, 100.0])
+def test_absolute_transport_deadline_clips_open_timeout(monkeypatch, started):
     transport = HttpsTransport(config())
     monkeypatch.setattr(live, '_HTTP_REQUEST_SECONDS', 0.12, raising=False)
+    monkeypatch.setattr(live.time, 'monotonic', lambda: started)
     timeouts = []
     def respond(*args, **kwargs):
         timeouts.append(kwargs['timeout'])
@@ -342,6 +344,24 @@ def test_absolute_transport_deadline_clips_open_timeout(monkeypatch):
     monkeypatch.setattr(transport._opener, 'open', respond)
     assert transport.request('POST', '/_search/scroll', {'scroll_id': 'test'}) == b'{}'
     assert 0 < timeouts[0] <= 0.12
+
+
+@pytest.mark.parametrize('remaining, expected', [(0.12, LiveError), (30, TimeoutError)])
+def test_socket_timeout_uses_the_limit_that_was_applied(monkeypatch, remaining, expected):
+    elapsed, timeouts = [100.0], []
+    class TimedOutRaw(io.RawIOBase):
+        def readinto(self, target):
+            # Model an OS timeout rounding fractionally below its requested wait.
+            elapsed[0] += timeouts[-1] - 0.0001
+            raise TimeoutError('injected')
+    class TimedOutSocket:
+        def settimeout(self, seconds):
+            timeouts.append(seconds)
+    monkeypatch.setattr(live.time, 'monotonic', lambda: elapsed[0])
+    with live._DeadlineReader(TimedOutRaw(), TimedOutSocket(),
+                              deadline=100.0 + remaining, code='request_deadline') as reader:
+        with pytest.raises(expected, match='request_deadline' if expected is LiveError else 'injected'):
+            reader.readinto(bytearray(1))
 
 
 @pytest.mark.parametrize('method', ['POST', 'DELETE'])

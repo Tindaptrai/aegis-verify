@@ -95,8 +95,14 @@ class _DeadlineReader(io.RawIOBase):
         return True
 
     def readinto(self, target):
-        self._sock.settimeout(min(10, _remaining(self._deadline, self._code)))
-        count = self._raw.readinto(target)
+        remaining = _remaining(self._deadline, self._code)
+        self._sock.settimeout(min(10, remaining))
+        try:
+            count = self._raw.readinto(target)
+        except TimeoutError:
+            if remaining <= 10:
+                raise LiveError(self._code) from None
+            raise
         _remaining(self._deadline, self._code)
         return count
 
@@ -198,7 +204,8 @@ class HttpsTransport:
         self._handler.deadline, self._handler.deadline_code = deadline, deadline_code
         for attempt in range(3):
             try:
-                with self._opener.open(request, timeout=min(10, _remaining(deadline, deadline_code))) as response:
+                timeout = min(10, _HTTP_REQUEST_SECONDS, _remaining(deadline, deadline_code))
+                with self._opener.open(request, timeout=timeout) as response:
                     raw = bytearray()
                     while len(raw) <= MAX_BYTES:
                         _remaining(deadline, deadline_code)

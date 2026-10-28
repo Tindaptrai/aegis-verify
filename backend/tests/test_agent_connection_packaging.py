@@ -1,11 +1,13 @@
 """Public release boundaries exercised through the standalone package CLI."""
 from hashlib import sha256
+import importlib.util
 import json
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tarfile
+from types import SimpleNamespace
 import zipfile
 
 import pytest
@@ -232,6 +234,36 @@ def test_source_build_output_links_and_hardlinks_cannot_export_private_bytes(pac
     except OSError:
         pytest.skip("Symlink creation privilege unavailable; native POSIX gate exercises links")
     assert stage(package_input, tmp_path / "symlink-output").returncode != 0
+
+
+@pytest.mark.parametrize("location", ["source", "build", "output-parent", "source-asset-parent"])
+def test_reparse_paths_are_rejected_without_path_is_junction(package_input, tmp_path, monkeypatch, location):
+    source, build, rid, _ = package_input
+    output = tmp_path / "public" / "output"
+    output.parent.mkdir()
+    platform = "windows" if rid == "win-x64" else "linux"
+    reparse = {"source": source, "build": build, "output-parent": output.parent,
+               "source-asset-parent": source / "deploy/agent" / platform}[location]
+    original_lstat = Path.lstat
+
+    def reparse_lstat(path, *args, **kwargs):
+        info = original_lstat(path, *args, **kwargs)
+        if path == reparse:
+            fields = {name: getattr(info, name) for name in dir(info) if name.startswith("st_")}
+            fields["st_file_attributes"] = fields.get("st_file_attributes", 0) | 0x400
+            return SimpleNamespace(**fields)
+        return info
+
+    # Python 3.11 exposes Windows reparse attributes but has no is_junction API.
+    monkeypatch.delattr(Path, "is_junction", raising=False)
+    monkeypatch.setattr(Path, "lstat", reparse_lstat)
+    spec = importlib.util.spec_from_file_location("agent_connection_packaging", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    canonical = source / "canonical-scenario.yaml" if rid == "win-x64" else None
+    with pytest.raises(ValueError):
+        module.stage_agent_connection(source, build, output, rid, "0.3.0", COMMIT, canonical)
+    assert not output.exists()
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows junction boundary")

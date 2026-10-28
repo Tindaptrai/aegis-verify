@@ -22,7 +22,12 @@ def checked_path(value):
     if not path.is_absolute() or ".." in path.parts:
         raise ValueError()
     for part in (path, *path.parents):
-        if part.is_symlink() or (hasattr(part, "is_junction") and part.is_junction()):
+        try:
+            info = part.lstat()
+        except FileNotFoundError:
+            continue
+        # Inspect raw parents before resolve; Python 3.11 has no is_junction.
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise ValueError()
     return path.resolve()
 
