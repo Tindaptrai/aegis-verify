@@ -1,0 +1,26 @@
+[Unit]
+Description=AEGIS Agent authenticated presence
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=aegis-agent
+Group=aegis-agent
+ExecStart=/opt/aegis-agent/bin/aegis-agent run --state-dir /var/lib/aegis-agent
+WorkingDirectory=/var/lib/aegis-agent
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=20
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/aegis-agent
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

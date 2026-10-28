@@ -6,6 +6,7 @@ import { LoginPage } from './LoginPage';
 import { AccountMenu } from './AccountMenu';
 import { MyAccount } from './MyAccount';
 import { UsersPage } from './UsersPage';
+import { DevicesPage } from './DevicesPage';
 import logo from '../../../packaging/windows/demo-launcher/assets/aegis-demo-logo.png';
 
 const anonymous: SessionDTO = { authenticated: false, csrf_token: '', user: null, expires_at: null };
@@ -17,7 +18,7 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const [sessionError, setSessionError] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [page, setPage] = useState<'overview' | 'users'>('overview');
+  const [page, setPage] = useState<'overview' | 'users' | 'devices'>('overview');
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const generation = useRef(0);
   const active = useRef<AbortController | null>(null);
@@ -83,7 +84,7 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
           clear(); setSession({ ...anonymous, csrf_token: result.csrf_token }); return;
         }
         if (result.user.id !== sessionUserId.current) clear();
-        if (!result.user.capabilities.includes('view') || !result.user.capabilities.includes('manage_users')) setPage('overview');
+        setPage((current) => !result.user!.capabilities.includes('view') || (current === 'users' && !result.user!.capabilities.includes('manage_users')) ? 'overview' : current);
         setSession(result);
       } catch (failure) {
         if (!mounted.current || !isCurrent(request)) return;
@@ -114,6 +115,10 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
       }
     }
     return { ...api,
+      listDevices: (query, signal) => guarded(() => api.listDevices(query, signal), signal),
+      createPairingCode: (input, signal) => guarded(() => api.createPairingCode(input, signal), signal),
+      revokePairingCode: (id, signal) => guarded(() => api.revokePairingCode(id, signal), signal),
+      revokeDevice: (id, signal) => guarded(() => api.revokeDevice(id, signal), signal),
       listUsers: (query, signal) => guarded(() => api.listUsers(query, signal), signal),
       permissions: (signal) => guarded(() => api.permissions(signal), signal),
       createUser: (input, signal) => guarded(() => api.createUser(input, signal), signal),
@@ -208,17 +213,21 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const closeAccount = useCallback(() => setAccountOpen(false), []);
   const user = session?.authenticated ? session.user : null;
   const canManageUsers = !!user?.capabilities.includes('view') && !!user?.capabilities.includes('manage_users');
+  const canView = !!user?.capabilities.includes('view');
+  const canManageDevices = canView && !!user?.capabilities.includes('manage_devices');
+  const showingDevices = page === 'devices' && canView;
+  const deviceAuthority = user ? `${user.id}:${[...user.capabilities].sort().join(',')}` : '';
   const showingUsers = page === 'users' && canManageUsers;
   return <div className="manager-app" data-theme={theme}>
     {!session ? <main className="session-pending" aria-busy={!sessionError}>{sessionError ? <><p role="alert">{sessionError}</p><button onClick={() => { if (logoutFailed.current) void logout(); else void revalidate(); }}>Thử lại</button></> : <p>Đang xác minh phiên…</p>}</main> : !user ? <LoginPage onLogin={(input) => void login(input)} busy={authBusy} error={loginError} /> : <>
       <aside className="manager-sidebar"><div className="manager-brand"><img src={logo} alt="" /><div><strong>AEGIS</strong><small>VERIFY · MANAGER</small></div></div>
-        <p className="eyebrow nav-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng Manager"><button className={!showingUsers ? 'selected' : ''} aria-current={!showingUsers ? 'page' : undefined} onClick={() => setPage('overview')}>Tổng quan</button>
-          <button disabled title="Chưa khả dụng">Thiết bị <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Kịch bản <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Tác vụ <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Kết nối <small>Chưa khả dụng</small></button>
+        <p className="eyebrow nav-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng Manager"><button className={!showingUsers && !showingDevices ? 'selected' : ''} aria-current={!showingUsers && !showingDevices ? 'page' : undefined} onClick={() => setPage('overview')}>Tổng quan</button>
+          <button disabled={!canView} className={showingDevices ? 'selected' : ''} aria-current={showingDevices ? 'page' : undefined} onClick={() => setPage('devices')}>Máy</button><button disabled title="Chưa khả dụng">Kịch bản <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Tác vụ <small>Chưa khả dụng</small></button><button disabled title="Chưa khả dụng">Kết nối <small>Chưa khả dụng</small></button>
           {canManageUsers && <button className={showingUsers ? 'selected' : ''} aria-current={showingUsers ? 'page' : undefined} onClick={() => setPage('users')}>Tài khoản &amp; quyền</button>}
         </nav></aside>
-      <div className="manager-workspace"><header className="manager-header"><div className="header-identity"><div className="manager-brand"><img src={logo} alt="AEGIS" /><div><strong>AEGIS</strong><small>MANAGER</small></div></div><span className="breadcrumb">Không gian làm việc / {showingUsers ? 'Tài khoản & quyền' : 'Tổng quan'}</span></div>
+      <div className="manager-workspace"><header className="manager-header"><div className="header-identity"><div className="manager-brand"><img src={logo} alt="AEGIS" /><div><strong>AEGIS</strong><small>MANAGER</small></div></div><span className="breadcrumb">Không gian làm việc / {showingUsers ? 'Tài khoản & quyền' : showingDevices ? 'Máy' : 'Tổng quan'}</span></div>
         <div className="header-actions"><button className="theme-toggle" aria-label={`Chuyển giao diện ${theme === 'dark' ? 'sáng' : 'tối'}`} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀' : '☾'}</button><AccountMenu user={user} onAccount={() => setAccountOpen(true)} onLogout={() => void logout()} /></div>
-      </header><main className="manager-content">{showingUsers ? <UsersPage key={user.id} api={accountsApi} onAuthorityChanged={refreshAuthority} /> : <><div className="page-heading"><p className="eyebrow">MANAGER</p><h1>Tổng quan</h1><p>Dữ liệu đã ghi nhận trong hệ thống quản lý.</p></div>
+      </header><main className="manager-content">{showingUsers ? <UsersPage key={user.id} api={accountsApi} onAuthorityChanged={refreshAuthority} /> : showingDevices ? <DevicesPage key={deviceAuthority} api={accountsApi} canManage={canManageDevices} /> : <><div className="page-heading"><p className="eyebrow">MANAGER</p><h1>Tổng quan</h1><p>Dữ liệu đã ghi nhận trong hệ thống quản lý.</p></div>
         {!user.capabilities.includes('view') ? <p className="manager-alert" role="alert">Bạn không có quyền xem dữ liệu. Liên hệ quản trị viên để được cấp quyền.</p> : overviewError ? <section className="panel panel-body"><p className="manager-alert" role="alert">{overviewError}</p><button onClick={() => void revalidate()}>Xác minh lại phiên</button></section> : !overview ? <p>Đang tải tổng quan…</p> : <section className="overview-counts" aria-label="Số liệu đã ghi nhận">
           <article className="panel"><p>Thiết bị đã đăng ký</p><strong>{overview.registered_devices}</strong><small>Số đăng ký trong cơ sở dữ liệu</small></article><article className="panel"><p>Tác vụ đã ghi nhận</p><strong>{overview.recorded_jobs}</strong><small>Số tác vụ trong cơ sở dữ liệu</small></article><article className="panel"><p>Phiên bản đã ghi nhận</p><strong>{overview.recorded_releases}</strong><small>Số phiên bản trong cơ sở dữ liệu</small></article>
         </section>}</>}

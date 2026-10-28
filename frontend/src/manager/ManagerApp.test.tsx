@@ -218,7 +218,7 @@ describe('real Manager shell', () => {
     const { container } = render(<ManagerApp api={api} />);
     await screen.findByText('17');
     expect(screen.queryByRole('button', { name: /Tài khoản & quyền/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Thiết bị/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Máy' })).toBeEnabled();
     fireEvent.click(screen.getByRole('button', { name: 'Chuyển giao diện sáng' }));
     expect(container.firstElementChild).toHaveAttribute('data-theme', 'light');
   });

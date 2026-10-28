@@ -1,3 +1,4 @@
+import { validDevices, validPairingCode, type DevicesDTO, type PairingCodeDTO } from './types';
 import type { CreateUserInput, OverviewDTO, PermissionsDTO, SessionDTO, UpdateUserInput, UserDTO, UsersDTO } from './contracts';
 
 const accountErrorStatuses = {
@@ -7,12 +8,14 @@ const accountErrorStatuses = {
   technical_account_readonly: 403, permission_denied: 403, unauthenticated: 401,
   invalid_credentials: 401, current_password_invalid: 400,
 } as const;
-type AccountErrorCode = keyof typeof accountErrorStatuses;
+const deviceErrorStatuses = { device_conflict: 409 } as const;
+type ManagerErrorCode = keyof typeof accountErrorStatuses | keyof typeof deviceErrorStatuses;
+const errorStatuses = { ...accountErrorStatuses, ...deviceErrorStatuses };
 export class ManagerApiError extends Error {
-  readonly code: AccountErrorCode | undefined;
+  readonly code: ManagerErrorCode | undefined;
   constructor(public readonly status: number, code?: unknown) {
     super('Manager request failed'); this.name = 'ManagerApiError';
-    this.code = typeof code === 'string' && Object.hasOwn(accountErrorStatuses, code) && accountErrorStatuses[code as AccountErrorCode] === status ? code as AccountErrorCode : undefined;
+    this.code = typeof code === 'string' && Object.hasOwn(errorStatuses, code) && errorStatuses[code as ManagerErrorCode] === status ? code as ManagerErrorCode : undefined;
   }
 }
 
@@ -40,14 +43,19 @@ export function createManagerApi(fetcher: typeof fetch = fetch) {
   const invalidate = () => { generation += 1; csrfToken = ''; };
   const stale = () => new DOMException('Request superseded', 'AbortError');
 
-  async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal, token = csrfToken): Promise<T> {
+  async function request<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal, token = csrfToken, expectedStatus?: number, validate?: (value: unknown) => boolean): Promise<T> {
     const response = await fetcher(`/api/v1/${path}`, {
       method, credentials: 'same-origin', cache: 'no-store', signal,
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json', 'X-CSRFToken': token },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
     if (!response.ok) throw new ManagerApiError(response.status, await readErrorCode(response));
-    return response.status === 204 ? undefined as T : await response.json() as T;
+    if (expectedStatus !== undefined && response.status !== expectedStatus) throw new ManagerApiError(response.status);
+    if (response.status === 204) return undefined as T;
+    let result: unknown;
+    try { result = await response.json(); } catch { throw new ManagerApiError(response.status); }
+    if (validate && !validate(result)) throw new ManagerApiError(response.status);
+    return result as T;
   }
 
   async function authenticate(path: string, body?: unknown, signal?: AbortSignal) {
@@ -76,6 +84,14 @@ export function createManagerApi(fetcher: typeof fetch = fetch) {
     createUser: (input: CreateUserInput, signal?: AbortSignal) => request<UserDTO>('users', 'POST', input, signal),
     updateUser: (id: number, input: UpdateUserInput, signal?: AbortSignal) => request<UserDTO>(`users/${id}`, 'PUT', input, signal),
     resetPassword: (id: number, input: { new_password: string }, signal?: AbortSignal) => request<void>(`users/${id}/reset-password`, 'POST', input, signal),
+    listDevices: (query: { page?: number; search?: string } = {}, signal?: AbortSignal) => {
+      const params = new URLSearchParams({ page: String(query.page ?? 1) });
+      if (query.search !== undefined) params.set('search', query.search);
+      return request<DevicesDTO>(`devices?${params}`, 'GET', undefined, signal, csrfToken, 200, validDevices);
+    },
+    createPairingCode: (input: { environment_id: string }, signal?: AbortSignal) => request<PairingCodeDTO>('pairing-codes', 'POST', input, signal, csrfToken, 201, validPairingCode),
+    revokePairingCode: (id: string, signal?: AbortSignal) => request<void>(`pairing-codes/${encodeURIComponent(id)}/revoke`, 'POST', {}, signal, csrfToken, 204),
+    revokeDevice: (id: string, signal?: AbortSignal) => request<void>(`devices/${encodeURIComponent(id)}/revoke`, 'POST', {}, signal, csrfToken, 204),
     permissions: (signal?: AbortSignal) => request<PermissionsDTO>('users/permissions', 'GET', undefined, signal),
     overview: (signal?: AbortSignal) => request<OverviewDTO>('overview', 'GET', undefined, signal),
   };

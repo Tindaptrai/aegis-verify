@@ -17,6 +17,6 @@ def authenticate_device(request):
         now = timezone.now()
         if not cert.not_valid_before_utc <= now <= cert.not_valid_after_utc:
             raise ValueError()
-        return Device.objects.get(certificate_sha256=cert.fingerprint(hashes.SHA256()).hex(), revoked=False)
+        return Device.objects.get(certificate_sha256=cert.fingerprint(hashes.SHA256()).hex(), revoked=False, connection_kind="legacy_v1")
     except (ValueError, UnicodeError, Device.DoesNotExist):
         raise PermissionError("Machine identity denied") from None
