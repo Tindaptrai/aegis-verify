@@ -133,6 +133,18 @@ internal static partial class Program
             if (OperatingSystem.IsWindows()) { using var held = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read); Denied(() => store.Promote(ca.Issue(s)), "state_invalid"); }
             else Denied(() => store.Promote(ca.Issue(s) with { DeviceId = "invalid" }), "identity_invalid");
             Check(File.ReadAllBytes(file).SequenceEqual(before), "atomic failure destroyed identity");
+            if (OperatingSystem.IsWindows())
+            {
+                // Native test/status readers must allow replacement while retaining
+                // their complete old snapshot; never retry or weaken writer failures.
+                var protectedAcl = FileSystemAclExtensions.GetAccessControl(new FileInfo(file)).GetSecurityDescriptorBinaryForm();
+                using var shared = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                store.Promote(ca.Issue(s));
+                Check(store.Read()!.Kind == "enrolled" && store.Read()!.PrivateKeyPem == s.PrivateKeyPem, "shared reader blocked identity publication");
+                using var previous = new MemoryStream(); shared.CopyTo(previous);
+                Check(previous.ToArray().SequenceEqual(before), "shared reader lost complete old snapshot");
+                Check(FileSystemAclExtensions.GetAccessControl(new FileInfo(file)).GetSecurityDescriptorBinaryForm().SequenceEqual(protectedAcl), "replacement changed protected snapshot ACL");
+            }
         });
         Test("state retire match archive failure lock and complete preservation", () =>
         {
