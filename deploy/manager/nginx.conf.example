@@ -27,7 +27,9 @@ server {
         proxy_set_header X-Aegis-Client-Cert $ssl_client_escaped_cert;
         proxy_redirect off;
     }
-    # collectstatic only: never alias private evidence/catalog/spool directories.
+    # Reviewed collectstatic + stage_manager_ui.py public assets only.
+    # Manager assets live in manager/assets; /manager/ HTML comes from Django.
+    # Never alias a build root, private config/evidence/catalog/spool or Indexer.
     location ^~ /static/ {
         alias /srv/aegis-manager-static/;
         autoindex off;

@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 from django.db import transaction
 from django.utils import timezone
+from accounts.permissions import require_product_admin, require_product_permission
 from .models import Job, Device, DispatchLock, AuditEntry
 from .signing import sign_payload
 from aegis_verify.intake.io import read_local
@@ -11,11 +12,6 @@ from aegis_verify.intake.errors import IntakeError
 
 TERMINAL_COLLECTION = ("evaluated", "empty", "reconciled")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
-
-
-def owner(actor):
-    if not actor or not actor.is_authenticated or not actor.is_active or not actor.is_superuser:
-        raise PermissionError("Owner approval required")
 
 
 def audit(job, action, actor):
@@ -45,7 +41,7 @@ def stamp(value):
 
 @transaction.atomic
 def approve_job(job_id, actor):
-    owner(actor)
+    actor = require_product_permission(actor, "run_jobs")
     lock_dispatch()
     job = Job.objects.select_for_update().select_related("device", "release").get(pk=job_id)
     if job.execution_state != "draft": raise ValueError("Job already approved")
@@ -96,7 +92,7 @@ def claim_job(device):
 
 @transaction.atomic
 def reconcile_job(job_id, actor):
-    owner(actor)
+    actor = require_product_admin(actor)
     lock_dispatch()
     job = Job.objects.select_for_update().get(pk=job_id)
     if job.execution_state == "draft" or job.collection_state == "collecting": raise ValueError("Cannot reconcile draft or active collection")
@@ -110,7 +106,7 @@ def reconcile_job(job_id, actor):
 
 @transaction.atomic
 def cancel_job(job_id, actor):
-    owner(actor)
+    actor = require_product_permission(actor, "run_jobs")
     lock_dispatch()
     job = Job.objects.select_for_update().get(pk=job_id)
     if job.execution_state not in ("draft", "queued", "leased"):

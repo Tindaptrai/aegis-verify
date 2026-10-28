@@ -83,6 +83,60 @@ class ProtocolTests(TestCase):
         self.assertEqual(json.loads(payload)["run_id"],str(job.id))
         self.assertEqual(self.post().json(),envelope)
 
+    def test_operator_approval_uses_fresh_authority_after_cached_grants_revoked(self):
+        from django.contrib.auth.models import Group
+        actor = get_user_model().objects.create_user('synthetic-operator')
+        actor.groups.add(Group.objects.get(name='AEGIS Operators'))
+        actor.get_all_permissions()
+        job = self.job()
+        approve_job(job.pk, actor)
+        job.refresh_from_db()
+        self.assertEqual(job.execution_state, 'queued')
+        reconcile_job(job.pk, self.owner)
+        actor.groups.clear()
+        newer = self.job()
+        with self.assertRaises(PermissionError):
+            approve_job(newer.pk, actor)
+        newer.refresh_from_db()
+        self.assertEqual(newer.execution_state, 'draft')
+
+    def test_product_job_action_matrix_preserves_reconcile_and_admin_boundaries(self):
+        from django.contrib import admin
+        from django.contrib.auth.models import Group, Permission
+        from django.test import RequestFactory
+        from control.admin import OwnerAdmin
+        from control.jobs import cancel_job
+        for role, allowed, reconcile in (('Viewer', False, False), ('Operator', True, False), ('Administrator', True, True)):
+            actor = get_user_model().objects.create_user('synthetic-' + role)
+            actor.groups.add(Group.objects.get(name={'Viewer': 'AEGIS Viewers', 'Operator': 'AEGIS Operators', 'Administrator': 'AEGIS Administrators'}[role]))
+            job = self.job()
+            if allowed:
+                approve_job(job.pk, actor)
+                job.refresh_from_db()
+                self.assertEqual(job.execution_state, 'queued')
+                if reconcile:
+                    reconcile_job(job.pk, actor)
+                else:
+                    with self.assertRaises(PermissionError): reconcile_job(job.pk, actor)
+                    cancel_job(job.pk, actor)
+                    job.refresh_from_db()
+                    self.assertEqual(job.execution_state, 'cancelled')
+                    self.assertTrue(AuditEntry.objects.filter(job=job, action='cancelled', actor=str(actor.pk)).exists())
+            else:
+                with self.assertRaises(PermissionError): approve_job(job.pk, actor)
+                with self.assertRaises(PermissionError): cancel_job(job.pk, actor)
+            request = RequestFactory().get('/admin/')
+            request.user = actor
+            self.assertFalse(OwnerAdmin(Job, admin.site).has_module_permission(request))
+        manager = get_user_model().objects.create_user('synthetic-account-manager')
+        manager.user_permissions.add(*Permission.objects.filter(content_type__app_label='accounts', codename__in=('view', 'manage_users')))
+        job = self.job()
+        approve_job(job.pk, self.owner)
+        with self.assertRaises(PermissionError): reconcile_job(job.pk, manager)
+        reconcile_job(job.pk, self.owner)
+        get_user_model().objects.filter(pk=self.owner.pk).update(is_active=False)
+        with self.assertRaises(PermissionError): cancel_job(self.job().pk, self.owner)
+
     def test_untrusted_proxy_revoked_wrong_certificate_denied(self):
         self.assertEqual(self.post(REMOTE_ADDR="192.0.2.1").status_code,403)
         self.assertEqual(self.post(HTTP_X_FORWARDED_PROTO="http").status_code,403)
