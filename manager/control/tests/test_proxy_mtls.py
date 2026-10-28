@@ -232,6 +232,39 @@ class NginxMutualTlsTests(LiveServerTestCase):
         device = Device.objects.get(pk=result["device_id"])
         self.assertIsNotNone(device.last_heartbeat_at)
 
+    def test_both_heartbeats_replace_forged_peer_header(self):
+        now = timezone.now()
+        device = Device.objects.create(environment_id="synthetic", connection_kind="paired_presence",
+            certificate_sha256=self.client_cert.fingerprint(hashes.SHA256()).hex(),
+            certificate_not_before=now - timedelta(hours=1), certificate_expires_at=now + timedelta(hours=1))
+        for network in (False, True):
+            body = {"protocol": "2.1" if network else "2.0", "device_id": str(device.pk), "generation": 1}
+            if network:
+                body["network"] = {"collection_status": "ok", "reported_ips": ["192.0.2.9"],
+                                   "truncated": False, "agent_version": "0.2.0"}
+            path = "/agent/v2/network-heartbeat" if network else "/agent/v2/heartbeat"
+            with self.subTest(path=path):
+                self.assertEqual(self._request(self.client_path, self.client_key_path,
+                    headers={"X-Aegis-Peer-IP": "192.0.2.99, 192.0.2.100", "X-Forwarded-For": "192.0.2.99",
+                             "Forwarded": "for=192.0.2.99"}, path=path, body=body), 200)
+                device.refresh_from_db()
+                self.assertIn(device.observed_ip, ("127.0.0.1", "::1"))
+                self.assertIsNotNone(device.observed_ip_received_at)
+                self.assertEqual(device.reported_ips, ["192.0.2.9"] if network else None)
+
+    def test_network_heartbeat_requires_mtls_and_enrolled_identity(self):
+        spoof = {"X-Aegis-Client-Verify": "SUCCESS", "X-Aegis-Client-Cert":
+                 quote(self.client_cert.public_bytes(serialization.Encoding.PEM).decode(), safe=""),
+                 "X-Aegis-Peer-IP": "192.0.2.9"}
+        body = {"protocol": "2.1", "device_id": "00000000-0000-0000-0000-000000000001", "generation": 1,
+                "network": {"collection_status": "unavailable", "reported_ips": None,
+                            "truncated": False, "agent_version": "0.2.0"}}
+        self.assertEqual(self._request(headers=spoof, path="/agent/v2/network-heartbeat", body=body), 403)
+        self.assertEqual(self._request(self.other_path, self.other_key_path,
+                                      path="/agent/v2/network-heartbeat", body=body), 403)
+        self.assertEqual(self._request(self.client_path, self.client_key_path, path="/agent/v2/network-heartbeat",
+                                      body={"padding": "x" * 16385}), 413)
+
     def test_bootstrap_strips_spoofed_identity_and_cannot_write_presence(self):
         _, body = self._enrollment_body()
         spoof = {"X-Aegis-Client-Verify": "SUCCESS", "X-Aegis-Client-Cert":

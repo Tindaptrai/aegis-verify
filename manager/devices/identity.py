@@ -7,6 +7,7 @@ from cryptography.hazmat.primitives import hashes
 from django.utils import timezone
 
 from .contracts import DeviceError
+from .network import ip_literal
 
 
 def require_https(request, *, error="pairing_denied"):
@@ -34,3 +35,10 @@ def certificate_fingerprint(request):
         return cert.fingerprint(hashes.SHA256()).hex()
     except (ValueError, TypeError, UnicodeError):
         raise DeviceError("identity_denied") from None
+
+
+def observed_peer_ip(request):
+    """Call only after certificate identity has been bound to an active Device."""
+    require_https(request, error="identity_denied")
+    value = request.META.get("HTTP_X_AEGIS_PEER_IP")
+    return None if value is None else str(ip_literal(value))

@@ -49,6 +49,16 @@ def payload(source, build, runtime, version, commit):
     if set(path.name for path in build.iterdir()) != set(names):
         raise ValueError()
     files = {"bin/" + name: read_public(build / name) for name in names}
+    # The caller's archive label must describe the published application. This
+    # reads version metadata only; the closed runtime inventory above remains
+    # the sole authority for payload filenames.
+    dependencies = json.loads(files["bin/aegis-agent.deps.json"])
+    if not isinstance(dependencies, dict):
+        raise ValueError()
+    libraries = dependencies.get("libraries", {})
+    if (not isinstance(libraries, dict)
+            or {name for name in libraries if name.startswith("aegis-agent/")} != {"aegis-agent/" + version}):
+        raise ValueError()
     config = json.loads(files["bin/aegis-agent.runtimeconfig.json"])
     if config.get("runtimeOptions", {}).get("includedFrameworks") != [{"name": "Microsoft.NETCore.App", "version": "10.0.13"}]:
         raise ValueError()

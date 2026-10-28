@@ -94,7 +94,7 @@ internal static partial class Program
             {
                 Check(path == "/agent/v2/enroll", "wrong enrollment route");
                 Check(store.Read()!.Kind == "pending", "request sent before durable pending write");
-                using var doc = JsonDocument.Parse(body); Check(doc.RootElement.GetProperty("pairing_code").GetString() == new string('a', 64), "code wire mismatch");
+                using var doc = JsonDocument.Parse(body); Check(doc.RootElement.GetProperty("pairing_code").GetString() == new string('a', 64) && doc.RootElement.GetProperty("agent_version").GetString() == "0.2.0" && doc.RootElement.GetProperty("protocol").GetString() == "2.0", "code/version/protocol wire mismatch");
                 return new Reply(201, JsonSerializer.Serialize(identityCa.Issue(pending!), Protocol.Json));
             }))
             {
@@ -105,9 +105,9 @@ internal static partial class Program
             var enrolled = store.Read()!;
             await using var heartbeat = new TlsEndpoint(ca, (path, body) =>
             {
-                Check(path == "/agent/v2/heartbeat", "wrong heartbeat route");
+                Check(path == "/agent/v2/network-heartbeat", "wrong heartbeat route");
                 Check(!body.Contains("pairing_code") && !body.Contains("PRIVATE"), "heartbeat leaked enrollment secret");
-                return new Reply(200, HeartbeatOk);
+                return new Reply(200, NetworkOk);
             }, clientIssuer: identityCa.Certificate);
             using var connection = new AgentClient(enrolled with { ManagerOrigin = heartbeat.Origin });
             Check((await connection.HeartbeatAsync(CancellationToken.None)).HeartbeatSeconds == 15, "heartbeat response invalid");

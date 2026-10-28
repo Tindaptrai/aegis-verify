@@ -21,8 +21,11 @@ public sealed class AgentClient : IHeartbeatTransport, IDisposable
     private readonly X509Certificate2? clientCertificate;
     private readonly X509Certificate2? issuer;
     private readonly Uri origin;
-    public AgentClient(IdentityState state)
+    private readonly NetworkHeartbeat network;
+    public AgentClient(IdentityState state) : this(state, NetworkHeartbeat.Process) { }
+    internal AgentClient(IdentityState state, NetworkHeartbeat network)
     {
+        this.network = network;
         this.state = state; origin = Protocol.Origin(state.ManagerOrigin);
         try
         {
@@ -73,6 +76,19 @@ public sealed class AgentClient : IHeartbeatTransport, IDisposable
     }
     public async Task<HeartbeatResponse> HeartbeatAsync(CancellationToken cancellationToken)
     {
+        if (!network.Unsupported)
+        {
+            var snapshot = await network.Inventory.CollectAsync(cancellationToken);
+            try
+            {
+                var networkBytes = await Send("/agent/v2/network-heartbeat", Protocol.NetworkHeartbeatRequest(state, snapshot), 200, false, cancellationToken);
+                return Protocol.NetworkHeartbeat(networkBytes);
+            }
+            catch (NetworkUnsupportedException)
+            {
+                network.MarkUnsupported();
+            }
+        }
         var bytes = await Send("/agent/v2/heartbeat", Protocol.HeartbeatRequest(state), 200, false, cancellationToken);
         return Protocol.Heartbeat(bytes);
     }
@@ -84,6 +100,8 @@ public sealed class AgentClient : IHeartbeatTransport, IDisposable
             using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(origin, path));
             request.Content = new ByteArrayContent(body); request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
             using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token);
+            // Only authenticated HTTP status enables fallback, independently of body.
+            if (path == "/agent/v2/network-heartbeat" && response.StatusCode == HttpStatusCode.NotFound) throw new NetworkUnsupportedException();
             if (response.Content.Headers.ContentLength > Protocol.ResponseLimit) throw new ConnectionException("response_invalid");
             using var stream = await response.Content.ReadAsStreamAsync(timeout.Token);
             using var output = new MemoryStream(); var buffer = new byte[4096];
@@ -110,6 +128,7 @@ public sealed class AgentClient : IHeartbeatTransport, IDisposable
         finally { CryptographicOperations.ZeroMemory(body); }
     }
     private sealed record ErrorEnvelope(ErrorCode Error);
+    private sealed class NetworkUnsupportedException : Exception;
     private sealed record ErrorCode(string Code);
     public void Dispose() { client.Dispose(); clientCertificate?.Dispose(); issuer?.Dispose(); serverCa.Dispose(); }
 }

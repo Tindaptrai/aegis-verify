@@ -90,7 +90,7 @@ public sealed class StateStore : IDisposable
             if (RuntimeInformation.OSArchitecture != Architecture.X64 || !(OperatingSystem.IsWindows() || OperatingSystem.IsLinux())) throw new ConnectionException("configuration_invalid");
             using var key = RSA.Create(3072);
             var csr = new CertificateRequest("CN=AEGIS pending agent", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1).CreateSigningRequestPem();
-            var state = new IdentityState("pending", uri.GetLeftPart(UriPartial.Authority), ca.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem(), csr, System.Net.Dns.GetHostName(), OperatingSystem.IsWindows() ? "windows" : "linux", "x64", "0.1.0");
+            var state = new IdentityState("pending", uri.GetLeftPart(UriPartial.Authority), ca.ExportCertificatePem(), key.ExportPkcs8PrivateKeyPem(), csr, System.Net.Dns.GetHostName(), OperatingSystem.IsWindows() ? "windows" : "linux", "x64", Protocol.AgentVersion);
             Save(state); return state;
         }
         catch (CryptographicException) { throw new ConnectionException("configuration_invalid"); }
@@ -152,7 +152,7 @@ public sealed class StateStore : IDisposable
     {
         try
         {
-            if (state.Kind is not ("pending" or "enrolled") || Protocol.Origin(state.ManagerOrigin).GetLeftPart(UriPartial.Authority) != state.ManagerOrigin || state.Hostname.Length is < 1 or > 255 || state.Hostname.Any(char.IsControl) || state.Os is not ("windows" or "linux") || state.Architecture != "x64" || state.AgentVersion != "0.1.0" || state.Failure != null && !Failures.Contains(state.Failure) || state.LastAcknowledgedAt != null && !DateTimeOffset.TryParse(state.LastAcknowledgedAt, out _)) throw new CryptographicException();
+            if (state.Kind is not ("pending" or "enrolled") || Protocol.Origin(state.ManagerOrigin).GetLeftPart(UriPartial.Authority) != state.ManagerOrigin || state.Hostname.Length is < 1 or > 255 || state.Hostname.Any(char.IsControl) || state.Os is not ("windows" or "linux") || state.Architecture != "x64" || state.AgentVersion is not ("0.1.0" or "0.2.0") || state.Failure != null && !Failures.Contains(state.Failure) || state.LastAcknowledgedAt != null && !DateTimeOffset.TryParse(state.LastAcknowledgedAt, out _)) throw new CryptographicException();
             using var ca = Certificates.PublicPem(state.ServerCaPem);
             // Persisted expired trust/identity must still be readable for status and explicit retirement.
             if (!ca.Extensions.OfType<X509BasicConstraintsExtension>().Any(e => e.CertificateAuthority)) throw new CryptographicException();

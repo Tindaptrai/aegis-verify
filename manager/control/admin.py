@@ -1,4 +1,5 @@
 from django.contrib import admin, messages
+from django.db import transaction
 from .models import Device, RunnerRelease, Job, AuditEntry
 from .jobs import approve_job, reconcile_job, cancel_job
 
@@ -14,6 +15,24 @@ class OwnerAdmin(admin.ModelAdmin):
 @admin.register(Device)
 class DeviceAdmin(OwnerAdmin):
     list_display = ("id", "environment_id", "generation", "revoked")
+    readonly_fields = ("archived_at", "archived_by_id", "reported_ips", "ip_collection_status",
+                       "reported_ips_truncated", "reported_ips_received_at", "observed_ip",
+                       "observed_ip_received_at", "reported_agent_version", "last_heartbeat_at")
+
+    def get_readonly_fields(self, request, obj=None):
+        return self.readonly_fields + (("revoked",) if obj and obj.archived_at is not None else ())
+
+    @transaction.atomic
+    def save_model(self, request, obj, form, change):
+        if change:
+            # A form loaded before archive/heartbeat must not write its stale
+            # readonly snapshot back over a subsequently committed mutation.
+            current = Device.objects.select_for_update().get(pk=obj.pk)
+            for name in self.readonly_fields:
+                setattr(obj, name, getattr(current, name))
+            if current.archived_at is not None:
+                obj.revoked = True
+        super().save_model(request, obj, form, change)
 
 
 @admin.register(RunnerRelease)

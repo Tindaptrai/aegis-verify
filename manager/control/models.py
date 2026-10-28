@@ -18,6 +18,21 @@ class Device(models.Model):
     certificate_not_before = models.DateTimeField(null=True, blank=True)
     certificate_expires_at = models.DateTimeField(null=True, blank=True)
     last_heartbeat_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    archived_by_id = models.PositiveBigIntegerField(null=True, blank=True)
+    reported_ips = models.JSONField(null=True, blank=True)
+    ip_collection_status = models.CharField(max_length=16, choices=[(v, v) for v in ("unknown", "ok", "unavailable")], default="unknown")
+    reported_ips_truncated = models.BooleanField(default=False)
+    reported_ips_received_at = models.DateTimeField(null=True, blank=True)
+    observed_ip = models.GenericIPAddressField(null=True, blank=True)
+    observed_ip_received_at = models.DateTimeField(null=True, blank=True)
+    reported_agent_version = models.CharField(max_length=32, null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(archived_at__isnull=True) | models.Q(revoked=True),
+                                   name="archived_device_is_revoked"),
+        ]
 
 
 class RunnerRelease(models.Model):

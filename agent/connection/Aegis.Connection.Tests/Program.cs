@@ -13,6 +13,7 @@ internal static partial class Program
         StateTests();
         ProtocolTests();
         TransportTests();
+        NetworkTests();
         LoopTests();
         CliTests();
         DurabilityTests();

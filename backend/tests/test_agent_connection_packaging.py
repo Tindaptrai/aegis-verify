@@ -35,6 +35,7 @@ def package_input(request, tmp_path):
         (build / name).write_bytes(b"synthetic public binary")
     (build / "aegis-agent.runtimeconfig.json").write_text(json.dumps({"runtimeOptions": {
         "tfm": "net10.0", "includedFrameworks": [{"name": "Microsoft.NETCore.App", "version": "10.0.13"}]}}))
+    (build / "aegis-agent.deps.json").write_text(json.dumps({"libraries": {"aegis-agent/0.2.0": {"type": "project"}}}))
     platform = "windows" if request.param == "win-x64" else "linux"
     scripts = ["Install-Agent.ps1", "Uninstall-Agent.ps1"] if platform == "windows" else ["install.sh", "uninstall.sh", "aegis-agent.service"]
     deploy = source / "deploy/agent" / platform
@@ -55,7 +56,7 @@ def stage(data, output, *extra):
     source, build, rid, _ = data
     return subprocess.run([sys.executable, "-B", str(SCRIPT), "--source-root", str(source),
         "--build-root", str(build), "--output-root", str(output), "--runtime", rid,
-        "--version", "0.1.0", "--commit", COMMIT, *extra], capture_output=True, text=True)
+        "--version", "0.2.0", "--commit", COMMIT, *extra], capture_output=True, text=True)
 
 
 def archive_payload(path):
@@ -73,11 +74,11 @@ def test_public_packages_have_stable_hashes_layout_metadata_and_no_private_sourc
     result = stage(package_input, output)
     assert result.returncode == 0, result.stderr
     extension = ".zip" if rid == "win-x64" else ".tar.gz"
-    archive = output / ("AEGIS-Agent-Connection-0.1.0-" + rid + extension)
+    archive = output / ("AEGIS-Agent-Connection-0.2.0-" + rid + extension)
     data = archive_payload(archive)
     assert set(name for name in data if not name.startswith("bin/")) == {*scripts, "AGENT_CONNECTION_RUNBOOK.md", "version.json", "SHA256SUMS.txt"}
     metadata = json.loads(data["version.json"])
-    assert metadata == {"schema_version": "1.0", "version": "0.1.0", "source_commit": COMMIT,
+    assert metadata == {"schema_version": "1.0", "version": "0.2.0", "source_commit": COMMIT,
                         "runtime": rid, "dotnet_runtime": "10.0.13"}
     lines = data["SHA256SUMS.txt"].decode().splitlines()
     assert lines == sorted(lines, key=lambda line: line[66:])
@@ -200,3 +201,32 @@ def test_junction_build_and_output_are_rejected(package_input, tmp_path):
         assert stage(package_input, output).returncode != 0
     finally:
         output.rmdir()
+
+
+def test_package_version_must_match_published_binary(package_input, tmp_path):
+    result = stage(package_input, tmp_path / "output", "--version", "0.1.0")
+    assert result.returncode != 0
+    assert result.stderr.strip() == "agent_package_invalid"
+    assert not (tmp_path / "output").exists()
+
+
+def test_native_workflow_stages_current_connection_version():
+    import xml.etree.ElementTree as ET
+    project = ET.parse(ROOT / "agent/connection/Aegis.Connection/Aegis.Connection.csproj")
+    version = project.findtext(".//Version")
+    workflow = (ROOT / ".github/workflows/agent-connection.yml").read_text()
+    assert "--version " + version + " --commit" in workflow
+    for rid, extension in (("win-x64", ".zip"), ("linux-x64", ".tar.gz")):
+        assert "AEGIS-Agent-Connection-" + version + "-" + rid + extension in workflow
+
+
+@pytest.mark.parametrize("metadata", [[], {"libraries": []}, {"libraries": {}},
+    {"libraries": {"aegis-agent/0.1.0": {}}},
+    {"libraries": {"aegis-agent/0.1.0": {}, "aegis-agent/0.2.0": {}}}])
+def test_invalid_application_metadata_is_rejected(package_input, tmp_path, metadata):
+    _, build, _, _ = package_input
+    (build / "aegis-agent.deps.json").write_text(json.dumps(metadata))
+    result = stage(package_input, tmp_path / "output")
+    assert result.returncode != 0
+    assert result.stderr.strip() == "agent_package_invalid"
+    assert not (tmp_path / "output").exists()

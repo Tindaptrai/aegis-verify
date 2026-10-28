@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Net;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -11,6 +12,7 @@ public sealed record HeartbeatResponse(string Protocol, string ServerTime, int H
 
 public static class Protocol
 {
+    public static string AgentVersion { get; } = typeof(Protocol).Assembly.GetName().Version!.ToString(3);
     internal const int ResponseLimit = 16384;
     internal static readonly JsonSerializerOptions Json = new()
     {
@@ -23,11 +25,34 @@ public static class Protocol
     public static byte[] EnrollmentRequest(IdentityState state, string code)
     {
         if (!Regex.IsMatch(code, "\\A[0-9a-f]{64}\\z", RegexOptions.CultureInvariant)) throw new ConnectionException("pairing_code_invalid");
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(new { protocol = "2.0", pairing_code = code, csr_pem = state.CsrPem, hostname = state.Hostname, os = state.Os, architecture = state.Architecture, agent_version = state.AgentVersion });
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new { protocol = "2.0", pairing_code = code, csr_pem = state.CsrPem, hostname = state.Hostname, os = state.Os, architecture = state.Architecture, agent_version = AgentVersion });
         if (bytes.Length > ResponseLimit) throw new ConnectionException("configuration_invalid");
         return bytes;
     }
     public static byte[] HeartbeatRequest(IdentityState state) => JsonSerializer.SerializeToUtf8Bytes(new { protocol = "2.0", device_id = state.DeviceId, generation = state.Generation });
+    internal static byte[] NetworkHeartbeatRequest(IdentityState state, NetworkSnapshot network)
+    {
+        if (network.AgentVersion != AgentVersion) throw new ConnectionException("configuration_invalid");
+        if (network.CollectionStatus == "unavailable")
+        {
+            if (network.ReportedIps != null || network.Truncated) throw new ConnectionException("configuration_invalid");
+        }
+        else if (network.CollectionStatus == "ok" && network.ReportedIps is { Length: <= 32 } ips)
+        {
+            var addresses = new List<IPAddress>();
+            foreach (var text in ips)
+            {
+                if (text == null || !IPAddress.TryParse(text, out var address)) throw new ConnectionException("configuration_invalid");
+                addresses.Add(address);
+            }
+            var normalized = NetworkInventory.Normalize([new(true, addresses)]);
+            if (!ips.SequenceEqual(normalized.ReportedIps!) || network.Truncated && ips.Length != 32) throw new ConnectionException("configuration_invalid");
+        }
+        else throw new ConnectionException("configuration_invalid");
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new { protocol = "2.1", device_id = state.DeviceId, generation = state.Generation, network }, Json);
+        if (bytes.Length > ResponseLimit) throw new ConnectionException("configuration_invalid");
+        return bytes;
+    }
     public static EnrollmentResponse Enrollment(byte[] json)
     {
         var value = Decode<EnrollmentResponse>(json, ResponseLimit, "response_invalid");
@@ -39,10 +64,12 @@ public static class Protocol
         if (value.Protocol != "2.0" || !Uuid(value.DeviceId) || !Environment(value.EnvironmentId) || value.Generation != 1 || value.HeartbeatSeconds != 15 || value.OfflineAfterSeconds != 60 || !Timestamp(value.ExpiresAt, out _) || value.CertificatePem.Length > 8192 || value.IssuerPem.Length > 8192)
             throw new ConnectionException(error);
     }
-    public static HeartbeatResponse Heartbeat(byte[] json)
+    public static HeartbeatResponse Heartbeat(byte[] json) => Heartbeat(json, "2.0");
+    internal static HeartbeatResponse NetworkHeartbeat(byte[] json) => Heartbeat(json, "2.1");
+    private static HeartbeatResponse Heartbeat(byte[] json, string protocol)
     {
         var value = Decode<HeartbeatResponse>(json, ResponseLimit, "response_invalid");
-        if (value.Protocol != "2.0" || value.HeartbeatSeconds != 15 || value.OfflineAfterSeconds != 60 || !Timestamp(value.ServerTime, out _)) throw new ConnectionException("response_invalid");
+        if (value.Protocol != protocol || value.HeartbeatSeconds != 15 || value.OfflineAfterSeconds != 60 || !Timestamp(value.ServerTime, out _)) throw new ConnectionException("response_invalid");
         return value;
     }
     public static Uri Origin(string origin)

@@ -41,7 +41,7 @@ class EnrollmentAudit(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     actor_id = models.PositiveBigIntegerField(null=True, blank=True)
     action = models.CharField(max_length=32, choices=[(v, v) for v in
-        ("pairing_code_created", "pairing_code_revoked", "device_enrolled", "device_revoked")])
+        ("pairing_code_created", "pairing_code_revoked", "device_enrolled", "device_revoked", "device_archived")])
     code_id = models.UUIDField(null=True, blank=True)
     device_id = models.UUIDField(null=True, blank=True)
 

@@ -10,7 +10,8 @@ from django.utils import timezone
 from accounts.contracts import _unique_object, _invalid_constant
 
 ERRORS = {"invalid_request": 400, "pairing_denied": 403, "issuer_unavailable": 503,
-          "identity_denied": 403, "temporarily_unavailable": 503, "device_conflict": 409}
+          "identity_denied": 403, "temporarily_unavailable": 503, "device_conflict": 409,
+          "device_busy": 409, "device_not_found": 404}
 
 
 class DeviceError(ValueError):
@@ -56,7 +57,7 @@ def enrollment_input(data):
             or any(type(v) is not str for v in data.values())):
         raise DeviceError("invalid_request")
     if (data["protocol"] != "2.0" or data["os"] not in ("windows", "linux") or data["architecture"] != "x64"
-            or data["agent_version"] != "0.1.0" or not re.fullmatch(r"[0-9a-f]{64}", data["pairing_code"])
+            or data["agent_version"] not in ("0.1.0", "0.2.0") or not re.fullmatch(r"[0-9a-f]{64}", data["pairing_code"])
             or not 1 <= len(data["hostname"]) <= 255
             or any(unicodedata.category(c).startswith("C") or not c.isprintable() for c in data["hostname"])
             or not data["csr_pem"].isascii() or len(data["csr_pem"]) > 8192):
@@ -99,9 +100,9 @@ def device_dto(device, *, now=None):
             "execution_supported": False}
 
 
-def devices_query(request):
+def devices_query(request, *, allowed=None):
     query = request.GET
-    if set(query) - {"page", "search"} or any(len(query.getlist(k)) != 1 for k in query):
+    if set(query) - (allowed if allowed is not None else {"page", "search"}) or any(len(query.getlist(k)) != 1 for k in query):
         raise DeviceError("invalid_request")
     raw, search = query.get("page", "1"), query.get("search", "")
     if not raw.isascii() or not raw.isdecimal() or len(raw) > 9 or int(raw) < 1 or len(search) > 100:
