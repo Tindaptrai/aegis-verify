@@ -101,6 +101,9 @@ class SyntheticHost:
     def cleanup(self, work):
         self.events.append("cleanup")
 
+    def restore_firewall_compatibility(self, p, snapshot, work):
+        self.event("restore_compatibility")
+
 
 class TransactionTests(unittest.TestCase):
     @classmethod
@@ -173,6 +176,7 @@ class TransactionTests(unittest.TestCase):
         self.assertFalse(self.host.guard)
         self.assertEqual(self.host.config, "old")
         self.assertLess(self.host.events.index("verify_old"), self.host.events.index("remove_guard"))
+        self.assertLess(self.host.events.index("remove_guard"), self.host.events.index("restore_compatibility"))
 
     def test_failure_each_mutating_phase_rolls_back(self):
         for phase in ("stage", "install", "guard", "verify_guard", "units", "patch", "restart", "verify_new"):
@@ -206,7 +210,7 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(self.c.rollback()["status"], "rolled_back")
 
     def test_uncertain_recovery_never_removes_guard(self):
-        for phase in ("restore", "restart", "verify_old", "remove_guard"):
+        for phase in ("restore", "restart", "verify_old", "remove_guard", "restore_compatibility"):
             with self.subTest(phase=phase), tempfile.TemporaryDirectory() as temporary:
                 host = SyntheticHost()
                 store = self.t.DurableStore(Path(temporary) / "state", sync_directory=lambda p: None)
@@ -311,6 +315,7 @@ class TransactionTests(unittest.TestCase):
 
     def test_guard_conflict_is_never_replaced_and_verify_never_adds_table(self):
         host = self.h.LinuxHost(fs=object(), commands=object())
+        host.verify_installed_firewall_compatibility = lambda p: None  # Firewall-only boundary.
         mutations = []
         host.firewall = lambda: {"nftables": [{"table": {"family": "inet", "name": "aegis_wazuh_http_v1"}}]}
         host.run = lambda *args, **kwargs: mutations.append(args)
@@ -332,7 +337,13 @@ class TransactionTests(unittest.TestCase):
                 def read(_, path, **kwargs):
                     return json.dumps(manifest).encode() if path.name == "KIT-MANIFEST.json" else bodies[str(path.relative_to(root)).replace("\\", "/")]
             host = self.h.LinuxHost(fs=Files(), commands=object(), bundle=root)
-            self.assertEqual(len(host.bundle_files()), 9)
+            self.assertEqual(len(self.h.KIT_FILES), 10)
+            self.assertEqual(len(host.bundle_files()), 11)
+            for name in ("https_setup/ufw.py", "https_setup/ufw_host.py"):
+                pin = manifest["files"].pop(name)
+                with self.assertRaisesRegex(SetupError, "manifest_invalid"):
+                    host.bundle_files()
+                manifest["files"][name] = pin
             manifest["files"]["unrelated.py"] = "b" * 64
             with self.assertRaisesRegex(SetupError, "manifest_invalid"):
                 host.bundle_files()
@@ -523,6 +534,7 @@ class TransactionTests(unittest.TestCase):
     def test_guard_creation_uses_exclusive_batch(self):
         from deploy.wazuh.https_setup.firewall import _expected
         host = self.h.LinuxHost(fs=object(), commands=object())
+        host.verify_installed_firewall_compatibility = lambda p: None  # Firewall-only boundary.
         state = {"nftables": []}
         host.firewall = lambda: state
         observed = []
@@ -586,7 +598,8 @@ class TransactionTests(unittest.TestCase):
         host = self.h.LinuxHost(fs=Files(), commands=object())
         host.uid = host.gid = 123
         host.firewall = lambda: {"nftables": []}
-        facts = {"archive": {"ino": 77}, "firewall": {"nftables": []}, "bundle": {}}
+        host.admit_firewall_loaders = lambda: None  # Signing-only boundary.
+        facts = {"archive": {"ino": 77}, "firewall": {"nftables": []}, "bundle": {}, "ufw_compatibility": None}
         def signer(work, profile, actual_ca, actual_key, old):
             self.assertEqual((actual_ca, actual_key, old), (ca, key, b"old synthetic leaf"))
             return b"new leaf", b"new HTTP key"
@@ -633,6 +646,416 @@ class TransactionTests(unittest.TestCase):
         with self.assertRaisesRegex(SetupError, "recovery_required"):
             self.c.rollback()
         self.assertEqual(self.host.config, "intervening operator edit")
+
+
+class UfwHostIntegrationTests(unittest.TestCase):
+    """Synthetic OS evidence; these are not native UFW qualification results."""
+    def setUp(self):
+        from deploy.wazuh.tests.test_ufw import FakeReader, loaders
+        self.h = importlib.import_module("deploy.wazuh.https_setup.host")
+        self.u = importlib.import_module("deploy.wazuh.https_setup.ufw")
+        self.reader = FakeReader(self.u)
+        self.states = loaders()
+        self.host = self.h.LinuxHost(fs=object(), commands=object())
+        self.p = Profile(**profile_dict())
+        self.rules = {"nftables": [{"table": {"family": "ip", "name": "foreign"}}]}
+        self.host.firewall = lambda: copy.deepcopy(self.rules)
+        self.host.properties = lambda unit, keys: {k: self.states[unit][k] for k in keys}
+        self.probe = {"file": {"sha256": "a" * 64}, "package_md5": "b" * 32}
+        self.reader.probe_identity = lambda wrapper: copy.deepcopy(self.probe)
+        self.reader.dependency_facts = lambda: {"ufw.service": {"After": []}}
+        self.reader.validate_library_alias = lambda wrapper: None
+        self.host.ufw_reader = lambda: self.reader
+        self.record = None
+        self.host.read_firewall_compatibility = lambda: copy.deepcopy(self.record)
+
+    def admission(self):
+        self.assertTrue(hasattr(self.host, "admit_firewall_loaders"), "Task 2 host admission missing")
+        return self.host.admit_firewall_loaders()
+
+    def pin(self):
+        from deploy.wazuh.https_setup.transaction import digest
+        self.record = {"schema_version": 1, "profile_sha256": digest(self.p.as_dict()),
+                       "fingerprint": self.admission()}
+
+    def test_strict_old_path_has_no_exception_record(self):
+        self.states["ufw.service"].update(ActiveState="inactive", UnitFileState="disabled")
+        self.assertIsNone(self.admission())
+
+    def test_qualified_host_envelope_preserves_wrapper_and_foreign_rules(self):
+        result = self.admission()
+        self.assertEqual(set(result), {"wrapper", "probe", "dependencies", "foreign_firewall"})
+        self.assertEqual(set(result["wrapper"]), {"schema_version", "package_version", "files", "unit", "backends"})
+        self.assertEqual(result["foreign_firewall"], self.rules)
+        self.assertEqual(result["probe"], self.probe)
+
+    def test_active_wrapper_startup_cannot_bootstrap_missing_record(self):
+        self.admission()
+        with self.assertRaisesRegex(SetupError, "ufw_drift"):
+            self.host.verify_installed_firewall_compatibility(self.p)
+
+    def test_startup_requalifies_pinned_record_even_with_active_guard(self):
+        from deploy.wazuh.https_setup.firewall import _expected
+        self.pin()
+        self.rules["nftables"].extend(_expected(self.p))
+        self.host.verify_installed_firewall_compatibility(self.p)
+        self.probe["package_md5"] = "c" * 32
+        with self.assertRaisesRegex(SetupError, "ufw_drift"):
+            self.host.verify_installed_firewall_compatibility(self.p)
+
+    def test_partial_malformed_profile_mismatch_and_unknown_fields_refuse(self):
+        self.pin()
+        valid = copy.deepcopy(self.record)
+        for record in ({}, [], valid | {"schema_version": True}, valid | {"profile_sha256": "f" * 64},
+                       valid | {"extra": 1}, valid | {"fingerprint": {}},
+                       valid | {"fingerprint": valid["fingerprint"] | {"extra": 1}}):
+            with self.subTest(record=record):
+                self.record = record
+                with self.assertRaisesRegex(SetupError, "ufw_drift"):
+                    self.host.verify_installed_firewall_compatibility(self.p)
+
+    def test_present_record_does_not_fall_back_when_wrapper_disabled(self):
+        self.pin()
+        self.states["ufw.service"].update(ActiveState="inactive", UnitFileState="disabled")
+        with self.assertRaises(SetupError):
+            self.host.verify_installed_firewall_compatibility(self.p)
+        self.record = {}
+        with self.assertRaisesRegex(SetupError, "ufw_drift"):
+            self.host.verify_installed_firewall_compatibility(self.p)
+
+    def test_conflicting_loaders_and_foreign_drift_refuse(self):
+        self.pin()
+        self.states["nftables.service"]["ActiveState"] = "active"
+        with self.assertRaises(SetupError):
+            self.host.verify_installed_firewall_compatibility(self.p)
+        self.states["nftables.service"]["ActiveState"] = "inactive"
+        self.rules["nftables"].append({"table": {"family": "ip6", "name": "new"}})
+        with self.assertRaisesRegex(SetupError, "ufw_drift"):
+            self.host.verify_installed_firewall_compatibility(self.p)
+
+    def test_both_guard_entrypoints_validate_before_table_io(self):
+        self.admission()
+        calls = []
+        def refuse(p):
+            calls.append("compatibility")
+            raise SetupError("ufw_drift")
+        self.host.verify_installed_firewall_compatibility = refuse
+        self.host.firewall = lambda: self.fail("table read before admission")
+        for operation in (self.host.ensure_guard, self.host.verify_guard):
+            with self.assertRaisesRegex(SetupError, "ufw_drift"):
+                operation(self.p)
+        self.assertEqual(calls, ["compatibility", "compatibility"])
+
+    def test_both_units_order_after_ufw_without_start_dependency(self):
+        from deploy.wazuh.https_setup.firewall import guard_unit, indexer_dropin
+        for text in (guard_unit(), indexer_dropin()):
+            after = [line for line in text.splitlines() if line.startswith("After=")]
+            self.assertIn("ufw.service", " ".join(after))
+            for line in text.splitlines():
+                if line.startswith(("Requires=", "Wants=", "BindsTo=", "ExecStop=")):
+                    self.assertNotIn("ufw.service", line)
+
+    def test_record_install_revalidates_before_write_and_never_replaces(self):
+        self.assertTrue(hasattr(self.host, "install_firewall_compatibility"), "record install missing")
+        fingerprint = self.admission()
+        events = []
+        def write(path, body):
+            events.append("write")
+            self.record = json.loads(body)
+        self.host.fs = SimpleNamespace(write=write)
+        self.host.install_firewall_compatibility(self.p, fingerprint)
+        self.assertEqual(events, ["write"])
+        self.assertEqual(self.record["fingerprint"], fingerprint)
+        with self.assertRaisesRegex(SetupError, "ufw_drift"):
+            self.host.install_firewall_compatibility(self.p, fingerprint)
+        self.record = None
+        self.probe["package_md5"] = "f" * 32
+        with self.assertRaisesRegex(SetupError, "state_changed"):
+            self.host.install_firewall_compatibility(self.p, fingerprint)
+        self.assertEqual(events, ["write"])
+
+    def test_partial_record_write_never_reaches_guard(self):
+        self.assertTrue(hasattr(self.host, "install_firewall_compatibility"), "record install missing")
+        fingerprint = self.admission()
+        for when in ("before", "after"):
+            self.record = None
+            def write(path, body):
+                if when == "after":
+                    self.record = json.loads(body)
+                raise KeyboardInterrupt()
+            self.host.fs = SimpleNamespace(write=write)
+            with self.assertRaises(KeyboardInterrupt):
+                self.host.install_firewall_compatibility(self.p, fingerprint)
+            if when == "before":
+                with self.assertRaisesRegex(SetupError, "ufw_drift"):
+                    self.host.verify_installed_firewall_compatibility(self.p)
+            else:
+                self.host.verify_installed_firewall_compatibility(self.p)
+
+    def test_compatibility_is_part_of_frozen_check_digest(self):
+        self.pin()
+        from deploy.wazuh.https_setup.transaction import Coordinator
+        synthetic = SyntheticHost()
+        synthetic.facts["ufw_compatibility"] = copy.deepcopy(self.record["fingerprint"])
+        c = Coordinator(synthetic)
+        first = c.check("profile")["check_sha256"]
+        synthetic.facts["ufw_compatibility"]["probe"]["package_md5"] = "d" * 32
+        self.assertNotEqual(first, c.check("profile")["check_sha256"])
+
+    def test_install_record_precedes_any_vendor_file_or_guard(self):
+        fingerprint = self.admission()
+        self.host.uid = self.host.gid = 123
+        self.host.bundle_files = lambda: {"synthetic.py": b"synthetic"}
+        events = []
+        def write(path, body):
+            events.append(("write", str(path)))
+            if Path(path).name == "ufw-compat.json":
+                self.record = json.loads(body)
+        def vendor_mkdir(*args):
+            self.assertIsNotNone(self.record)
+            events.append(("vendor_mkdir", str(args[0])))
+        self.host.fs = SimpleNamespace(mkdir=lambda *args: None, write=write,
+            vendor_mkdir=vendor_mkdir, read=lambda *args, **kwargs: b"synthetic",
+            vendor_write=lambda *args: self.assertIsNotNone(self.record))
+        staged = {"bundle": {"synthetic.py": self.h.sha(b"synthetic")}, "ufw_compatibility": fingerprint,
+                  "certificate_sha256": self.h.sha(b"synthetic"), "key_sha256": self.h.sha(b"synthetic")}
+        self.host.install(self.p, staged, Path("synthetic"))
+        record_event = next(i for i, event in enumerate(events) if event[1].endswith("ufw-compat.json"))
+        self.assertLess(record_event, next(i for i, event in enumerate(events) if event[0] == "vendor_mkdir"))
+
+    def recovery_fixture(self):
+        self.pin()
+        raw = self.h.encoded(self.record)
+        snapshot = {"ufw_compatibility_original": None, "ufw_compatibility_sha256": self.h.sha(raw),
+                    "original_sha256": self.h.sha(b"original")}
+        self.host.fs = SimpleNamespace(read=lambda *args, **kwargs: raw,
+            unlink=lambda path: setattr(self, "record", None))
+        self.host.vread = lambda path: b"original"
+        return snapshot
+
+    def test_recovery_restores_original_absence_and_retains_unknown_record(self):
+        snapshot = self.recovery_fixture()
+        self.host.restore_firewall_compatibility(self.p, snapshot, Path("synthetic"))
+        self.assertIsNone(self.record)
+        # Interrupted cleanup is idempotent once old config/units/table are absent.
+        with patch.object(self.h, "GUARD_UNIT", Path("synthetic-absent-guard")), patch.object(self.h, "DROPIN", Path("synthetic-absent-dropin")):
+            self.host.restore_firewall_compatibility(self.p, snapshot, Path("synthetic"))
+        snapshot = self.recovery_fixture()
+        self.record["fingerprint"]["probe"]["package_md5"] = "d" * 32
+        changed = copy.deepcopy(self.record)
+        with self.assertRaisesRegex(SetupError, "ufw_drift"):
+            self.host.restore_firewall_compatibility(self.p, snapshot, Path("synthetic"))
+        self.assertEqual(self.record, changed)
+
+    def test_recovery_missing_record_with_expanded_state_retains_protection(self):
+        from deploy.wazuh.https_setup.firewall import _expected
+        snapshot = self.recovery_fixture()
+        self.rules["nftables"].extend(_expected(self.p))
+        self.record = None
+        with self.assertRaisesRegex(SetupError, "recovery_required"):
+            self.host.check_recovery_firewall_compatibility(self.p, snapshot, Path("synthetic"))
+        self.assertTrue(self.host.table(self.rules)["nftables"])
+
+    def test_host_gate_drift_after_capture_stops_before_signing_archive(self):
+        fingerprint = self.admission()
+        facts = {"firewall": copy.deepcopy(self.rules), "ufw_compatibility": fingerprint}
+        self.probe["package_md5"] = "f" * 32
+        self.host.fs = SimpleNamespace(archive=lambda *args: self.fail("CA archive opened after host drift"))
+        with self.assertRaisesRegex(SetupError, "state_changed"):
+            self.host.stage(self.p, facts, Path("synthetic"))
+
+
+class UfwAdapterTests(unittest.TestCase):
+    def setUp(self):
+        from deploy.wazuh.tests.test_ufw import FakeReader, snapshot
+        self.a = importlib.import_module("deploy.wazuh.https_setup.ufw_host")
+        self.u = importlib.import_module("deploy.wazuh.https_setup.ufw")
+        self.h = importlib.import_module("deploy.wazuh.https_setup.host")
+        self.snapshot = lambda path, body, **kwargs: snapshot(self.u, path, body, **kwargs)
+        self.host = self.h.LinuxHost(fs=object(), commands=object())
+        self.reader = self.a.UfwHostReader(self.host)
+        self.fake = FakeReader(self.u)
+        self.reader.root_file = self.fake.root_file
+
+    def test_probe_provenance_precedes_inactive_command_and_is_frozen(self):
+        body = b"#!/usr/bin/python3\n# synthetic CLI, never executed\n"
+        self.fake.files["/usr/sbin/ufw"] = self.snapshot("/usr/sbin/ufw", body, mode=0o755)
+        sums = self.fake.files[self.u.SUMS_PATH].body + hashlib.md5(body).hexdigest().encode() + b"  usr/sbin/ufw\n"
+        self.fake.files[self.u.SUMS_PATH] = self.snapshot(self.u.SUMS_PATH, sums)
+        wrapper = {"files": {self.u.SUMS_PATH: self.u.file_identity(self.fake.files[self.u.SUMS_PATH], path=self.u.SUMS_PATH)}}
+        calls = []
+        self.host.commands = SimpleNamespace(run_selected=lambda *args: (calls.append(args) or b"Status: inactive\n", b""))
+        identity = self.reader.probe_identity(wrapper)
+        self.assertEqual(calls, [("ufw", "status")])
+        self.assertEqual(identity["package_md5"], hashlib.md5(body).hexdigest())
+        self.assertEqual(set(identity), {"file", "package_md5"})
+        self.fake.files["/usr/sbin/ufw"] = self.snapshot("/usr/sbin/ufw", body + b"# drift\n", mode=0o755)
+        with self.assertRaises(SetupError):
+            self.reader.probe_identity(wrapper)
+        self.assertEqual(len(calls), 1)
+
+    def test_probe_active_localized_oversized_or_changed_status_refuses(self):
+        body = b"#!/usr/bin/python3\n# synthetic\n"
+        self.fake.files["/usr/sbin/ufw"] = self.snapshot("/usr/sbin/ufw", body, mode=0o755)
+        sums = hashlib.md5(body).hexdigest().encode() + b"  usr/sbin/ufw\n"
+        self.fake.files[self.u.SUMS_PATH] = self.snapshot(self.u.SUMS_PATH, sums)
+        wrapper = {"files": {self.u.SUMS_PATH: self.u.file_identity(self.fake.files[self.u.SUMS_PATH], path=self.u.SUMS_PATH)}}
+        for output in (b"Status: active\n", b"localized inactive\n", b"Status: inactive\nextra", b"x" * 65537):
+            self.host.commands = SimpleNamespace(run_selected=lambda *args: (output, b""))
+            with self.assertRaises(SetupError):
+                self.reader.probe_identity(wrapper)
+        def raced(*args):
+            self.fake.files["/usr/sbin/ufw"] = self.snapshot("/usr/sbin/ufw", body + b"# drift\n", mode=0o755)
+            return b"Status: inactive\n", b""
+        self.host.commands = SimpleNamespace(run_selected=raced)
+        with self.assertRaisesRegex(SetupError, "state_changed"):
+            self.reader.probe_identity(wrapper)
+
+    def test_backend_checks_wrapper_sbin_alias_and_preserves_selected_argv(self):
+        paths = []
+        self.reader.alias = lambda path: paths.append(path) or sorted(self.a.ALIASES[path])[0]
+        self.reader.root_file = lambda path, limit: self.fake.backends["iptables"]["file"]
+        calls = []
+        self.host.commands = SimpleNamespace(run_selected=lambda *args: (calls.append(args) or b"iptables v1.8.10 (nf_tables)\n", b""))
+        self.reader.backend_identity("iptables")
+        self.assertIn("/sbin", paths)
+        self.assertEqual(calls, [("iptables", "--version")])
+
+    def graph(self, installed=False):
+        self.facts = {name: {key: "" for key in self.a.DEPENDENCIES}
+                      for name in ("ufw.service", self.a.INDEXER, self.a.GUARD, "network-pre.target")}
+        self.facts["ufw.service"]["Before"] = "network-pre.target"
+        self.facts[self.a.INDEXER]["After"] = "network-pre.target"
+        self.host.guard_unit_present = lambda: installed
+        def props(name):
+            if not installed and name == self.a.GUARD:
+                self.fail("absent guard must not be queried as an installed unit")
+            return self.facts[name]
+        self.host.dependency_properties = props
+
+    def test_absent_guard_uses_proposed_edges_then_installed_graph_is_stable(self):
+        self.graph()
+        original = self.reader.dependency_facts()
+        self.graph(installed=True)
+        self.facts[self.a.GUARD]["After"] = "ufw.service"
+        self.facts[self.a.GUARD]["Before"] = self.a.INDEXER
+        self.facts[self.a.INDEXER]["After"] += " ufw.service " + self.a.GUARD
+        self.facts[self.a.INDEXER]["Requires"] = self.a.GUARD
+        self.facts["ufw.service"]["Before"] += " " + self.a.GUARD + " " + self.a.INDEXER
+        self.assertEqual(original, self.reader.dependency_facts())
+
+    def test_effective_transitive_cycle_and_ufw_start_dependency_refuse(self):
+        self.graph(installed=True)
+        self.facts["network-pre.target"]["After"] = self.a.INDEXER
+        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            self.reader.dependency_facts()
+        for key in ("Requires", "Wants", "BindsTo", "Upholds"):
+            self.graph(installed=True)
+            self.facts[self.a.GUARD][key] = "ufw.service"
+            with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                self.reader.dependency_facts()
+
+    def test_present_null_duplicate_or_nonobject_record_refuses(self):
+        self.host.fs = SimpleNamespace(trusted=lambda *args, **kwargs: SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_gid=0))
+        self.host.ufw_reader = lambda: self.reader
+        for body in (b"null", b"[]", b"{}", b'{"schema_version":1,"schema_version":1}', b"{"):
+            self.reader.root_file = lambda path, limit: self.snapshot(path, body, mode=0o600)
+            with self.assertRaisesRegex(SetupError, "ufw_drift"):
+                self.a.read_record(self.host)
+
+    def test_held_file_reads_reject_fd_entry_content_metadata_races(self):
+        # Synthetic syscall boundary, not a claim that Windows implements openat.
+        path, body = "/usr/lib/ufw/synthetic", b"synthetic"
+        frozen = self.snapshot(path, body).info
+        @contextmanager
+        def parent(path):
+            yield 3, "synthetic"
+        def kernel(held, entry, raw=body):
+            calls = []
+            module = SimpleNamespace(O_RDONLY=0, O_NONBLOCK=1, O_NOFOLLOW=2,
+                open=lambda *args, **kwargs: calls.append((args, kwargs)) or 4,
+                fdopen=lambda *args, **kwargs: io.BytesIO(raw),
+                fstat=lambda fd: next(held), stat=lambda *args, **kwargs: entry)
+            return module, calls
+        for changed, entry, raw in (
+                (self.snapshot(path, body, st_ino=2).info, frozen, body),
+                (frozen, self.snapshot(path, body, st_ino=2).info, body),
+                (self.snapshot(path, body, st_mode=stat.S_IFREG | 0o666).info, frozen, body),
+                (frozen, frozen, body + b"x")):
+            module, calls = kernel(iter((frozen, changed)), entry, raw)
+            with patch.object(self.a, "os", module), patch.object(self.a, "root_parent", parent):
+                with self.assertRaisesRegex(SetupError, "state_changed"):
+                    self.a.UfwHostReader(self.host).root_file(path, 1024)
+            self.assertEqual(calls[0][0][1], 3)  # NOFOLLOW | NONBLOCK
+        atime_only = self.snapshot(path, body, st_atime=123).info
+        module, _ = kernel(iter((frozen, atime_only)), atime_only)
+        with patch.object(self.a, "os", module), patch.object(self.a, "root_parent", parent):
+            self.assertEqual(self.a.UfwHostReader(self.host).root_file(path, 1024).body, body)
+
+    def test_held_ancestor_paths_refuse_replacement_and_close_every_fd(self):
+        directory = self.snapshot("/", b"x", st_mode=stat.S_IFDIR | 0o755).info
+        moved = self.snapshot("/", b"x", st_mode=stat.S_IFDIR | 0o755, st_ino=2).info
+        opened, closed = [], []
+        def open_path(*args, **kwargs):
+            opened.append((args, kwargs))
+            return len(opened)
+        entries = {"/": directory, "usr": directory, "lib": directory}
+        module = SimpleNamespace(O_RDONLY=0, O_DIRECTORY=1, O_NOFOLLOW=2,
+            open=open_path, close=closed.append, fstat=lambda fd: directory,
+            stat=lambda name, **kwargs: entries[name])
+        with patch.object(self.a, "os", module):
+            with self.assertRaisesRegex(SetupError, "state_changed"):
+                with self.a.root_parent("/usr/lib/synthetic") as (fd, name):
+                    self.assertEqual((fd, name), (3, "synthetic"))
+                    entries["usr"] = moved
+        self.assertEqual(closed, [3, 2, 1])
+        self.assertTrue(all(args[1] == 3 for args, kwargs in opened))
+
+    def test_transitive_start_dependency_and_bounded_unknown_graph_refuse(self):
+        self.graph(installed=True)
+        self.facts[self.a.GUARD]["Wants"] = "network-pre.target"
+        self.facts["network-pre.target"]["Requires"] = "ufw.service"
+        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            self.reader.dependency_facts()
+        self.graph(installed=True)
+        self.facts[self.a.INDEXER]["After"] = "not a valid/unit"
+        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            self.reader.dependency_facts()
+
+    def test_aliases_refuse_nonstandard_targets_and_link_replacement(self):
+        link = self.snapshot("/lib", b"x", st_mode=stat.S_IFLNK | 0o777).info
+        replaced = self.snapshot("/lib", b"x", st_mode=stat.S_IFLNK | 0o777, st_ino=2).info
+        @contextmanager
+        def parent(path):
+            yield 1, "lib"
+        for target, entry in (("/untrusted/lib", link), ("usr/lib", replaced)):
+            values = iter((link, entry))
+            module = SimpleNamespace(stat=lambda *args, **kwargs: next(values),
+                                     readlink=lambda *args, **kwargs: target)
+            with patch.object(self.a, "os", module), patch.object(self.a, "root_parent", parent):
+                with self.assertRaises(SetupError):
+                    self.reader.alias("/lib")
+
+    def test_commands_selected_allowlist_and_multicall_dispatch(self):
+        command = self.h.Commands(SimpleNamespace(trusted=lambda path: None))
+        calls = []
+        command._execute = lambda *args, **kwargs: calls.append((args, kwargs)) or (b"", b"")
+        command.run_selected("iptables", "--version")
+        self.assertEqual(calls, [(("/usr/sbin/xtables-nft-multi", ("--version",)), {"argv0": "/usr/sbin/iptables"})])
+        for name, argument in (("ufw", "enable"), ("ufw-init", "status"), ("iptables", "-F")):
+            with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                command.run_selected(name, argument)
+        self.assertEqual(len(calls), 1)
+
+    def test_absent_guard_file_does_not_hide_loaded_or_transient_unit(self):
+        self.host.fs = SimpleNamespace(trusted=lambda *args, **kwargs: None)
+        self.host.properties = lambda *args: {"LoadState": "loaded", "FragmentPath": "", "Transient": "yes",
+                                             "DropInPaths": "", "NeedDaemonReload": "no"}
+        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            self.host.guard_unit_present()
+        self.host.properties = lambda *args: {"LoadState": "not-found", "FragmentPath": "", "Transient": "no",
+                                             "DropInPaths": "", "NeedDaemonReload": "no"}
+        self.assertFalse(self.host.guard_unit_present())
 
 
 class PropertiesTests(unittest.TestCase):
@@ -959,6 +1382,7 @@ class PublicationTests(unittest.TestCase):
         fs = SimpleNamespace(check_publications=lambda: None, read=lambda *args, **kwargs: original)
         host = self.h.LinuxHost(fs=fs, commands=object())
         host.vread = lambda _: original
+        host.check_recovery_firewall_compatibility = lambda *args: None  # Publisher-only boundary.
         host.vstat = lambda _: SimpleNamespace(st_uid=123, st_gid=123, st_mode=stat.S_IFREG | 0o640)
         host.run = lambda *args, **kwargs: self.fail("metadata drift must stop before daemon reload/restart")
         with self.assertRaisesRegex(SetupError, "vendor_drift"):
@@ -997,6 +1421,7 @@ class PublicationTests(unittest.TestCase):
                 fs.check_publications = lambda: None
                 fs.read = lambda path, **kwargs: b"original"
                 linux = self.h.LinuxHost(fs=fs, commands=object())
+                linux.check_recovery_firewall_compatibility = lambda *args: None  # Publisher-only boundary.
                 linux.vread = lambda _: target["body"]
                 linux.vstat = lambda _: ops.info(target)
                 commands = []

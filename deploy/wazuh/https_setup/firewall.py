@@ -72,7 +72,7 @@ def verify_table(document: dict, p: Profile) -> None:
 def guard_unit() -> str:
     return f'''[Unit]
 Description=AEGIS Wazuh HTTP firewall guard
-After=network-pre.target nftables.service
+After=network-pre.target nftables.service ufw.service
 Before=wazuh-indexer.service
 
 [Service]
@@ -90,7 +90,7 @@ WantedBy=multi-user.target
 def indexer_dropin() -> str:
     return f'''[Unit]
 Requires=aegis-wazuh-http-guard.service
-After=aegis-wazuh-http-guard.service
+After=aegis-wazuh-http-guard.service ufw.service
 
 [Service]
 ExecStartPre=+/usr/bin/python3 -I -B {ENTRYPOINT} guard-verify --profile {PROFILE}

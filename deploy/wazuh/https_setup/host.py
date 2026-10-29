@@ -27,6 +27,9 @@ from .contracts import (SetupError, load_profile, patch_http_config,
 from .certificates import create_http_certificate
 from .firewall import TABLE, PROFILE, ENTRYPOINT, firewall_create_text, verify_table, guard_unit, indexer_dropin
 from .transaction import STATE_ROOT, atomic_write, encoded, fsync_directory
+from .ufw_host import (UfwHostReader, LOADERS, LOADER_KEYS, DEPENDENCIES, RECORD_PATH,
+                       strict_loaders, qualify_host, read_record, validate_record,
+                       compatibility_record, same_record)
 
 INSTALL_ROOT = Path(ENTRYPOINT).parent
 PROFILE_ROOT = Path(PROFILE).parent
@@ -35,7 +38,7 @@ GUARD_UNIT = Path("/etc/systemd/system/aegis-wazuh-http-guard.service")
 DROPIN = Path("/etc/systemd/system/wazuh-indexer.service.d/90-aegis-http.conf")
 MANIFEST = "KIT-MANIFEST.json"
 KIT_FILES = ("Setup-Wazuh-HTTPS.py", *("https_setup/" + name + ".py" for name in
-             ("__init__", "contracts", "certificates", "firewall", "host", "transaction", "cli")))
+             ("__init__", "contracts", "certificates", "firewall", "host", "transaction", "cli", "ufw", "ufw_host")))
 COMMANDS = {"systemctl": "/usr/bin/systemctl", "nft": "/usr/sbin/nft",
             "ss": "/usr/bin/ss", "ip": "/usr/sbin/ip", "dpkg-query": "/usr/bin/dpkg-query",
             "systemd-analyze": "/usr/bin/systemd-analyze", "openssl": "/usr/bin/openssl",
@@ -582,9 +585,23 @@ class Commands:
         # Resolve distro executable aliases, then validate root-only provenance.
         executable = Path(COMMANDS[name]).resolve(strict=True)
         self.fs.trusted(executable)
+        return self._execute(str(executable), args, data=data)
+
+    def run_selected(self, name, *args):
+        # Called only after the UFW adapter's held-file and fixed-alias gates.
+        # xtables-multi dispatches on argv[0]; resolving its name loses that.
+        allowed = {"ufw": ("status",), "iptables": ("--version",), "ip6tables": ("--version",)}
+        if allowed.get(name) != args:
+            raise SetupError("ufw_unsupported")
+        executable = "/usr/sbin/ufw" if name == "ufw" else "/usr/sbin/xtables-nft-multi"
+        self.fs.trusted(executable)
+        return self._execute(executable, args, argv0="/usr/sbin/" + name)
+
+    def _execute(self, executable, args, *, data=None, argv0=None):
         output = [bytearray(), bytearray()]
         overflow = []
-        proc = subprocess.Popen([str(executable), *args], stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+        proc = subprocess.Popen([argv0 or str(executable), *args], executable=str(executable),
+                                stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"})
         def drain(pipe, target):
@@ -670,6 +687,109 @@ class LinuxHost:
     def firewall(self):
         return json.loads(self.run("nft", "--json", "list", "ruleset"))
 
+    def ufw_reader(self):
+        return UfwHostReader(self)
+
+    def dependency_properties(self, unit):
+        # Unit names are selected from the bounded effective dependency graph.
+        if not re.fullmatch(r"[A-Za-z0-9_.@\\:-]+\.[a-z]+", unit) or len(unit) > 255:
+            raise SetupError("ufw_unsupported")
+        raw = self.run("systemctl", "show", "--all", "--no-pager",
+                       "--property=" + ",".join(DEPENDENCIES), "--", unit)
+        try:
+            pairs = [line.split("=", 1) for line in raw.decode("ascii").splitlines()]
+            props = dict(pairs)
+            if len(raw) > 65536 or len(pairs) != len(props) or set(props) != set(DEPENDENCIES):
+                raise ValueError
+            return props
+        except (ValueError, UnicodeError):
+            raise SetupError("ufw_unsupported") from None
+
+    def firewall_loaders(self):
+        return {name: self.properties(name, LOADER_KEYS) for name in LOADERS}
+
+    def guard_unit_present(self):
+        present = self.fs.trusted(GUARD_UNIT, missing=True) is not None
+        props = self.properties("aegis-wazuh-http-guard.service",
+                                ("LoadState", "FragmentPath", "Transient", "DropInPaths", "NeedDaemonReload"))
+        expected = {"LoadState": "loaded" if present else "not-found",
+                    "FragmentPath": str(GUARD_UNIT) if present else "", "Transient": "no",
+                    "DropInPaths": "", "NeedDaemonReload": "no"}
+        if props != expected or present and self.fs.read(GUARD_UNIT) != guard_unit().encode():
+            raise SetupError("ufw_unsupported")
+        return present
+
+    def foreign_firewall(self):
+        rules = stable_firewall(self.firewall())
+        own = self.table(rules)
+        return {"nftables": [obj for obj in rules["nftables"] if obj not in own["nftables"]]}
+
+    def admit_firewall_loaders(self, loaders=None, firewall=None):
+        """Ambient read-only qualification; never grants startup record authority."""
+        loaders = self.firewall_loaders() if loaders is None else loaders
+        if strict_loaders(loaders):
+            return None
+        return qualify_host(self, loaders, self.foreign_firewall() if firewall is None else firewall)
+
+    def read_firewall_compatibility(self):
+        return read_record(self)
+
+    def verify_installed_firewall_compatibility(self, profile):
+        record = self.read_firewall_compatibility()
+        loaders = self.firewall_loaders()
+        if record is None:
+            if not strict_loaders(loaders):
+                raise SetupError("ufw_drift")
+            return
+        validate_record(record, profile)
+        current = qualify_host(self, loaders, self.foreign_firewall())
+        if not same_record(record, compatibility_record(profile, current)):
+            raise SetupError("ufw_drift")
+
+    def install_firewall_compatibility(self, profile, fingerprint):
+        if self.read_firewall_compatibility() is not None:
+            raise SetupError("ufw_drift")
+        if not same_record(fingerprint, self.admit_firewall_loaders()):
+            raise SetupError("state_changed")
+        if fingerprint is not None:
+            self.fs.write(Path(RECORD_PATH), encoded(compatibility_record(profile, fingerprint)))
+        self.verify_installed_firewall_compatibility(profile)
+
+    def revalidate_firewall_facts(self, facts):
+        if (stable_firewall(self.firewall()) != facts["firewall"] or
+                not same_record(self.admit_firewall_loaders(), facts["ufw_compatibility"])):
+            raise SetupError("state_changed")
+
+    def check_recovery_firewall_compatibility(self, p, snapshot, work):
+        """Missing is safe only for an untouched or fully restored HTTP install."""
+        if snapshot.get("ufw_compatibility_original", "unknown") is not None:
+            raise SetupError("recovery_required")
+        raw = self.fs.read(work / "ufw-compatibility.json", private=True, limit=8 * 1024 * 1024)
+        if sha(raw) != snapshot.get("ufw_compatibility_sha256"):
+            raise SetupError("recovery_required")
+        expected = json.loads(raw)
+        current = self.read_firewall_compatibility()
+        if current is None and expected is not None:
+            if (self.table(self.firewall())["nftables"] or GUARD_UNIT.exists() or DROPIN.exists() or
+                    sha(self.vread(p.config_path)) != snapshot["original_sha256"]):
+                raise SetupError("recovery_required")
+            # Requalify ambient evidence, but never install a missing record here.
+            actual = compatibility_record(p, self.admit_firewall_loaders())
+            if not same_record(expected, actual):
+                raise SetupError("ufw_drift")
+        elif not same_record(current, expected):
+            raise SetupError("ufw_drift")
+        else:
+            self.verify_installed_firewall_compatibility(p)
+        return expected, current
+
+    def restore_firewall_compatibility(self, p, snapshot, work):
+        # Coordinator calls this only after old localhost TLS/listener verification
+        # and owned-guard removal. Unknown records are retained for human recovery.
+        _, current = self.check_recovery_firewall_compatibility(p, snapshot, work)
+        if current is not None:
+            self.fs.unlink(Path(RECORD_PATH))
+
     def table(self, ruleset):
         result = []
         for obj in ruleset["nftables"]:
@@ -735,12 +855,7 @@ class LinuxHost:
         validate_identity(p, socket.gethostname(), version, "2.19.4", addresses)
         listeners = self.run("ss", "-H", "-ltn").decode()
         verify_listeners(listeners, p, expanded=False)
-        loaders = {}
-        for name in ("nftables.service", "ufw.service", "firewalld.service"):
-            state = self.properties(name, ("ActiveState", "UnitFileState", "LoadState"))
-            if state["ActiveState"] not in {"inactive", "failed"} or state["UnitFileState"] not in {"disabled", "masked", ""}:
-                raise SetupError("host_unsupported")
-            loaders[name] = state
+        loaders = self.firewall_loaders()
         config = self.vread(p.config_path)
         patch_http_config(config, p)
         retained = self.config_files(config, p, owners)
@@ -755,6 +870,7 @@ class LinuxHost:
         firewall = stable_firewall(self.firewall())
         if self.table(firewall)["nftables"]:
             raise SetupError("firewall_mismatch")
+        compatibility = self.admit_firewall_loaders(loaders, firewall)
         if HTTP_ROOT.exists() or HTTP_ROOT.is_symlink():
             raise SetupError("intent_exists")
         for path in (PROFILE_ROOT, INSTALL_ROOT, GUARD_UNIT, DROPIN):
@@ -774,7 +890,8 @@ class LinuxHost:
                "opensearch_jar": sha(jar_bytes),
                "unit_path": str(unit_path), "unit": sha(unit), "unit_properties": props,
                "environment_files": environment,
-               "loaders": loaders, "retained": retained, "archive": archive, "firewall": firewall,
+               "loaders": loaders, "ufw_compatibility": compatibility,
+               "retained": retained, "archive": archive, "firewall": firewall,
                "bundle": {name: sha(body) for name, body in files.items()}}
 
     def config_files(self, raw, p, owners):
@@ -883,6 +1000,12 @@ class LinuxHost:
         unit = self.fs.read(facts["unit_path"])
         if sha(unit) != facts["unit"] or stable_firewall(self.firewall()) != facts["firewall"]:
             raise SetupError("state_changed")
+        self.revalidate_firewall_facts(facts)
+        if self.read_firewall_compatibility() is not None:
+            raise SetupError("ufw_drift")
+        record = (compatibility_record(p, facts["ufw_compatibility"])
+                  if facts["ufw_compatibility"] is not None else None)
+        self.fs.write(work / "ufw-compatibility.json", encoded(record))
         patched = patch_http_config(config, p)
         self.fs.write(work / "original.yml", config)
         self.fs.write(work / "original-metadata.json", encoded(facts["config_metadata"]))
@@ -892,11 +1015,11 @@ class LinuxHost:
         self.fs.write(work / "original-unit-properties.json", encoded(facts["unit_properties"]))
         return {"original_sha256": sha(config), "patched_sha256": sha(patched),
                 "metadata": facts["config_metadata"], "uid": self.uid, "gid": self.gid,
-                "guard_unit_absent": True, "dropin_absent": True, "table_absent": True}
+                "guard_unit_absent": True, "dropin_absent": True, "table_absent": True,
+                "ufw_compatibility_original": None, "ufw_compatibility_sha256": sha(encoded(record))}
 
     def stage(self, p, facts, work):
-        if stable_firewall(self.firewall()) != facts["firewall"]:
-            raise SetupError("state_changed")
+        self.revalidate_firewall_facts(facts)
         with self.fs.archive(p.ca_archive, facts["archive"]) as stream:
             ca, key = read_vendor_ca_archive(stream, p)
         if ca != self.vread(p.ca_path):
@@ -909,7 +1032,8 @@ class LinuxHost:
             del key
         self.fs.write(work / "http.pem", cert)
         self.fs.write(work / "http-key.pem", http_key)
-        return {"certificate_sha256": sha(cert), "key_sha256": sha(http_key), "bundle": facts["bundle"]}
+        return {"certificate_sha256": sha(cert), "key_sha256": sha(http_key), "bundle": facts["bundle"],
+                "ufw_compatibility": facts["ufw_compatibility"]}
 
     def install(self, p, staged, work):
         files = self.bundle_files()
@@ -921,6 +1045,7 @@ class LinuxHost:
             self.fs.write(INSTALL_ROOT / name, body)
         self.fs.mkdir(PROFILE_ROOT)
         self.fs.write(PROFILE, encoded(p.as_dict()))
+        self.install_firewall_compatibility(p, staged["ufw_compatibility"])
         self.fs.vendor_mkdir(HTTP_ROOT, self.uid, self.gid)
         self.fs.vendor_mkdir(HTTP_ROOT / "tls", self.uid, self.gid)
         for name, pin in (("http.pem", "certificate_sha256"), ("http-key.pem", "key_sha256")):
@@ -930,6 +1055,7 @@ class LinuxHost:
             self.fs.vendor_write(HTTP_ROOT / "tls" / ("indexer-" + name), body, self.uid, self.gid)
 
     def ensure_guard(self, p):
+        self.verify_installed_firewall_compatibility(p)
         table = self.table(self.firewall())
         if table["nftables"]:
             verify_table(table, p)
@@ -942,6 +1068,7 @@ class LinuxHost:
         self.verify_guard(p)
 
     def verify_guard(self, p):
+        self.verify_installed_firewall_compatibility(p)
         verify_table(self.table(self.firewall()), p)
 
     def install_units(self, p, work):
@@ -951,12 +1078,20 @@ class LinuxHost:
         self.fs.write(DROPIN, indexer_dropin().encode())
         self.run("systemctl", "daemon-reload")
         self.run("systemd-analyze", "verify", str(GUARD_UNIT), "wazuh-indexer.service")
-        props = self.properties("wazuh-indexer.service", ("DropInPaths", "ExecStartPre", "Requires", "After"))
+        props = self.properties("wazuh-indexer.service", ("DropInPaths", "ExecStartPre", "Requires", "After", "Wants"))
         if (props["DropInPaths"].split() != [str(DROPIN)] or
                 ENTRYPOINT not in props["ExecStartPre"] or "guard-verify" not in props["ExecStartPre"] or
                 "aegis-wazuh-http-guard.service" not in props["Requires"].split() or
-                "aegis-wazuh-http-guard.service" not in props["After"].split()):
+                "aegis-wazuh-http-guard.service" not in props["After"].split() or
+                "ufw.service" not in props["After"].split() or
+                any("ufw.service" in props[k].split() for k in ("Requires", "Wants"))):
             raise SetupError("host_unsupported")
+        guard = self.properties("aegis-wazuh-http-guard.service", ("After", "Before", "Requires", "Wants"))
+        if ("ufw.service" not in guard["After"].split() or
+                "wazuh-indexer.service" not in guard["Before"].split() or
+                any("ufw.service" in guard[k].split() for k in ("Requires", "Wants"))):
+            raise SetupError("host_unsupported")
+        self.verify_installed_firewall_compatibility(p)
         self.run("systemctl", "enable", "--now", "aegis-wazuh-http-guard.service")
         self.verify_guard(p)
 
@@ -1007,6 +1142,7 @@ class LinuxHost:
         # Never overwrite a pending/failed exchange's preserved vendor evidence.
         self.fs.check_publications()
         self.uid, self.gid = snapshot["uid"], snapshot["gid"]
+        self.check_recovery_firewall_compatibility(p, snapshot, work)
         if not (snapshot["guard_unit_absent"] and snapshot["dropin_absent"] and snapshot["table_absent"]):
             raise SetupError("recovery_required")
         original = self.fs.read(work / "original.yml", private=True)

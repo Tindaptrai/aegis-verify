@@ -201,6 +201,11 @@ class Coordinator:
                 self._phase(intent, "complete")
                 return self.status()
             except Exception as exc:
+                if isinstance(exc, SetupError) and exc.code in {"ufw_drift", "ufw_unsupported"}:
+                    intent["preserve_policy_evidence"] = True
+                    intent["status"] = "recovery_required"
+                    self.store.save(intent)
+                    raise SetupError("recovery_required") from None
                 if isinstance(exc, SetupError) and exc.code in {"vendor_drift", "filesystem_unsupported"}:
                     # Do not turn a refused publication into an overwrite via
                     # generic restore. Manual evidence reconciliation is needed.
@@ -228,7 +233,7 @@ class Coordinator:
             return self.status()
 
     def _recover(self, intent):
-        if intent.get("preserve_vendor_edits"):
+        if intent.get("preserve_vendor_edits") or intent.get("preserve_policy_evidence"):
             raise SetupError("recovery_required")
         p = Profile(**intent["profile"])
         work = self.store.work(intent)
@@ -243,6 +248,8 @@ class Coordinator:
             self.host.verify(p, intent["facts"], work, restored=True)
             self._phase(intent, "remove_guard")
             self.host.remove_guard(p)
+            self._phase(intent, "restore_compatibility")
+            self.host.restore_firewall_compatibility(p, intent["snapshot"], work)
             intent["status"] = "rolled_back"
             self._phase(intent, "rolled_back")
         except BaseException:
