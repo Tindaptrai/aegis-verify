@@ -170,7 +170,8 @@ class RunnerTests(unittest.TestCase):
                    ufw_host.GUARD: "aegis-native-0123456789ab-ufw-guard.service",
                    ufw_host.INDEXER: "aegis-native-0123456789ab-ufw-indexer.service"}
         cases = {}
-        for name in ("direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering"):
+        for name in ("direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering",
+                     "conflict_indexer", "conflict_guard", "conflict_stop"):
             roles = {role: "aegis-native-0123456789ab-dep-" + name + "-" + suffix + ".service"
                      for role, suffix in (("ufw.service", "ufw"), (ufw_host.INDEXER, "indexer"), (ufw_host.GUARD, "guard"), ("bridge.service", "bridge"))}
             facts = {unit: {key: [] for key in ufw_host.DEPENDENCIES} for unit in roles.values()}
@@ -183,10 +184,19 @@ class RunnerTests(unittest.TestCase):
                 if name == "transitive": edge("ufw.service", "Requires", "bridge.service")
                 else: edge("bridge.service", "PropagatesStopTo", "ufw.service")
             elif name == "activation": edge(ufw_host.GUARD, "Wants", "ufw.service")
+            elif name.startswith("conflict_"):
+                edge(ufw_host.GUARD if name == "conflict_guard" else ufw_host.INDEXER, "Wants", "bridge.service")
+                target = ufw_host.GUARD if name == "conflict_stop" else "ufw.service"
+                edge("bridge.service", "ConflictedBy" if name == "conflict_guard" else "Conflicts", target)
+                edge(target, "Conflicts" if name == "conflict_guard" else "ConflictedBy", "bridge.service")
+                if name == "conflict_stop": edge("ufw.service", "PartOf", ufw_host.GUARD)
             else: edge(ufw_host.GUARD, "Before", "ufw.service")
             cases[name] = dict(mapping=roles, facts=facts, refused=True, propagation_verified=name not in {"activation", "ordering"},
                                baseline={"identity_mapping": dict(roles), "raw_facts_sha256": "e" * 64, "admitted": True},
                                identity_mapping=dict(roles), raw_facts_sha256="f" * 64)
+            if name.startswith("conflict_"):
+                cases[name]["lifecycle"] = dict(source_active_before=True, wrapper_active_before=True,
+                    relay_inactive_before=True, relay_active_after=True, wrapper_inactive_after=True)
         bus = {key: {"type": signature, "data": []} for key, signature in ufw.EMPTY_ARRAYS.items()}
         bus["Job"] = {"type": "(uo)", "data": [0, "/"]}
         for key, args in (("ExecStartEx", ["start", "quiet"]), ("ExecStopEx", ["stop"])):
@@ -202,7 +212,16 @@ class RunnerTests(unittest.TestCase):
             if name.endswith("partial"):
                 document["nftables"].append({"chain": {"family": "inet", "table": "aegis_fixture_foreign", "name": name, "handle": 4}})
             nft[name] = dict(document=document, before_sha256=digest(document), after_sha256=digest(document),
-                             refused=name.endswith("partial"), absent_lock_preserved=True, present_lock_preserved=True)
+                             refused=name.endswith("partial"), absent_lock_preserved=True, present_lock_preserved=True,
+                             resources=dict(stage="complete", euid=0,
+                                source=dict(type="char", mode=0o666, uid=0, gid=0, rdev=[1, 3]),
+                                target_before=dict(type="regular", mode=0o600, uid=0, gid=0, rdev=[0, 0]),
+                                target_bound=dict(type="char", mode=0o666, uid=0, gid=0, rdev=[1, 3]),
+                                nodev=dict(source=False, target_before=True, target_bound=False),
+                                open_errno=dict(source=0, bound=0, chroot=0),
+                                child_mount_namespace_distinct=True, recursive_private=True,
+                                parent_namespace_unchanged=True, parent_target_unchanged=True,
+                                parent_mounts_unchanged=True, child_bind_released=True))
         item = dict(common,
                     vendor_deb_sha256="096eb403ecaf6740d160bb306970f025222ef71324319cc1cb78d06dfa462ef1",
                     vendor_inputs={path: hashlib.sha256(body).hexdigest() for path, body in VENDOR.items()},
@@ -226,7 +245,10 @@ class RunnerTests(unittest.TestCase):
     def test_closed_ufw_observations_require_every_preservation_and_transition(self):
         gate = self.runner()
         observations = self.observation_fixture(gate)
-        gate.validate_native_observations(observations)
+        try:
+            gate.validate_native_observations(observations)
+        except ValueError:
+            self.fail("complete synthetic resource/conflict observation must satisfy the proof schema")
         identity = gate.NATIVE_MODULE + ".NativeTests.test_ufw_disabled_wrapper_preserved"
         changes = []
         for name in gate.UFW_CHECKS:
@@ -253,6 +275,20 @@ class RunnerTests(unittest.TestCase):
                     lambda item: item["nft_observations"]["foreign"].__setitem__("after_sha256", "0" * 64),
                     lambda item: item["scope"].__setitem__("probe", "selected_backend_status_queries_not_ufw_cli"),
                     lambda item: item["native_adapter"]["typed_bus"].__setitem__("Job", {"type": "(uo)", "data": [1, "/pending"]})]
+        for case in ("conflict_indexer", "conflict_guard", "conflict_stop"):
+            changes.append(lambda item, case=case: item["dependency_cases"].pop(case))
+            for key in observations[identity]["dependency_cases"][case]["lifecycle"]:
+                changes.append(lambda item, case=case, key=key: item["dependency_cases"][case]["lifecycle"].__setitem__(key, False))
+        changes.append(lambda item: item["dependency_cases"]["conflict_guard"]["facts"][item["dependency_cases"]["conflict_guard"]["mapping"]["bridge.service"]].__setitem__("ConflictedBy", []))
+        for key in ("child_mount_namespace_distinct", "recursive_private", "parent_namespace_unchanged",
+                    "parent_target_unchanged", "parent_mounts_unchanged", "child_bind_released"):
+            changes.append(lambda item, key=key: item["nft_observations"]["empty"]["resources"].__setitem__(key, False))
+        for key in ("source", "bound", "chroot"):
+            changes.append(lambda item, key=key: item["nft_observations"]["empty"]["resources"]["open_errno"].__setitem__(key, 13))
+        changes += [lambda item: item["nft_observations"]["empty"]["resources"]["source"].__setitem__("type", "regular"),
+                    lambda item: item["nft_observations"]["empty"]["resources"]["nodev"].__setitem__("target_bound", True),
+                    lambda item: item["nft_observations"]["empty"]["resources"].__setitem__("stage", "bind"),
+                    lambda item: item["nft_observations"]["empty"]["resources"].__setitem__("private_path", "DO_NOT_EXPORT")]
         for index, change in enumerate(changes):
             with self.subTest(mutation=index):
                 broken = copy.deepcopy(observations)
@@ -307,6 +343,135 @@ class RunnerTests(unittest.TestCase):
 
 
 class NativeFixtureSafety(unittest.TestCase):
+    def test_probe_null_requires_real_device_and_owned_regular_target(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "probe_null_metadata"), "checked null resource missing")
+        import stat
+        source = SimpleNamespace(st_mode=stat.S_IFCHR | 0o666, st_uid=0, st_gid=0, st_rdev=259, st_nlink=1, st_size=0)
+        target = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_gid=0, st_rdev=0, st_nlink=1, st_size=0)
+        fake_os = SimpleNamespace(major=lambda n: 1 if n == 259 else 0, minor=lambda n: 3 if n == 259 else 0)
+        with patch.object(native, "os", fake_os):
+            self.assertEqual(native.probe_null_metadata(source, device=True)["rdev"], [1, 3])
+            self.assertEqual(native.probe_null_metadata(target, device=False)["type"], "regular")
+            for changes, device in ((dict(st_mode=stat.S_IFREG | 0o666), True), (dict(st_rdev=0), True),
+                                    (dict(st_uid=1), True), (dict(st_mode=stat.S_IFLNK | 0o777), False),
+                                    (dict(st_mode=stat.S_IFREG | 0o666), False), (dict(st_nlink=2), False),
+                                    (dict(st_size=1), False)):
+                info = SimpleNamespace(**{**vars(source if device else target), **changes})
+                with self.subTest(changes=changes, device=device), self.assertRaisesRegex(AssertionError, "probe_null_untrusted"):
+                    native.probe_null_metadata(info, device=device)
+
+    def test_probe_mount_facts_distinguish_nodev_bind_and_shared_mounts(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "probe_mount_facts"), "bounded mount observation missing")
+        raw = b"1 0 8:1 / / rw - ext4 /dev/root rw\n2 1 0:1 / /run rw,nosuid,nodev shared:7 - tmpfs tmpfs rw\n"
+        self.assertEqual(native.probe_mount_facts(raw, "/run/owned/probe-root/dev/null"),
+                         {"nodev": True, "mounted": False, "private": False})
+        private = raw.replace(b" shared:7", b"") + b"3 2 0:2 /null /run/owned/probe-root/dev/null rw,nosuid - tmpfs tmpfs rw\n"
+        self.assertEqual(native.probe_mount_facts(private, "/run/owned/probe-root/dev/null"),
+                         {"nodev": False, "mounted": True, "private": True})
+        for malformed in (b"private-host-data", b"", b"x" * (1024 * 1024 + 1)):
+            with self.assertRaisesRegex(AssertionError, "probe_mount_observation_required"):
+                native.probe_mount_facts(malformed, "/run/owned/probe-root/dev/null")
+
+    def test_probe_null_unshares_and_privatizes_before_exact_bind(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "bind_probe_null"), "private null bind missing")
+        import ctypes
+        import stat
+        source = SimpleNamespace(st_mode=stat.S_IFCHR | 0o666, st_uid=0, st_gid=0, st_rdev=259, st_nlink=1, st_size=0)
+        target = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_gid=0, st_rdev=0, st_nlink=1, st_size=0)
+        for fail in (None, "unshare", "private", "bind", "same_namespace", "source", "target", "open",
+                     "parent_process", "nonroot", "wrong_root", "ancestor", "shared", "nodev", "eof"):
+            events = []
+            def unshare(flags):
+                events.append(("unshare", flags))
+                return -1 if fail == "unshare" else 0
+            def mount(source_path, target_path, kind, flags, data):
+                stage = "private" if source_path is None else "bind"
+                events.append((stage, source_path, target_path, flags))
+                return -1 if fail == stage else 0
+            def opening(*args, **kwargs):
+                events.append(("open",))
+                if fail == "open": raise PermissionError(13, "DO_NOT_EXPORT")
+                return 9
+            count = {"value": 0}
+            def metadata(info, *, device):
+                count["value"] += 1
+                if (fail == "source" and device) or (fail == "target" and not device):
+                    raise AssertionError("probe_null_untrusted")
+                return {"type": "char" if device else "regular", "mode": 438 if device else 384,
+                        "uid": 0, "gid": 0, "rdev": [1, 3] if device else [0, 0]}
+            fake_os = SimpleNamespace(geteuid=lambda: 1 if fail == "nonroot" else 0, getpid=lambda: 111 if fail == "parent_process" else 222,
+                stat=lambda path, **kwargs: SimpleNamespace(st_ino=11 if fail == "same_namespace" else 22) if path == "/proc/self/ns/mnt" else source if str(path) == "/dev/null" else target,
+                open=opening, close=lambda fd: events.append(("close",)), read=lambda *args: b"x" if fail == "eof" else b"", fstat=lambda fd: source,
+                O_RDWR=2, O_NOFOLLOW=4)
+            diagnostic = {}
+            def parent(path):
+                if fail == "ancestor": raise native.SetupError("path_untrusted")
+                return nullcontext((3, "null"))
+            with self.subTest(fail=fail), patch.object(native, "os", fake_os), \
+                    patch.object(native.uh, "root_parent", side_effect=parent), \
+                    patch.object(native.uh, "_identity", return_value=(1,)), \
+                    patch.object(native, "probe_null_metadata", side_effect=metadata), \
+                    patch.object(native, "probe_mount_table", return_value=b"mounts"), \
+                    patch.object(native, "probe_mount_facts", return_value={"nodev": fail == "nodev", "mounted": True, "private": fail != "shared"}), \
+                    patch.object(ctypes, "CDLL", return_value=SimpleNamespace(unshare=unshare, mount=mount)):
+                args = (Path("/run/owned/other" if fail == "wrong_root" else "/run/owned/probe-root"), Path("/run/owned"), 111, 11, diagnostic)
+                if fail:
+                    with self.assertRaises((AssertionError, OSError, native.SetupError)):
+                        native.bind_probe_null(*args)
+                    if fail not in {"bind", "nodev"}:
+                        self.assertNotIn("bind", [event[0] for event in events])
+                else:
+                    native.bind_probe_null(*args)
+                    operations = [event for event in events if event[0] in {"unshare", "private", "bind"}]
+                    self.assertEqual(operations, [("unshare", 0x20000), ("private", None, b"/", 0x44000),
+                        ("bind", b"/dev/null", b"/run/owned/probe-root/dev/null", 0x1000)])
+                    self.assertTrue(diagnostic["child_mount_namespace_distinct"])
+                    self.assertTrue(diagnostic["recursive_private"])
+
+    def test_probe_parent_checks_placeholder_mounts_and_namespace_after_child_exit(self):
+        from deploy.wazuh.tests import test_native as native
+        import stat
+        root = Path("/run/owned/probe-root")
+        info = SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0, st_gid=0, st_rdev=0, st_nlink=1, st_size=0)
+        for changed in (None, "namespace", "target", "mounts", "child_failure"):
+            calls = {"stat": 0, "mount": 0}
+            def stat_path(path, **kwargs):
+                if path == "/proc/self/ns/mnt":
+                    calls["stat"] += 1
+                    return SimpleNamespace(st_ino=99 if changed == "namespace" and calls["stat"] > 1 else 11)
+                return info
+            def mounts():
+                calls["mount"] += 1
+                return b"changed" if changed == "mounts" and calls["mount"] > 1 else b"original"
+            result = dict(resources=dict(stage="complete"))
+            if changed == "child_failure":
+                result = dict(resources=dict(stage="bound_open", open_errno=dict(bound=13)), error_type="os_error", error_errno=13)
+            fake_os = SimpleNamespace(getpid=lambda: 111, stat=stat_path, pipe=lambda: (5, 6), fork=lambda: 222,
+                close=lambda fd: None, read=lambda *args: native.tx.encoded(result),
+                waitpid=lambda *args: (222, 256 if changed == "child_failure" else 0))
+            with self.subTest(changed=changed), patch.object(native, "os", fake_os), \
+                    patch.object(native.uh, "root_parent", side_effect=lambda path: nullcontext((3, "null"))), \
+                    patch.object(native.uh, "_identity", side_effect=[(2 if changed == "target" else 1,), (1,)]), \
+                    patch.object(native, "probe_null_metadata", return_value={"type": "regular"}), \
+                    patch.object(native, "probe_mount_table", side_effect=mounts), \
+                    patch.object(native, "probe_mount_facts", return_value={"nodev": True, "mounted": False, "private": False}), \
+                    patch.object(native.select, "select", return_value=([5], [], [])), patch.dict(native.OBSERVATIONS, clear=True):
+                if changed:
+                    with self.assertRaises(AssertionError):
+                        native.native_nft_read(self, SimpleNamespace(), root)
+                    if changed == "child_failure":
+                        diagnostic = native.OBSERVATIONS[self.id()]["probe_resource_failure"]
+                        self.assertEqual(diagnostic["error_errno"], 13)
+                        self.assertTrue(diagnostic["resources"]["parent_mounts_unchanged"])
+                        self.assertNotIn("/run", json.dumps(diagnostic))
+                else:
+                    observed = native.native_nft_read(self, SimpleNamespace(), root)
+                    for key in ("parent_namespace_unchanged", "parent_target_unchanged", "parent_mounts_unchanged", "child_bind_released"):
+                        self.assertTrue(observed["resources"][key])
+
     """Portable refusal tests only; these mocks supply no native OS proof."""
     def test_owned_nft_diagnostic_preserves_shape_and_redacts_fixture_data(self):
         from deploy.wazuh.tests import test_native as native

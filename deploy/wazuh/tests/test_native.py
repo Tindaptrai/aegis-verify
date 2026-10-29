@@ -659,7 +659,8 @@ ExecStart=/usr/bin/true
 TimeoutStartSec=10
 TimeoutStopSec=5
 '''
-    for case in ("direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering"):
+    for case in ("direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering",
+                 "conflict_indexer", "conflict_guard", "conflict_stop"):
         mapping = {role: f"aegis-native-{fixture.token}-dep-{case}-{name}.service"
                    for role, name in (("ufw.service", "ufw"), (uh.INDEXER, "indexer"), (uh.GUARD, "guard"), ("bridge.service", "bridge"))}
         ufw, indexer, guard, bridge = (mapping[k] for k in ("ufw.service", uh.INDEXER, uh.GUARD, "bridge.service"))
@@ -674,6 +675,16 @@ TimeoutStopSec=5
                 relations[bridge] += "\nPropagatesStopTo=" + ufw
         elif case == "activation":
             relations[guard] = "Wants=" + ufw
+        elif case.startswith("conflict_"):
+            source = guard if case == "conflict_guard" else indexer
+            relations[source] = "Wants=" + bridge
+            if case == "conflict_guard":
+                relations[ufw] = "Conflicts=" + bridge  # bridge's actual inverse must be captured
+            elif case == "conflict_stop":
+                relations[bridge] = "Conflicts=" + guard
+                relations[ufw] = "PartOf=" + guard
+            else:
+                relations[bridge] = "Conflicts=" + ufw
         else:
             relations[guard] = "Before=" + ufw
         paths = {}
@@ -687,6 +698,9 @@ TimeoutStopSec=5
         uh.UfwHostReader(baseline).dependency_facts()  # same complete mapper must admit the safe control
         baseline_proof = {"identity_mapping": baseline.mapping.queries,
                           "raw_facts_sha256": tx.digest(baseline.raw), "admitted": True}
+        if case.startswith("conflict_"):
+            # Establish the exact safe active UFW + inactive relay state first.
+            fixture.systemctl("start", ufw, source, *([guard] if case == "conflict_stop" else []))
         for name, relation in relations.items():
             replace_fixture_file(Path("/run/systemd/system"), paths[name], base.format(relations=relation).encode(), 0o644)
         fixture.systemctl("daemon-reload")
@@ -695,7 +709,19 @@ TimeoutStopSec=5
         with fixture.test.assertRaisesRegex(SetupError, "ufw_unsupported"):
             uh.UfwHostReader(hostile).dependency_facts()
         propagated = case not in {"activation", "ordering"}
-        if propagated:
+        lifecycle = {}
+        if case.startswith("conflict_"):
+            def state(unit):
+                return fixture.systemctl("show", unit, "--property=ActiveState", "--value").stdout.strip()
+            fixture.test.assertEqual(state(source), b"active")
+            fixture.test.assertEqual(state(ufw), b"active")
+            fixture.test.assertEqual(state(bridge), b"inactive")
+            fixture.systemctl("restart", source)
+            fixture.test.assertEqual(state(bridge), b"active")
+            fixture.test.assertEqual(state(ufw), b"inactive")
+            lifecycle = dict(source_active_before=True, wrapper_active_before=True, relay_inactive_before=True,
+                             relay_active_after=True, wrapper_inactive_after=True)
+        elif propagated:
             # One transaction establishes actual running units before stopping the source.
             fixture.systemctl("start", *mapping.values())
             fixture.test.assertEqual(fixture.systemctl("is-active", ufw).stdout.strip(), b"active")
@@ -717,6 +743,8 @@ TimeoutStopSec=5
                               "baseline": baseline_proof,
                               "identity_mapping": hostile.mapping.queries,
                               "raw_facts_sha256": tx.digest(hostile.raw)}
+        if lifecycle:
+            observations[case]["lifecycle"] = lifecycle
         fixture.systemctl("stop", *mapping.values())
         # Remove hostile edges before the next safe control, retaining owned units for teardown.
         for path in paths.values():
@@ -726,16 +754,132 @@ TimeoutStopSec=5
 
 
 
+def probe_mount_table():
+    with open("/proc/self/mountinfo", "rb") as stream:
+        raw = stream.read(1024 * 1024 + 1)
+    if len(raw) > 1024 * 1024:
+        raise AssertionError("probe_mount_observation_required")
+    return raw
+
+
+def probe_mount_facts(raw, path):
+    """Bounded local inspection; never return mount names or the host inventory."""
+    try:
+        if not raw or len(raw) > 1024 * 1024 or len(raw.splitlines()) > 8192:
+            raise ValueError
+        matches, private = [], True
+        for line in raw.decode("utf-8", "strict").splitlines():
+            left, right = line.split(" - ", 1)
+            fields = left.split()
+            if len(fields) < 6 or len(right.split()) < 3:
+                raise ValueError
+            mountpoint = re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), fields[4])
+            if not mountpoint.startswith("/"):
+                raise ValueError
+            private = private and not any(v.startswith(("shared:", "master:", "propagate_from:")) for v in fields[6:])
+            if path == mountpoint or path.startswith(mountpoint.rstrip("/") + "/"):
+                matches.append((len(mountpoint), mountpoint == path, "nodev" in fields[5].split(",")))
+        if not matches:
+            raise ValueError
+        _, mounted, nodev = max(matches)
+        return {"nodev": nodev, "mounted": mounted, "private": private}
+    except (ValueError, UnicodeError):
+        raise AssertionError("probe_mount_observation_required") from None
+
+
+def probe_null_metadata(info, *, device):
+    rdev = [os.major(info.st_rdev), os.minor(info.st_rdev)]
+    if (info.st_uid != 0 or info.st_gid != 0 or info.st_nlink != 1 or
+            (device and (not stat.S_ISCHR(info.st_mode) or rdev != [1, 3])) or
+            (not device and (not stat.S_ISREG(info.st_mode) or info.st_size != 0 or
+                             stat.S_IMODE(info.st_mode) != 0o600))):
+        raise AssertionError("probe_null_untrusted")
+    return {"type": "char" if device else "regular", "mode": stat.S_IMODE(info.st_mode),
+            "uid": info.st_uid, "gid": info.st_gid, "rdev": rdev}
+
+
+def probe_null_open(path, diagnostics, stage):
+    diagnostics["stage"] = stage + "_open"
+    try:
+        fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+        try:
+            probe_null_metadata(os.fstat(fd), device=True)
+            if os.read(fd, 1) != b"":
+                raise AssertionError("probe_null_eof_required")
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        diagnostics["open_errno"][stage] = exc.errno
+        raise
+    diagnostics["open_errno"][stage] = 0
+
+
+def bind_probe_null(root, fixture_root, parent_pid, parent_namespace, diagnostics):
+    """Bind only the real null device, only in a fork child's private mount ns."""
+    diagnostics.update(stage="resource_validation", euid=os.geteuid(),
+                       nodev={key: "unavailable" for key in ("source", "target_before", "target_bound")},
+                       open_errno={key: "unavailable" for key in ("source", "bound", "chroot")})
+    if os.getpid() == parent_pid or os.geteuid() != 0 or root != fixture_root / "probe-root":
+        raise AssertionError("probe_child_owned_root_required")
+    target = (root / "dev/null").as_posix()
+    # Hold and recheck every root-owned, no-follow ancestor. The placeholder is
+    # owned fixture storage; no parent mount or host device is ever replaced.
+    with uh.root_parent("/dev/null"), uh.root_parent(target):
+        source = os.stat("/dev/null", follow_symlinks=False)
+        diagnostics["source"] = probe_null_metadata(source, device=True)
+        diagnostics["target_before"] = probe_null_metadata(os.stat(target, follow_symlinks=False), device=False)
+        raw = probe_mount_table()
+        diagnostics["nodev"]["source"] = probe_mount_facts(raw, "/dev/null")["nodev"]
+        diagnostics["nodev"]["target_before"] = probe_mount_facts(raw, target)["nodev"]
+        probe_null_open("/dev/null", diagnostics, "source")
+        import ctypes
+        libc = ctypes.CDLL(None, use_errno=True)
+        diagnostics["stage"] = "unshare"
+        if libc.unshare(0x20000) != 0:  # CLONE_NEWNS
+            raise OSError(ctypes.get_errno(), "probe_unshare_failed")
+        distinct = os.stat("/proc/self/ns/mnt").st_ino != parent_namespace
+        diagnostics["child_mount_namespace_distinct"] = distinct
+        if not distinct:
+            raise AssertionError("probe_private_namespace_required")
+        diagnostics["stage"] = "private"
+        if libc.mount(None, b"/", None, 0x4000 | 0x40000, None) != 0:  # MS_REC | MS_PRIVATE
+            raise OSError(ctypes.get_errno(), "probe_private_mount_failed")
+        private = probe_mount_facts(probe_mount_table(), target)["private"]
+        diagnostics["recursive_private"] = private
+        if not private:
+            raise AssertionError("probe_private_namespace_required")
+        diagnostics["stage"] = "bind"
+        if libc.mount(b"/dev/null", target.encode("utf-8"), None, 0x1000, None) != 0:  # MS_BIND
+            raise OSError(ctypes.get_errno(), "probe_bind_failed")
+        bound = probe_mount_facts(probe_mount_table(), target)
+        diagnostics["nodev"]["target_bound"] = bound["nodev"]
+        if not bound["mounted"] or not bound["private"] or bound["nodev"]:
+            raise AssertionError("probe_bound_device_mount_required")
+        diagnostics["target_bound"] = probe_null_metadata(os.stat(target, follow_symlinks=False), device=True)
+        if uh._identity(os.stat("/dev/null", follow_symlinks=False)) != uh._identity(source):
+            raise AssertionError("probe_null_source_changed")
+        probe_null_open(target, diagnostics, "bound")
+
+
 def native_nft_read(test, fixture, root, *, refusal=False):
     """Real production nft reader in an owned netns and fork-only child root.
 
     The fixture supplies only nft and its shared libraries. There is no UFW CLI,
     compatibility binary, vendor config, interpreter executable or live bus here.
     """
+    parent_pid = os.getpid()
+    parent_namespace = os.stat("/proc/self/ns/mnt").st_ino
+    target = (root / "dev/null").as_posix()
+    with uh.root_parent(target):
+        target_before = os.stat(target, follow_symlinks=False)
+        probe_null_metadata(target_before, device=False)
+    parent_mounts = probe_mount_table()
+    test.assertFalse(probe_mount_facts(parent_mounts, target)["mounted"])
     reader, writer = os.pipe()
     pid = os.fork()
     if pid == 0:
         os.close(reader)
+        resources = {"stage": "network_namespace"}
         try:
             os.setsid()
             namespace = os.open("/run/netns/" + fixture.server, os.O_RDONLY | os.O_NOFOLLOW)
@@ -744,8 +888,12 @@ def native_nft_read(test, fixture, root, *, refusal=False):
             finally:
                 os.close(namespace)
             assert os.geteuid() == 0 and os.stat("/proc/self/ns/net").st_ino == fixture.inode
+            bind_probe_null(root, fixture.root, parent_pid, parent_namespace, resources)
+            resources["stage"] = "chroot"
             os.chroot(root)
             os.chdir("/")
+            probe_null_open("/dev/null", resources, "chroot")
+            resources["stage"] = "nft_read"
             with child_assertions(test):
                 host = h.LinuxHost()
                 baseline = host.firewall()
@@ -779,14 +927,19 @@ def native_nft_read(test, fixture, root, *, refusal=False):
                 test.assertEqual(sorted(path.name for path in Path("/run").iterdir()), entries)
                 after = tx.digest(host.firewall())
                 test.assertEqual(frozen, after)
+                resources["stage"] = "complete"
                 result = dict(document=baseline, before_sha256=frozen, after_sha256=after,
-                              refused=refusal, absent_lock_preserved=True, present_lock_preserved=True)
+                              refused=refusal, absent_lock_preserved=True, present_lock_preserved=True,
+                              resources=resources)
                 payload = tx.encoded(result)
                 test.assertLessEqual(len(payload), 4096)
                 os.write(writer, payload)
                 os._exit(0)
         except BaseException as exc:
-            os.write(writer, (type(exc).__name__ + ": " + str(exc))[:3000].encode("utf-8", "replace"))
+            # Closed diagnostics only: no paths, command text or exception message.
+            failure = dict(resources=resources, error_type="os_error" if isinstance(exc, OSError) else "assertion_or_contract",
+                           error_errno=exc.errno if isinstance(exc, OSError) else None)
+            os.write(writer, tx.encoded(failure)[:4096])
             os._exit(1)
     os.close(writer)
     try:
@@ -795,9 +948,20 @@ def native_nft_read(test, fixture, root, *, refusal=False):
             os.killpg(pid, signal.SIGKILL)
         payload = os.read(reader, 4096) if ready else b""
         _, status = os.waitpid(pid, 0)
+        result = json.loads(payload) if payload else {"resources": {"stage": "timeout"}}
+        resources = result["resources"]
+        resources["parent_namespace_unchanged"] = os.stat("/proc/self/ns/mnt").st_ino == parent_namespace
+        with uh.root_parent(target):
+            resources["parent_target_unchanged"] = uh._identity(os.stat(target, follow_symlinks=False)) == uh._identity(target_before)
+        after_mounts = probe_mount_table()
+        resources["parent_mounts_unchanged"] = parent_mounts == after_mounts
+        resources["child_bind_released"] = not probe_mount_facts(after_mounts, target)["mounted"] and resources["parent_target_unchanged"]
+        if status != 0:
+            OBSERVATIONS.setdefault(test.id(), {})["probe_resource_failure"] = result
         test.assertTrue(ready, "native nft reader child timed out")
-        test.assertEqual(status, 0, payload.decode("utf-8", "replace"))
-        return json.loads(payload)
+        test.assertTrue(all(resources[key] is True for key in ("parent_namespace_unchanged", "parent_target_unchanged", "parent_mounts_unchanged", "child_bind_released")))
+        test.assertEqual(status, 0, tx.encoded(result).decode("ascii"))
+        return result
     finally:
         os.close(reader)
 
@@ -1433,7 +1597,7 @@ ExecStart=+/usr/bin/python3 -I -B {entry} guard-ensure --profile {profile_path}
             probe_root.mkdir(mode=0o755)
             copy_tool_closure(probe_root, ("/usr/sbin/nft",))
             (probe_root / "dev").mkdir()
-            os.mknod(probe_root / "dev/null", stat.S_IFCHR | 0o666, os.makedev(1, 3))
+            private_file(probe_root / "dev/null", b"")  # child-only real device bind target
             (probe_root / "run").mkdir()
             nft_observations = {"empty": native_nft_read(self, fixture, probe_root)}
             foreign_name = "aegis_fixture_foreign"

@@ -41,13 +41,20 @@ hay gọi UFW của host. Script/unit/default/hook giữ SHA-256 riêng, config 
 Gate thử stop/restart, direct `restart`/`force-reload`, từ chối `systemctl reload`
 vì không có ExecReload; start/stop đồng thời trong một transaction systemd. Qua
 các bước đó phải giữ Manager TLS allowed, nguồn khác denied, owned table và
-foreign rules. Unit dùng một lần cung cấp 17 thuộc tính dependency thực và stop
+foreign rules. Unit dùng một lần cung cấp 18 thuộc tính dependency thực và stop
 propagation trực tiếp/bắc cầu/kết hợp, với ánh xạ vai trò song ánh được ghi lại.
 
 Dependency fixture chuẩn hóa song ánh toàn bộ danh tính unit đã quan sát, kể cả
 unit ngoài fixture trùng tên vai trò. Mọi query đảo ánh xạ về unit thực, giữ
-nguyên 17 thuộc tính và mọi edge; proof giữ mapping và hash canonical raw facts.
+nguyên 18 thuộc tính và mọi edge, gồm inverse `ConflictedBy` do systemd tạo;
+thiếu thuộc tính không được coi là mảng rỗng. Proof giữ mapping và hash canonical raw facts.
 Cùng mapper phải admit baseline an toàn trước khi thêm dependency để thử refusal.
+Giữ sáu case cũ và thêm `conflict_indexer`, `conflict_guard`, `conflict_stop`:
+restart unit sở hữu kéo relay qua Wants; conflict của relay dừng wrapper giả
+trực tiếp hoặc qua PartOf. Case guard giữ cả inverse ConflictedBy thực. Proof
+phải có wrapper/source active và relay inactive trước restart, relay active và
+wrapper inactive sau restart, cùng refusal của graph production. Chỉ dùng unit
+disposable `/usr/bin/true`, không thao tác vendor wrapper hoặc UFW thật.
 Unit ngoài fixture chỉ được đọc; start/stop/restart/reload chỉ chấp nhận danh sách
 unit fixture đã sở hữu, không dùng alias để gửi action tới UFW thật.
 
@@ -60,6 +67,21 @@ với handles, partial UFW chain refusal, baseline và lock vắng mặt/sentine
 không đổi. Không gọi UFW CLI, compatibility-list/save hay init-status. Runner và
 workflow cùng validate schema, hashes, packet/order/preservation/cleanup; chỉ
 upload proof không đủ qualify. Không upload fixture tree, CA/key hay journal.
+
+Probe root cung cấp `/dev/null` bằng file bind của device thật, chỉ trong child
+đã fork và tạo mount namespace mới, xác nhận inode khác parent rồi đặt `/`
+recursively private trước bind. Target là placeholder regular 0600 dưới cây
+fixture sở hữu; kiểm tra no-follow/root ownership của source, target và mọi
+ancestor. Source/bound device phải là char 1:3; open read/write và EOF phải thành
+công trước bind, sau bind và sau chroot. Không remount host `/run`, không bind cả
+`/dev`, không dùng regular file làm null hay đổi `Popen(DEVNULL)` production.
+Mỗi `nft_observations` có `resources` đóng: metadata type/mode/uid/gid/rdev,
+nodev source/target trước/sau, errno các lần open, stage và xác nhận private
+mount/parent namespace/target/mount table không đổi, child bind đã được giải phóng.
+Mount flags phải được quan sát; diagnostic thất bại ghi `unavailable` nếu chưa
+đọc được, không suy ra nodev từ EACCES. Chỉ xuất trường đã lọc, không dump mounts.
+Thiếu facility hoặc cleanup không chắc chắn làm gate thất bại. Đây là boundary
+fixture bổ sung được khai báo trong relocations, không phải thay đổi host policy.
 
 Đây là **qualification Linux tổng hợp**, chưa phải kiểm chứng Wazuh/OpenSearch,
 Dashboard, Manager thật, cấu hình vendor thật hay sự bền vững sau reboot. Chạy
@@ -90,6 +112,10 @@ profile và fingerprint static; ghi bền vững trước guard. Mỗi ensure v�
 verify qualify lại kể cả guard active. Thiếu record, method cũ hoặc drift không
 tự refresh/migrate. Guard và Indexer chỉ `After=ufw.service`, không Wants/Requires
 để tự start UFW; effective graph phải không truyền stop/restart ngược tới UFW.
+Graph kiểm tra có giới hạn tác động start/stop/restart kết hợp: activation của
+dependency có thể dừng conflict ở cả hai hướng, rồi truyền stop hoặc kích hoạt
+completion handler. Không mô phỏng toàn bộ systemd và không tự start/repair UFW.
+Fingerprint cũ thiếu `ConflictedBy` từ chối drift, không refresh tự động.
 
 Kit không stop/restart/reload/enable/disable, sửa file/hook hay flush UFW. Rollback
 khôi phục HTTP/drop-in và verify localhost cũ trước khi bỏ owned table; không

@@ -22,7 +22,7 @@ LOADERS = ("nftables.service", "ufw.service", "firewalld.service")
 GUARD = "aegis-wazuh-http-guard.service"
 INDEXER = "wazuh-indexer.service"
 DEPENDENCIES = ("Before", "After", "Requires", "Wants", "Requisite", "BindsTo",
-                "PartOf", "Conflicts", "OnFailure", "OnSuccess", "Upholds",
+                "PartOf", "Conflicts", "ConflictedBy", "OnFailure", "OnSuccess", "Upholds",
                 "RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf",
                 "PropagatesStopTo", "StopPropagatedFrom")
 # Ordered aliases only; no general resolve() of a root command or library path.
@@ -178,44 +178,64 @@ class UfwHostReader:
             pending.extend(other for values in current.values() for other in values)
             if sum(len(edges) for edges in graph.values()) > 8192:
                 raise SetupError("ufw_unsupported")
-        # A Requires/BindsTo/PartOf dependency propagates stop/restart in the
-        # opposite direction to activation. Inspect both effective directions:
-        # inverse properties also discover intermediates in mixed-edge chains.
-        # RequisiteOf has the same stop/restart propagation in systemd v255.
+        # Conservative operation effects for this bounded relationship model,
+        # not a systemd job simulator. In particular activation can stop a
+        # conflicting unit; that stop can propagate or activate completion units.
+        # Read both effective conflict directions (ConflictedBy is implicit).
+        activating = {name: set() for name in facts}
+        restarting = {name: set() for name in facts}
         stopping = {name: set() for name in facts}
+        conflicts = {name: set() for name in facts}
         for name, relations in facts.items():
-            for key in ("Requires", "Requisite", "BindsTo", "PartOf", "StopPropagatedFrom"):
+            for key in ("Requires", "Wants", "BindsTo", "Upholds", "OnFailure", "OnSuccess"):
+                activating[name].update(relations[key])
+            for key in ("RequiredBy", "BoundBy"):
+                for dependent in relations[key]:
+                    activating[dependent].add(name)
+            for key in ("Requires", "Requisite", "BindsTo", "PartOf"):
                 for source in relations[key]:
-                    stopping[source].add(name)
-            for key in ("RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf", "PropagatesStopTo"):
-                stopping[name].update(relations[key])
-        if sum(len(edges) for edges in stopping.values()) > 8192:
+                    restarting[source].add(name)
+            for key in ("RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf"):
+                restarting[name].update(relations[key])
+            stopping[name].update(relations["PropagatesStopTo"])
+            for source in relations["StopPropagatedFrom"]:
+                stopping[source].add(name)
+            for key in ("Conflicts", "ConflictedBy"):
+                for other in relations[key]:
+                    conflicts[name].add(other)
+                    conflicts[other].add(name)
+        for name in facts:
+            stopping[name].update(restarting[name])
+        if any(sum(len(edges) for edges in model.values()) > 8192
+               for model in (activating, restarting, stopping, conflicts)):
             raise SetupError("ufw_unsupported")
         for name in (GUARD, INDEXER):
-            reachable, queue = set(), [name]
-            while queue:
-                unit = queue.pop()
-                if unit in reachable:
-                    continue
-                reachable.add(unit)
-                if unit == "ufw.service":
-                    raise SetupError("ufw_unsupported")
-                queue.extend(stopping[unit])
-            # Preserve the original direct/forward activation gate separately.
+            # Preserve direct unsupported requirements as well as the composed
+            # effects below; Requisite/PartOf do not themselves start a unit.
             if any("ufw.service" in facts[name][key] for key in
                    ("Requires", "Wants", "Requisite", "BindsTo", "PartOf",
-                    "Conflicts", "OnFailure", "OnSuccess", "Upholds")):
+                    "Conflicts", "ConflictedBy", "OnFailure", "OnSuccess", "Upholds")):
                 raise SetupError("ufw_unsupported")
-            reachable, queue = set(), [name]
+            # At most three effects per observed unit. Restart propagates to
+            # dependents, but an explicit/conflict stop must not invent a restart.
+            reachable, queue = set(), [(name, "restart")]
             while queue:
-                unit = queue.pop()
-                if unit in reachable:
+                unit, effect = queue.pop()
+                if (unit, effect) in reachable:
                     continue
-                reachable.add(unit)
+                reachable.add((unit, effect))
                 if unit == "ufw.service":
                     raise SetupError("ufw_unsupported")
-                for key in ("Requires", "Wants", "BindsTo", "Upholds", "OnFailure", "OnSuccess"):
-                    queue.extend(facts[unit][key])
+                if effect == "restart":
+                    queue.extend(((unit, "start"), (unit, "stop")))
+                    queue.extend((other, "restart") for other in restarting[unit])
+                elif effect == "start":
+                    queue.extend((other, "start") for other in activating[unit])
+                    queue.extend((other, "stop") for other in conflicts[unit])
+                else:
+                    queue.extend((other, "stop") for other in stopping[unit])
+                    for key in ("OnSuccess", "OnFailure"):
+                        queue.extend((other, "start") for other in facts[unit][key])
         graph.setdefault("ufw.service", set()).update((GUARD, INDEXER))
         graph.setdefault(GUARD, set()).add(INDEXER)
         # Iterative topological sort: no recursion/depth guesses for a real graph.

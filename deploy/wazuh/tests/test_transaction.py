@@ -703,6 +703,37 @@ class UfwHostIntegrationTests(unittest.TestCase):
         self.assertEqual(result["foreign_firewall"], self.h.stable_firewall(self.rules))
         self.assertEqual(result["probe"], self.probe)
 
+    def test_composed_conflict_refuses_host_admission_and_installed_verification(self):
+        for root in ("wazuh-indexer.service", "aegis-wazuh-http-guard.service"):
+            for key in ("Wants", "Requires"):
+                with self.subTest(root=root, key=key):
+                    graph = UfwAdapterTests()
+                    graph.setUp()
+                    graph.graph(installed=True)
+                    graph.facts["relay.service"] = {name: "" for name in graph.a.DEPENDENCIES}
+                    graph.facts[root][key] = "relay.service"
+                    self.reader.dependency_facts = graph.reader.dependency_facts
+                    self.pin()
+                    self.host.verify_installed_firewall_compatibility(self.p)
+                    graph.facts["relay.service"]["Conflicts"] = "ufw.service"
+                    with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                        self.admission()
+                    with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                        self.host.verify_installed_firewall_compatibility(self.p)
+
+    def test_old_dependency_fingerprint_cannot_refresh_missing_inverse_conflict(self):
+        graph = UfwAdapterTests()
+        graph.setUp()
+        graph.graph(installed=True)
+        self.reader.dependency_facts = graph.reader.dependency_facts
+        self.pin()
+        for facts in self.record["fingerprint"]["dependencies"].values():
+            del facts["ConflictedBy"]
+        frozen = copy.deepcopy(self.record)
+        with self.assertRaisesRegex(SetupError, "ufw_drift"):
+            self.host.verify_installed_firewall_compatibility(self.p)
+        self.assertEqual(self.record, frozen)
+
     def test_active_wrapper_startup_cannot_bootstrap_missing_record(self):
         self.admission()
         with self.assertRaisesRegex(SetupError, "ufw_drift"):
@@ -1154,7 +1185,7 @@ class UfwAdapterTests(unittest.TestCase):
         added = {"RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf",
                  "PropagatesStopTo", "StopPropagatedFrom"}
         self.assertTrue(added.issubset(self.a.DEPENDENCIES))
-        self.assertEqual(len(self.a.DEPENDENCIES), 17)
+        self.assertEqual(len(self.a.DEPENDENCIES), 18)
         self.graph(installed=True)
         result = self.reader.dependency_facts()
         for root in ("ufw.service", self.a.INDEXER):
@@ -1202,6 +1233,87 @@ class UfwAdapterTests(unittest.TestCase):
         result = self.reader.dependency_facts()
         self.assertEqual(result["ufw.service"]["Requires"], ["synthetic-a.service"])
         self.assertEqual(result["ufw.service"]["Wants"], [self.a.INDEXER])
+
+    def test_activation_conflicts_compose_with_reverse_stops_for_both_roots(self):
+        for root in (self.a.INDEXER, self.a.GUARD):
+            for activation in ("Wants", "Requires", "BindsTo", "Upholds", "OnSuccess", "OnFailure"):
+                for conflict in ("Conflicts", "ConflictedBy"):
+                    for stop in (None, "Requires", "Requisite", "BindsTo", "PartOf", "StopPropagatedFrom"):
+                        with self.subTest(root=root, activation=activation, conflict=conflict, stop=stop):
+                            self.graph(installed=True)
+                            for name in ("relay.service", "relay2.service", "victim.service"):
+                                self.facts[name] = {key: "" for key in self.a.DEPENDENCIES}
+                            self.facts[root][activation] = "relay.service"
+                            self.facts["relay.service"]["Wants"] = "relay2.service"
+                            # Safe activation control must admit before injecting the conflict.
+                            self.reader.dependency_facts()
+                            self.facts["relay2.service"][conflict] = "victim.service" if stop else "ufw.service"
+                            if stop:
+                                self.facts["ufw.service"][stop] = "victim.service"
+                            with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                                self.reader.dependency_facts()
+
+    def test_conflict_on_inverse_side_and_stop_completion_activation_refuse(self):
+        for root in (self.a.INDEXER, self.a.GUARD):
+            for trigger in ("OnSuccess", "OnFailure"):
+                self.graph(installed=True)
+                for name in ("relay.service", "victim.service", "completion.service"):
+                    self.facts[name] = {key: "" for key in self.a.DEPENDENCIES}
+                self.facts[root]["Wants"] = "relay.service"
+                self.facts[root]["Before"] = "victim.service"  # discover the inverse-only facts
+                self.facts["victim.service"]["Conflicts"] = "relay.service"
+                self.facts["victim.service"][trigger] = "completion.service"
+                self.reader.dependency_facts()  # harmless conflict/handler control
+                self.facts["ufw.service"]["ConflictedBy"] = "completion.service"
+                with self.subTest(root=root, trigger=trigger), self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                    self.reader.dependency_facts()
+
+    def test_restart_propagation_composes_with_activation_conflicts(self):
+        for root in (self.a.INDEXER, self.a.GUARD):
+            self.graph(installed=True)
+            for name in ("dependent.service", "relay.service"):
+                self.facts[name] = {key: "" for key in self.a.DEPENDENCIES}
+            self.facts[root]["ConsistsOf"] = "dependent.service"
+            self.facts["dependent.service"]["Wants"] = "relay.service"
+            self.reader.dependency_facts()
+            self.facts["relay.service"]["Conflicts"] = "ufw.service"
+            with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                self.reader.dependency_facts()
+
+    def test_inverse_conflict_evidence_is_required_even_when_empty(self):
+        self.assertIn("ConflictedBy", self.a.DEPENDENCIES)
+        for value in (None, [], 1):
+            self.graph(installed=True)
+            self.facts["ufw.service"]["ConflictedBy"] = value
+            with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                self.reader.dependency_facts()
+        self.graph(installed=True)
+        del self.facts["ufw.service"]["ConflictedBy"]
+        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            self.reader.dependency_facts()
+
+    def test_effective_inverse_conflict_must_be_returned_by_systemctl(self):
+        calls = []
+        self.host.run = lambda *args: calls.append(args) or b"".join(key.encode() + b"=\n" for key in self.a.DEPENDENCIES)
+        self.assertEqual(self.host.dependency_properties("ufw.service")["ConflictedBy"], "")
+        self.assertIn("ConflictedBy", calls[0][4].split("=", 1)[1].split(","))
+        self.host.run = lambda *args: b"".join(key.encode() + b"=\n" for key in self.a.DEPENDENCIES if key != "ConflictedBy")
+        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            self.host.dependency_properties("ufw.service")
+
+    def test_conflict_stop_follows_every_collected_inverse_propagation(self):
+        for root in (self.a.INDEXER, self.a.GUARD):
+            for inverse in ("RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf", "PropagatesStopTo"):
+                with self.subTest(root=root, inverse=inverse):
+                    self.graph(installed=True)
+                    for name in ("relay.service", "victim.service"):
+                        self.facts[name] = {key: "" for key in self.a.DEPENDENCIES}
+                    self.facts[root]["Wants"] = "relay.service"
+                    self.facts["relay.service"]["Conflicts"] = "victim.service"
+                    self.reader.dependency_facts()
+                    self.facts["victim.service"][inverse] = "ufw.service"
+                    with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                        self.reader.dependency_facts()
 
     def test_present_null_duplicate_or_nonobject_record_refuses(self):
         self.host.fs = SimpleNamespace(trusted=lambda *args, **kwargs: SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_gid=0))

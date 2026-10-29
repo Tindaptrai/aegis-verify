@@ -117,7 +117,8 @@ UFW_RELOCATIONS = ["owned_root:vendor_paths", "owned_units:wrapper_guard_indexer
                    "wrapper:RootDirectory,NetworkNamespacePath", "host.INSTALL_ROOT", "host.PROFILE",
                    "host.RECORD_PATH", "ufw_host.RECORD_PATH", "loader_query:owned_inactive_inventory",
                    "dependency_roles:bijective_all_observed_units_readonly_external", "positive_reader:synthetic_package_unit_backend_dependencies",
-                   "fixture.Commands:root_netns_before_each_execute"]
+                   "fixture.Commands:root_netns_before_each_execute",
+                   "probe_root/dev/null:real_device_bind_in_child_private_mount_namespace"]
 UFW_CHECKS = ("vendor_bytes_preserved", "vendor_state_preserved", "real_ufw_baseline_preserved",
               "namespace_assertion_before_mutations", "no_unintended_wrapper_start", "cold_guard_verified",
               "active_guard_verified", "concurrent_start_order_verified", "concurrent_stop_order_verified",
@@ -206,7 +207,28 @@ def validate_native_observations(observations):
     nft = item["nft_observations"]
     require(type(nft) is dict and set(nft) == {"empty", "foreign", "ufw-partial", "ufw6-partial"})
     for name, observed in nft.items():
-        require(type(observed) is dict and set(observed) == {"document", "before_sha256", "after_sha256", "refused", "absent_lock_preserved", "present_lock_preserved"})
+        require(type(observed) is dict and set(observed) == {"document", "before_sha256", "after_sha256", "refused", "absent_lock_preserved", "present_lock_preserved", "resources"})
+        resources = observed["resources"]
+        isolation = {"child_mount_namespace_distinct", "recursive_private", "parent_namespace_unchanged",
+                     "parent_target_unchanged", "parent_mounts_unchanged", "child_bind_released"}
+        require(type(resources) is dict and set(resources) == isolation | {
+            "stage", "euid", "source", "target_before", "target_bound", "nodev", "open_errno"})
+        require(resources["stage"] == "complete" and type(resources["euid"]) is int and resources["euid"] == 0)
+        require(all(resources[key] is True for key in isolation))
+        for key in ("source", "target_before", "target_bound"):
+            device = resources[key]
+            require(type(device) is dict and set(device) == {"type", "mode", "uid", "gid", "rdev"})
+            require(type(device["uid"]) is int and type(device["gid"]) is int and device["uid"] == device["gid"] == 0)
+            require(type(device["mode"]) is int and 0 <= device["mode"] <= 0o7777)
+            require(type(device["rdev"]) is list and all(type(n) is int for n in device["rdev"]))
+            require(device["type"] == ("regular" if key == "target_before" else "char"))
+            require(device["rdev"] == ([0, 0] if key == "target_before" else [1, 3]))
+        require(resources["target_before"]["mode"] == 0o600 and resources["source"] == resources["target_bound"])
+        require(type(resources["nodev"]) is dict and set(resources["nodev"]) == {"source", "target_before", "target_bound"})
+        require(all(type(value) is bool for value in resources["nodev"].values()))
+        require(resources["nodev"]["source"] is False and resources["nodev"]["target_bound"] is False)
+        require(type(resources["open_errno"]) is dict and set(resources["open_errno"]) == {"source", "bound", "chroot"})
+        require(all(type(value) is int and value == 0 for value in resources["open_errno"].values()))
         require(observed["absent_lock_preserved"] is True and observed["present_lock_preserved"] is True)
         require(sha(observed["before_sha256"]) and observed["before_sha256"] == observed["after_sha256"] == digest(observed["document"]))
         require(observed["refused"] is name.endswith("partial"))
@@ -238,10 +260,16 @@ def validate_native_observations(observations):
                 require(body["chain"] == "input")
     require(item["preservation_hashes"]["fresh_nft"] == {"before": nft["foreign"]["before_sha256"], "after": nft["foreign"]["after_sha256"]})
     cases = item["dependency_cases"]
-    require(type(cases) is dict and set(cases) == {"direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering"})
+    require(type(cases) is dict and set(cases) == {"direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering",
+                                                 "conflict_indexer", "conflict_guard", "conflict_stop"})
     from deploy.wazuh.https_setup.ufw_host import DEPENDENCIES
     for name, case in cases.items():
-        require(set(case) == {"mapping", "facts", "refused", "propagation_verified", "baseline", "identity_mapping", "raw_facts_sha256"} and case["refused"] is True)
+        require(set(case) == {"mapping", "facts", "refused", "propagation_verified", "baseline", "identity_mapping", "raw_facts_sha256"} |
+                ({"lifecycle"} if name.startswith("conflict_") else set()) and case["refused"] is True)
+        if name.startswith("conflict_"):
+            require(type(case["lifecycle"]) is dict and set(case["lifecycle"]) == {
+                "source_active_before", "wrapper_active_before", "relay_inactive_before", "relay_active_after", "wrapper_inactive_after"})
+            require(all(value is True for value in case["lifecycle"].values()))
         require(case["propagation_verified"] is (name not in {"activation", "ordering"}))
         roles = case["mapping"]
         require(set(roles) == {"ufw.service", "wazuh-indexer.service", "aegis-wazuh-http-guard.service", "bridge.service"})
@@ -273,6 +301,14 @@ def validate_native_observations(observations):
             require(bridge in facts["ufw.service"]["Requires"] if name == "transitive" else ufw in facts["bridge.service"]["PropagatesStopTo"])
         elif name == "activation":
             require(ufw in facts["aegis-wazuh-http-guard.service"]["Wants"])
+        elif name.startswith("conflict_"):
+            source = "aegis-wazuh-http-guard.service" if name == "conflict_guard" else "wazuh-indexer.service"
+            require(bridge in facts[source]["Wants"])
+            target = "aegis-wazuh-http-guard.service" if name == "conflict_stop" else "ufw.service"
+            require(roles[target] in facts["bridge.service"]["ConflictedBy" if name == "conflict_guard" else "Conflicts"])
+            require(bridge in facts[target]["Conflicts" if name == "conflict_guard" else "ConflictedBy"])
+            if name == "conflict_stop":
+                require(guard in facts["ufw.service"]["PartOf"])
         else:
             require(ufw in facts["aegis-wazuh-http-guard.service"]["Before"])
 
