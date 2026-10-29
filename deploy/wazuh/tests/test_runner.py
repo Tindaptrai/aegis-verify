@@ -448,6 +448,80 @@ class NativeFixtureSafety(unittest.TestCase):
                 self.assertTrue(all(call[0] == "show" for call in calls))
                 self.assertLessEqual(len(calls), 10)
 
+    def test_propagated_state_poll_requires_final_state_and_newer_timestamp(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "wait_propagated_state"), "propagation observation poll missing")
+        for after, rows, succeeds in (
+                (None, [("active", 50), ("deactivating", 50), ("inactive", 0)], True),
+                (50, [("active", 50), ("inactive", 51), ("activating", 51), ("active", 51)], True),
+                (None, [("active", 50)], False), (50, [("active", 50)], False),
+                (50, [("active", 0)], False), (50, [("inactive", 51)], False)):
+            clock, calls = {"now": 0.0}, []
+            pending = list(rows)
+            def systemctl(*args, **kwargs):
+                calls.append((args, kwargs))
+                clock["now"] += 0.1
+                state, stamp = pending.pop(0) if len(pending) > 1 else pending[0]
+                return SimpleNamespace(stdout=f"ActiveState={state}\nActiveEnterTimestampMonotonic={stamp}\n".encode())
+            def sleep(delay): clock["now"] += delay
+            fixture = SimpleNamespace(systemctl=systemctl)
+            with self.subTest(after=after, rows=rows), patch.object(native.time, "monotonic", side_effect=lambda: clock["now"]), patch.object(native.time, "sleep", side_effect=sleep):
+                if succeeds:
+                    native.wait_propagated_state(fixture, "owned.service", after=after)
+                    self.assertEqual(len(calls), len(rows))
+                else:
+                    with self.assertRaisesRegex(AssertionError, "^propagation_observation_timeout$"):
+                        native.wait_propagated_state(fixture, "owned.service", after=after)
+                self.assertTrue(all(args == ("show", "owned.service", "--all", "--property=ActiveState,ActiveEnterTimestampMonotonic")
+                                    and 0 < kwargs["timeout"] <= 1 for args, kwargs in calls))
+                self.assertLessEqual(len(calls), 26)
+
+    def test_propagated_state_poll_refuses_malformed_evidence(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "wait_propagated_state"), "propagation observation poll missing")
+        for raw in (b"", b"ActiveState=active\n", b"ActiveState=private-secret\nActiveEnterTimestampMonotonic=51\n",
+                    b"ActiveState=active\nActiveEnterTimestampMonotonic=private-secret\n",
+                    b"ActiveState=active\nActiveEnterTimestampMonotonic=-1\n",
+                    b"ActiveState=active\nActiveEnterTimestampMonotonic=18446744073709551616\n",
+                    b"ActiveState=active\nActiveEnterTimestampMonotonic=51\nActiveState=active\n",
+                    b"\xff", b"x" * 257):
+            calls = []
+            fixture = SimpleNamespace(systemctl=lambda *args, **kwargs: calls.append(args) or SimpleNamespace(stdout=raw))
+            with self.subTest(raw=raw[:20]), self.assertRaisesRegex(AssertionError, "^propagation_observation_invalid$"):
+                native.wait_propagated_state(fixture, "owned.service", after=50)
+            self.assertEqual(len(calls), 1)
+
+    def test_propagated_lifecycle_keeps_single_source_mutations(self):
+        from deploy.wazuh.tests import test_native as native
+        tree = ast.parse(Path(native.__file__).read_text(encoding="utf-8"))
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "dependency_observations")
+        branch = next(n for n in ast.walk(function) if isinstance(n, ast.If) and isinstance(n.test, ast.Name) and n.test.id == "propagated")
+        code = compile(ast.Module(body=branch.body, type_ignores=[]), "propagated-lifecycle", "exec")
+        for case in ("direct_indexer", "direct_guard", "transitive", "mixed"):
+            actions, waits = [], []
+            def systemctl(*args, **kwargs):
+                actions.append(args)
+                return SimpleNamespace(stdout=b"active" if args[0] == "is-active" else b"50")
+            fixture = SimpleNamespace(test=self, systemctl=systemctl)
+            env = dict(vars(native), fixture=fixture, case=case, ufw="wrapper", indexer="indexer", guard="guard",
+                       mapping=dict(ufw="wrapper", indexer="indexer", guard="guard", bridge="bridge"),
+                       wait_propagated_state=lambda *args, **kwargs: waits.append((args, kwargs)))
+            with self.subTest(case=case):
+                exec(code, env)
+                source = "indexer" if case == "direct_indexer" else "guard"
+                self.assertEqual([a for a in actions if a[0] in {"stop", "restart"}], [("stop", source), ("restart", source)])
+                self.assertEqual(waits, [((fixture, "wrapper"), {}),
+                                        ((fixture, "wrapper"), {} if case == "mixed" else {"after": 50})])
+        for raw in (b"0", b"-1", b"private-secret", b"18446744073709551616"):
+            actions.clear()
+            def invalid_before(*args, **kwargs):
+                actions.append(args)
+                return SimpleNamespace(stdout=b"active" if args[0] == "is-active" else raw)
+            fixture.systemctl = invalid_before
+            with self.subTest(before=raw), self.assertRaisesRegex(AssertionError, "^propagation_observation_invalid$"):
+                exec(code, env)
+            self.assertNotIn("restart", [a[0] for a in actions])
+
     def test_completed_probe_observations_survive_later_fixture_failure(self):
         from deploy.wazuh.tests import test_native as native
         with tempfile.TemporaryDirectory() as temporary:

@@ -748,6 +748,34 @@ def wait_conflict_states(fixture, relay, wrapper):
     raise AssertionError("conflict_states_timeout")
 
 
+def wait_propagated_state(fixture, wrapper, *, after=None):
+    """Observe dependent jobs after one source action; never retry the action."""
+    if after is not None and (type(after) is not int or not 0 < after < 2**64):
+        raise AssertionError("propagation_observation_invalid")
+    deadline = time.monotonic() + 5
+    while (remaining := deadline - time.monotonic()) > 0:
+        raw = fixture.systemctl("show", wrapper, "--all",
+                                "--property=ActiveState,ActiveEnterTimestampMonotonic", timeout=min(1, remaining)).stdout
+        try:
+            if len(raw) > 256:
+                raise ValueError
+            pairs = [line.split("=", 1) for line in raw.decode("ascii").splitlines()]
+            values = dict(pairs)
+            if len(pairs) != 2 or set(values) != {"ActiveState", "ActiveEnterTimestampMonotonic"}:
+                raise ValueError
+            state, stamp = values["ActiveState"], values["ActiveEnterTimestampMonotonic"]
+            if (state not in {"active", "inactive", "activating", "deactivating", "failed", "reloading", "maintenance"} or
+                    not re.fullmatch(r"[0-9]{1,20}", stamp) or int(stamp) >= 2**64):
+                raise ValueError
+        except (ValueError, UnicodeError):
+            raise AssertionError("propagation_observation_invalid") from None
+        complete = state == "inactive" if after is None else state == "active" and int(stamp) > after
+        if complete and time.monotonic() <= deadline:
+            return
+        time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+    raise AssertionError("propagation_observation_timeout")
+
+
 def dependency_observations(fixture):
     """Actual D-Bus/systemctl graph and propagation; only disposable true units."""
     observations = OBSERVATIONS.setdefault(fixture.test.id(), {}).setdefault("dependency_cases", {})
@@ -828,17 +856,19 @@ TimeoutStopSec=5
             fixture.test.assertEqual(fixture.systemctl("is-active", ufw).stdout.strip(), b"active")
             source = indexer if case == "direct_indexer" else guard
             fixture.systemctl("stop", source)
-            fixture.test.assertEqual(fixture.systemctl("show", ufw, "--property=ActiveState", "--value").stdout.strip(), b"inactive")
+            wait_propagated_state(fixture, ufw)
             # Restart propagation gets separate evidence with both units active.
             fixture.systemctl("start", *mapping.values())
-            before = int(fixture.systemctl("show", ufw, "--property=ActiveEnterTimestampMonotonic", "--value").stdout)
+            before_raw = fixture.systemctl("show", ufw, "--property=ActiveEnterTimestampMonotonic", "--value", timeout=1).stdout.strip()
+            if not re.fullmatch(rb"[0-9]{1,20}", before_raw) or not 0 < int(before_raw) < 2**64:
+                raise AssertionError("propagation_observation_invalid")
+            before = int(before_raw)
             fixture.systemctl("restart", source)
             if case == "mixed":
                 # PropagatesStopTo propagates stop, not automatic reactivation.
-                fixture.test.assertEqual(fixture.systemctl("show", ufw, "--property=ActiveState", "--value").stdout.strip(), b"inactive")
+                wait_propagated_state(fixture, ufw)
             else:
-                after = int(fixture.systemctl("show", ufw, "--property=ActiveEnterTimestampMonotonic", "--value").stdout)
-                fixture.test.assertGreater(after, before)
+                wait_propagated_state(fixture, ufw, after=before)
         observations[case] = {"mapping": mapping, "facts": {name: {key: sorted(value.split()) for key, value in facts.items()} for name, facts in raw.items()},
                               "refused": True, "propagation_verified": propagated,
                               "baseline": baseline_proof,

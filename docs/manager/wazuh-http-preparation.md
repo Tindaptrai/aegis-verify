@@ -74,6 +74,9 @@ chỉ giữ role/state/timestamp đã lọc. Resource/check/operation đã hoàn
 giữ ngay trong proof hiện có nếu bước sau lỗi; partial proof vẫn không qualify.
 Case conflict chỉ restart source một lần rồi poll read-only có deadline để đợi
 relay active và wrapper inactive; timeout phải fail, không dùng sleep làm bằng chứng order.
+Case propagation cũng chỉ stop/restart source một lần: poll read-only tối đa 5 giây
+đợi inactive khi stop, hoặc active với timestamp mới lớn hơn baseline dương khi restart.
+Mixed PropagatesStopTo vẫn phải về inactive; dữ liệu lỗi hoặc timeout đều fail.
 
 Proof tách hành vi vendor/packet/order thực; file/backend/typed D-Bus thực; và
 admission dương qua reader tổng hợp. RootDirectory/FragmentPath khác stock phải
