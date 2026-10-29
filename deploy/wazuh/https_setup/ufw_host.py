@@ -22,7 +22,9 @@ LOADERS = ("nftables.service", "ufw.service", "firewalld.service")
 GUARD = "aegis-wazuh-http-guard.service"
 INDEXER = "wazuh-indexer.service"
 DEPENDENCIES = ("Before", "After", "Requires", "Wants", "Requisite", "BindsTo",
-                "PartOf", "Conflicts", "OnFailure", "OnSuccess", "Upholds")
+                "PartOf", "Conflicts", "OnFailure", "OnSuccess", "Upholds",
+                "RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf",
+                "PropagatesStopTo", "StopPropagatedFrom")
 # Ordered aliases only; no general resolve() of a root command or library path.
 ALIASES = {"/lib": {"usr/lib", "/usr/lib"}, "/sbin": {"usr/sbin", "/usr/sbin"}}
 for _name in ("iptables", "ip6tables"):
@@ -207,8 +209,33 @@ class UfwHostReader:
             pending.extend(other for values in current.values() for other in values)
             if sum(len(edges) for edges in graph.values()) > 8192:
                 raise SetupError("ufw_unsupported")
+        # A Requires/BindsTo/PartOf dependency propagates stop/restart in the
+        # opposite direction to activation. Inspect both effective directions:
+        # inverse properties also discover intermediates in mixed-edge chains.
+        # RequisiteOf has the same stop/restart propagation in systemd v255.
+        stopping = {name: set() for name in facts}
+        for name, relations in facts.items():
+            for key in ("Requires", "Requisite", "BindsTo", "PartOf", "StopPropagatedFrom"):
+                for source in relations[key]:
+                    stopping[source].add(name)
+            for key in ("RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf", "PropagatesStopTo"):
+                stopping[name].update(relations[key])
+        if sum(len(edges) for edges in stopping.values()) > 8192:
+            raise SetupError("ufw_unsupported")
         for name in (GUARD, INDEXER):
-            if any("ufw.service" in facts[name][key] for key in DEPENDENCIES if key not in {"Before", "After"}):
+            reachable, queue = set(), [name]
+            while queue:
+                unit = queue.pop()
+                if unit in reachable:
+                    continue
+                reachable.add(unit)
+                if unit == "ufw.service":
+                    raise SetupError("ufw_unsupported")
+                queue.extend(stopping[unit])
+            # Preserve the original direct/forward activation gate separately.
+            if any("ufw.service" in facts[name][key] for key in
+                   ("Requires", "Wants", "Requisite", "BindsTo", "PartOf",
+                    "Conflicts", "OnFailure", "OnSuccess", "Upholds")):
                 raise SetupError("ufw_unsupported")
             reachable, queue = set(), [name]
             while queue:

@@ -955,6 +955,80 @@ class UfwAdapterTests(unittest.TestCase):
             with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
                 self.reader.dependency_facts()
 
+    def test_reverse_stop_restart_requirements_refuse_for_both_operated_units(self):
+        for operated in (self.a.INDEXER, self.a.GUARD):
+            for key in ("Requires", "Requisite", "BindsTo", "PartOf"):
+                with self.subTest(operated=operated, key=key):
+                    self.graph(installed=True)
+                    self.facts["ufw.service"][key] = operated
+                    with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                        self.reader.dependency_facts()
+
+    def test_transitive_reverse_stop_restart_requirements_refuse(self):
+        for operated in (self.a.INDEXER, self.a.GUARD):
+            for first in ("Requires", "Requisite", "BindsTo", "PartOf"):
+                for second in ("Requires", "Requisite", "BindsTo", "PartOf"):
+                    with self.subTest(operated=operated, first=first, second=second):
+                        self.graph(installed=True)
+                        self.facts["synthetic-relay.service"] = {k: "" for k in self.a.DEPENDENCIES}
+                        self.facts["ufw.service"][first] = "synthetic-relay.service"
+                        self.facts["synthetic-relay.service"][second] = operated
+                        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                            self.reader.dependency_facts()
+
+    def test_stop_propagation_properties_are_mandatory_frozen_evidence(self):
+        added = {"RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf",
+                 "PropagatesStopTo", "StopPropagatedFrom"}
+        self.assertTrue(added.issubset(self.a.DEPENDENCIES))
+        self.assertEqual(len(self.a.DEPENDENCIES), 17)
+        self.graph(installed=True)
+        result = self.reader.dependency_facts()
+        for root in ("ufw.service", self.a.INDEXER):
+            self.assertEqual(set(result[root]), set(self.a.DEPENDENCIES))
+        for key in added:
+            self.graph(installed=True)
+            del self.facts["ufw.service"][key]
+            with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                self.reader.dependency_facts()
+
+    def test_explicit_direct_and_mixed_direction_stop_propagation_refuse(self):
+        for operated in (self.a.INDEXER, self.a.GUARD):
+            for source, key, target in ((operated, "PropagatesStopTo", "ufw.service"),
+                                        ("ufw.service", "StopPropagatedFrom", operated)):
+                with self.subTest(source=source, key=key):
+                    self.graph(installed=True)
+                    self.facts[source][key] = target
+                    with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                        self.reader.dependency_facts()
+            for inverse in ("RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf"):
+                with self.subTest(operated=operated, inverse=inverse):
+                    self.graph(installed=True)
+                    for unit in ("synthetic-source.service", "synthetic-sink.service"):
+                        self.facts[unit] = {key: "" for key in self.a.DEPENDENCIES}
+                    # Source is discoverable only through the effective inverse
+                    # on the operated unit. Combine both edge directions.
+                    self.facts[operated][inverse] = "synthetic-source.service"
+                    self.facts["synthetic-source.service"]["PropagatesStopTo"] = "synthetic-sink.service"
+                    self.facts["ufw.service"]["StopPropagatedFrom"] = "synthetic-sink.service"
+                    with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                        self.reader.dependency_facts()
+
+    def test_unrelated_requirements_and_reverse_wants_are_not_stop_edges(self):
+        self.graph(installed=True)
+        for name in ("synthetic-a.service", "synthetic-b.service"):
+            self.facts[name] = {key: "" for key in self.a.DEPENDENCIES}
+        self.facts["ufw.service"]["Requires"] = "synthetic-a.service"
+        self.facts["ufw.service"]["Wants"] = self.a.INDEXER
+        # UFW -> Indexer stop propagation alone cannot let kit operations stop
+        # UFW. Keep the new properties directional, not a blanket relation ban.
+        self.facts["ufw.service"]["PropagatesStopTo"] = self.a.INDEXER
+        self.facts[self.a.INDEXER]["StopPropagatedFrom"] = "ufw.service"
+        self.facts["synthetic-a.service"]["Requires"] = "synthetic-b.service"
+        self.facts["synthetic-b.service"]["Requires"] = "synthetic-a.service"
+        result = self.reader.dependency_facts()
+        self.assertEqual(result["ufw.service"]["Requires"], ["synthetic-a.service"])
+        self.assertEqual(result["ufw.service"]["Wants"], [self.a.INDEXER])
+
     def test_present_null_duplicate_or_nonobject_record_refuses(self):
         self.host.fs = SimpleNamespace(trusted=lambda *args, **kwargs: SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_gid=0))
         self.host.ufw_reader = lambda: self.reader
