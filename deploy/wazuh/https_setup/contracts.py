@@ -16,7 +16,11 @@ class SetupError(Exception):
 
     def __init__(self, code: str):
         safe = {"profile_invalid", "config_unsupported", "archive_invalid",
-                "certificate_invalid", "openssl_failed", "firewall_mismatch"}
+                "certificate_invalid", "openssl_failed", "firewall_mismatch",
+                "host_unsupported", "path_untrusted", "listeners_unsupported",
+                "state_changed", "operation_locked", "intent_exists",
+                "recovery_required", "verification_failed", "manifest_invalid",
+                "installed_only", "root_required", "command_failed", "no_intent"}
         self.code = code if code in safe else "setup_failed"
         super().__init__(self.code)
 

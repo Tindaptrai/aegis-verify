@@ -386,12 +386,12 @@ class Components(unittest.TestCase):
         unit = self.f.guard_unit()
         self.assertIn("Before=wazuh-indexer.service", unit)
         self.assertIn("WantedBy=multi-user.target", unit)
-        self.assertIn("guard-ensure --profile /etc/wazuh-indexer/aegis-http/profile.json", unit)
+        self.assertIn("guard-ensure --profile /etc/aegis-wazuh-https/profile.json", unit)
         self.assertNotIn("ExecStop", unit)
         dropin = self.f.indexer_dropin()
         self.assertIn("Requires=aegis-wazuh-http-guard.service", dropin)
         self.assertIn("After=aegis-wazuh-http-guard.service", dropin)
-        self.assertIn("ExecStartPre=+/usr/bin/python3 /usr/local/lib/aegis-wazuh-https/Setup-Wazuh-HTTPS.py guard-verify --profile /etc/wazuh-indexer/aegis-http/profile.json", dropin)
+        self.assertIn("ExecStartPre=+/usr/bin/python3 -I -B /usr/local/lib/aegis-wazuh-https/Setup-Wazuh-HTTPS.py guard-verify --profile /etc/aegis-wazuh-https/profile.json", dropin)
         self.assertNotIn("User=", dropin)
 
 

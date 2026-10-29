@@ -3,7 +3,7 @@ from .contracts import Profile, SetupError
 
 
 TABLE = "aegis_wazuh_http_v1"
-PROFILE = "/etc/wazuh-indexer/aegis-http/profile.json"
+PROFILE = "/etc/aegis-wazuh-https/profile.json"
 ENTRYPOINT = "/usr/local/lib/aegis-wazuh-https/Setup-Wazuh-HTTPS.py"
 
 
@@ -67,7 +67,7 @@ Type=oneshot
 RemainAfterExit=yes
 User=root
 Group=root
-ExecStart=/usr/bin/python3 {ENTRYPOINT} guard-ensure --profile {PROFILE}
+ExecStart=/usr/bin/python3 -I -B {ENTRYPOINT} guard-ensure --profile {PROFILE}
 
 [Install]
 WantedBy=multi-user.target
@@ -80,5 +80,5 @@ Requires=aegis-wazuh-http-guard.service
 After=aegis-wazuh-http-guard.service
 
 [Service]
-ExecStartPre=+/usr/bin/python3 {ENTRYPOINT} guard-verify --profile {PROFILE}
+ExecStartPre=+/usr/bin/python3 -I -B {ENTRYPOINT} guard-verify --profile {PROFILE}
 '''

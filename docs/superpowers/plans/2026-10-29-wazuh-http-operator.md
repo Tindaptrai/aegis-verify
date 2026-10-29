@@ -65,7 +65,7 @@ it. Reject concatenated gzip/trailing junk and cap both raw/decoded bytes at
 old_leaf: bytes) -> tuple[bytes, bytes]` returns cert/key after real verification.
 `firewall_text(p: Profile) -> str`, `verify_table(document: dict, p: Profile) -> None`,
 `guard_unit() -> str`, `indexer_dropin() -> str` consume the installed profile
-under `/etc/wazuh-indexer/aegis-http/profile.json` and fixed root-owned entrypoint
+under `/etc/aegis-wazuh-https/profile.json` and fixed root-owned entrypoint
 `/usr/local/lib/aegis-wazuh-https/Setup-Wazuh-HTTPS.py` with `guard-ensure` /
 `guard-verify`. Table `inet aegis_wazuh_http_v1`, priority -50, TCP 9200.
 TLS output `/etc/wazuh-indexer/aegis-http/tls/indexer-http{,-key}.pem`.
@@ -113,6 +113,11 @@ Check creates no files (including lock/intent) and never reads private CA key.
   before each mutation. Copy only the kit's own manifest-pinned code into the
   fixed root-owned installed root. New file/dir metadata is explicit. Original
   files/unit/drop-in/firewall captured before change. Keep a root recovery log.
+  Vendor directories/config/public certs may belong to the exact Indexer service
+  identity/group (observed stock layout); do not chmod/chown them. Keep privileged
+  profile in separate root-only `/etc/aegis-wazuh-https`, and write new TLS/vendor
+  config through pinned no-follow directory descriptors, revalidating identities
+  around writes. Preserve original vendor uid/gid/mode on targeted config patch.
   Keep the CA archive open by verified inode/stat, use `read_vendor_ca_archive`
   and stage only selected CA/key bytes; never copy/hash the whole archive or
   retain unselected decoded bodies. Gzip skipping necessarily decodes bytes.
@@ -146,6 +151,9 @@ results, and nonzero on missing/skipped native requirements.
 - [ ] Write red native tests: real OpenSSL signing; nft syntax and allowed/denied
   sources in disposable network namespace; actual systemd disposable synthetic
   Indexer unit verifies correct guard ordering and refuses stale/deleted rules.
+  Exercise actual Unix ownership, O_NOFOLLOW/unbuffered inode checks, exclusive
+  locking and atomic/fsynced journal writes in root-owned synthetic filesystem
+  fixtures; portable adapters are not proof of those OS behaviors.
   Namespace/unit names random, timeouts bounded and teardown verified. Never
   mutate CI host default firewall or real Wazuh services. Fail missing capability.
 - [ ] Implement isolated tests and Linux CI with exact source SHA and uploaded

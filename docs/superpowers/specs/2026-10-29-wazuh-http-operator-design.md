@@ -59,6 +59,14 @@ CA signing key is available. Systems with usable HTTPS skip this kit entirely.
   revalidate identity/stat, and stage only the two selected members into
   root-only storage. Check never reads member bodies. Apply never copies/hashes
   the whole archive or keeps unselected decoded bodies.
+  The owner-observed vendor config directory and file belong to the Indexer
+  service, so place privileged policy at `/etc/aegis-wazuh-https/profile.json`
+  under a new root-only parent, never beneath the vendor-owned directory. Keep
+  new TLS under the vendor config tree for OpenSearch compatibility. Accept
+  original vendor-owned configuration/public-cert paths only under their exact
+  trusted service identity/group with no other writable identities. Pin open
+  directory/file descriptors, use no-follow dir-fd operations and revalidate
+  inode identities around every write; never repair vendor ownership/modes.
 - Lock concurrent operators. Atomically persist and fsync intent transitions
   before side effects; handle interruption/partial changes by refusing blind
   retries and providing explicit rollback. A failure must not strand a

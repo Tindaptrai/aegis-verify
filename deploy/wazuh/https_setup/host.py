@@ -1,0 +1,810 @@
+"""Narrow Linux adapter for the optional root operator transaction.
+
+All host commands are fixed argv, have bounded output/time and omit diagnostics
+at the public boundary. No Manager, account, source or scenario operations exist.
+"""
+from contextlib import contextmanager
+import hashlib
+import ipaddress
+import json
+import os
+from pathlib import Path, PurePosixPath
+import re
+import socket
+import ssl
+import stat
+import subprocess
+import threading
+import secrets
+import io
+import zipfile
+import shlex
+
+from .contracts import (SetupError, load_profile, patch_http_config,
+                        read_vendor_ca_archive, _yaml_value)
+from .certificates import create_http_certificate
+from .firewall import TABLE, PROFILE, ENTRYPOINT, firewall_text, verify_table, guard_unit, indexer_dropin
+from .transaction import STATE_ROOT, atomic_write, encoded, fsync_directory
+
+INSTALL_ROOT = Path(ENTRYPOINT).parent
+PROFILE_ROOT = Path(PROFILE).parent
+HTTP_ROOT = Path("/etc/wazuh-indexer/aegis-http")
+GUARD_UNIT = Path("/etc/systemd/system/aegis-wazuh-http-guard.service")
+DROPIN = Path("/etc/systemd/system/wazuh-indexer.service.d/90-aegis-http.conf")
+MANIFEST = "KIT-MANIFEST.json"
+KIT_FILES = ("Setup-Wazuh-HTTPS.py", *("https_setup/" + name + ".py" for name in
+             ("__init__", "contracts", "certificates", "firewall", "host", "transaction", "cli")))
+COMMANDS = {"systemctl": "/usr/bin/systemctl", "nft": "/usr/sbin/nft",
+            "ss": "/usr/bin/ss", "ip": "/usr/sbin/ip", "dpkg-query": "/usr/bin/dpkg-query",
+            "systemd-analyze": "/usr/bin/systemd-analyze", "openssl": "/usr/bin/openssl"}
+UNIT_EMPTY = ("RootDirectory", "RootImage", "ExecStartPre", "DropInPaths", "ReadOnlyPaths",
+              "InaccessiblePaths", "BindPaths", "BindReadOnlyPaths", "RestrictAddressFamilies",
+              "SystemCallFilter", "IPAddressDeny", "NetworkNamespacePath")
+UNIT_NO = ("PrivateNetwork", "NoNewPrivileges", "ProtectHome", "ProtectSystem", "DynamicUser", "PrivateUsers")
+UNIT_PROPERTIES = (*UNIT_EMPTY, *UNIT_NO, "User", "Group", "LoadState", "ActiveState",
+                   "FragmentPath", "CapabilityBoundingSet")
+
+
+def sha(body):
+    return hashlib.sha256(body).hexdigest()
+
+
+def validate_metadata(info, *, owners=frozenset({0}), directory=False, private=False):
+    kind = stat.S_ISDIR if directory else stat.S_ISREG
+    if not kind(info.st_mode) or info.st_uid not in owners or info.st_mode & 0o022:
+        raise SetupError("path_untrusted")
+    if not directory and info.st_nlink != 1:
+        raise SetupError("path_untrusted")
+    if private and stat.S_IMODE(info.st_mode) != 0o600:
+        raise SetupError("path_untrusted")
+
+
+def identity(info):
+    return {key: getattr(info, "st_" + key) for key in
+            ("dev", "ino", "mode", "uid", "gid", "nlink", "size", "mtime_ns", "ctime_ns")}
+
+
+def validate_vendor_metadata(info, *, uid, gid, directory=False):
+    kind = stat.S_ISDIR if directory else stat.S_ISREG
+    if (not kind(info.st_mode) or info.st_uid not in {0, uid} or info.st_gid not in {0, gid}
+            or info.st_mode & 0o002 or info.st_mode & 0o020 and info.st_gid != gid
+            or not directory and info.st_nlink != 1):
+        raise SetupError("path_untrusted")
+
+
+def verify_listeners(text, p, *, expanded):
+    found = {9200: [], 9300: []}
+    try:
+        for line in text.splitlines():
+            fields = line.split()
+            if len(fields) < 5:
+                raise ValueError
+            address, port = fields[3].rsplit(":", 1)
+            if port not in {"9200", "9300"}:
+                continue
+            address = address.strip("[]")
+            ip = ipaddress.ip_address(address)
+            if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+                ip = ip.ipv4_mapped
+            found[int(port)].append(str(ip))
+        expected = ["127.0.0.1", p.indexer_ip] if expanded else ["127.0.0.1"]
+        if sorted(found[9200]) != sorted(expected) or found[9300] != ["127.0.0.1"]:
+            raise ValueError
+    except (ValueError, IndexError):
+        raise SetupError("listeners_unsupported") from None
+
+
+def stable_firewall(document):
+    """Keep all expressions, counter presence and policy-bearing attributes.
+
+    Only object handles, metainfo, and counter byte/packet values are volatile.
+    Stateful dynamic rules are deliberately unsupported: their expiry/state
+    cannot be frozen safely by this kit.
+    """
+    def clean(value):
+        if isinstance(value, list):
+            return [clean(v) for v in value]
+        if isinstance(value, dict):
+            result = {}
+            for key, item in value.items():
+                if key in {"expires", "quota", "limit", "synproxy", "flowtable"}:
+                    raise SetupError("host_unsupported")
+                if key == "counter" and isinstance(item, dict):
+                    result[key] = {k: clean(v) for k, v in item.items() if k not in {"bytes", "packets"}}
+                else:
+                    result[key] = clean(item)
+            return result
+        return value
+    if type(document) is not dict or set(document) != {"nftables"} or type(document["nftables"]) is not list:
+        raise SetupError("firewall_mismatch")
+    result = []
+    for obj in document["nftables"]:
+        if type(obj) is not dict or len(obj) != 1:
+            raise SetupError("firewall_mismatch")
+        kind, body = next(iter(obj.items()))
+        if kind == "metainfo":
+            continue
+        if type(body) is not dict:
+            raise SetupError("firewall_mismatch")
+        ignored = {"handle", "bytes", "packets"} if kind == "counter" else {"handle"}
+        result.append({kind: clean({k: v for k, v in body.items() if k not in ignored})})
+    return {"nftables": result}
+
+
+def validate_unit(props):
+    if (any(props.get(k) != "" for k in UNIT_EMPTY) or
+            any(props.get(k) != "no" for k in UNIT_NO) or
+            props.get("User") != "wazuh-indexer" or props.get("Group") != "wazuh-indexer" or
+            props.get("LoadState") != "loaded" or props.get("ActiveState") != "active" or
+            props.get("FragmentPath") not in {"/usr/lib/systemd/system/wazuh-indexer.service",
+                                               "/lib/systemd/system/wazuh-indexer.service"}):
+        raise SetupError("host_unsupported")
+    caps = props.get("CapabilityBoundingSet", "").lower().split()
+    if not {"cap_net_admin", "cap_dac_override"}.issubset(caps):
+        raise SetupError("host_unsupported")
+
+
+def validate_identity(p, hostname, wazuh_version, search_version, addresses):
+    if (hostname != p.hostname or not re.fullmatch(r"4\.14\.4(?:-\d+)?", wazuh_version) or
+            search_version != "2.19.4" or p.indexer_ip not in addresses):
+        raise SetupError("host_unsupported")
+
+
+class SecureFS:
+    """Stock vendor files may be vendor-owned; privileged ancestors must be root-owned."""
+    def resolve(self, path):
+        return Path(path).resolve(strict=True)
+
+    def trusted(self, path, *, owners=frozenset({0}), private=False, missing=False):
+        path = Path(path)
+        if not path.is_absolute() or ".." in path.parts:
+            raise SetupError("path_untrusted")
+        for parent in reversed(path.parents):
+            validate_metadata(parent.lstat(), directory=True)
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            if missing:
+                return None
+            raise SetupError("path_untrusted") from None
+        validate_metadata(info, owners=owners, private=private, directory=stat.S_ISDIR(info.st_mode))
+        return info
+
+    def read(self, path, *, owners=frozenset({0}), private=False, limit=1024 * 1024):
+        before = self.trusted(path, owners=owners, private=private)
+        validate_metadata(before, owners=owners, private=private)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb", buffering=0) as stream:
+            if identity(before) != identity(os.fstat(stream.fileno())):
+                raise SetupError("state_changed")
+            body = stream.read(limit + 1)
+            if len(body) > limit or identity(before) != identity(os.fstat(stream.fileno())):
+                raise SetupError("state_changed")
+        return body
+
+    def archive_stat(self, path):
+        # Writable home ancestors are allowed, links are not. Only the root-owned
+        # regular archive inode is trusted, and is pinned again after opening.
+        path = Path(path)
+        for parent in (path, *path.parents):
+            if stat.S_ISLNK(parent.lstat().st_mode):
+                raise SetupError("path_untrusted")
+        info = path.lstat()
+        validate_metadata(info, private=True)
+        if not 0 < info.st_size <= 32 * 1024 * 1024:
+            raise SetupError("archive_invalid")
+        return identity(info)
+
+    @contextmanager
+    def archive(self, path, frozen):
+        if self.archive_stat(path) != frozen:
+            raise SetupError("state_changed")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb", buffering=0) as stream:
+            if identity(os.fstat(stream.fileno())) != frozen or self.archive_stat(path) != frozen:
+                raise SetupError("state_changed")
+            yield stream
+            if identity(os.fstat(stream.fileno())) != frozen or self.archive_stat(path) != frozen:
+                raise SetupError("state_changed")
+
+    def mkdir(self, path, *, mode=0o700, gid=0):
+        path = Path(path)
+        if path.exists():
+            info = self.trusted(path)
+            if not stat.S_ISDIR(info.st_mode) or stat.S_IMODE(info.st_mode) != mode or info.st_gid != gid:
+                raise SetupError("path_untrusted")
+            return
+        self.trusted(path.parent)
+        path.mkdir(mode=mode)
+        os.chown(path, 0, gid)
+        os.chmod(path, mode)
+        fsync_directory(path.parent)
+
+    def write(self, path, body, *, mode=0o600, uid=0, gid=0):
+        self.trusted(Path(path).parent)
+        self.trusted(path, owners={0, uid}, missing=True)
+        atomic_write(path, body, mode=mode, uid=uid, gid=gid)
+
+    def unlink(self, path):
+        if Path(path).exists():
+            self.trusted(path)
+            Path(path).unlink()
+            fsync_directory(Path(path).parent)
+
+    @contextmanager
+    def vendor_parent(self, path, uid, gid):
+        """Pin each directory; never traverse a service-controlled symlink.
+
+        Path names are revalidated against held fds after the operation. A rename
+        cannot redirect a privileged write outside the opened vendor directory.
+        """
+        path = PurePosixPath(path)
+        if not path.is_absolute() or not path.is_relative_to("/etc/wazuh-indexer") or ".." in path.parts:
+            raise SetupError("path_untrusted")
+        descriptors = []
+        links = []
+        def directory_id(info):
+            return tuple(getattr(info, "st_" + key) for key in ("dev", "ino", "uid", "gid", "mode"))
+        try:
+            root = os.open("/", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            descriptors.append(root)
+            validate_metadata(os.fstat(root), directory=True)
+            parent_fd = root
+            for position, name in enumerate(path.parts[1:-1]):
+                fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent_fd)
+                descriptors.append(fd)
+                info = os.fstat(fd)
+                if position == 0:
+                    validate_metadata(info, directory=True)
+                else:
+                    validate_vendor_metadata(info, uid=uid, gid=gid, directory=True)
+                links.append((parent_fd, name, directory_id(info), fd))
+                parent_fd = fd
+            yield parent_fd, path.name
+            for previous, name, frozen, fd in links:
+                if (directory_id(os.fstat(fd)) != frozen or
+                        directory_id(os.stat(name, dir_fd=previous, follow_symlinks=False)) != frozen):
+                    raise SetupError("state_changed")
+        finally:
+            for fd in reversed(descriptors):
+                os.close(fd)
+
+    def vendor_stat(self, path, uid, gid):
+        with self.vendor_parent(path, uid, gid) as (parent, name):
+            info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            validate_vendor_metadata(info, uid=uid, gid=gid, directory=stat.S_ISDIR(info.st_mode))
+            return info
+
+    def vendor_read(self, path, uid, gid):
+        with self.vendor_parent(path, uid, gid) as (parent, name):
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+            with os.fdopen(fd, "rb", buffering=0) as stream:
+                before = os.fstat(fd)
+                validate_vendor_metadata(before, uid=uid, gid=gid)
+                raw = stream.read(1024 * 1024 + 1)
+                if (len(raw) > 1024 * 1024 or identity(before) != identity(os.fstat(fd)) or
+                        identity(before) != identity(os.stat(name, dir_fd=parent, follow_symlinks=False))):
+                    raise SetupError("state_changed")
+        return raw
+
+    def vendor_mkdir(self, path, uid, gid):
+        with self.vendor_parent(path, uid, gid) as (parent, name):
+            # Exclusive creation: existing service-replaced destinations refuse.
+            os.mkdir(name, 0o750, dir_fd=parent)
+            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            try:
+                os.fchown(fd, 0, gid)
+                os.fchmod(fd, 0o750)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.fsync(parent)
+
+    def vendor_write(self, path, body, uid, gid, *, mode=0o640, owner=0, group=None, expected=None):
+        with self.vendor_parent(path, uid, gid) as (parent, name):
+            try:
+                info = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                info = None
+            if info is not None:
+                validate_vendor_metadata(info, uid=uid, gid=gid)
+                if expected is None:
+                    raise SetupError("state_changed")
+                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
+                with os.fdopen(fd, "rb", buffering=0) as stream:
+                    if identity(info) != identity(os.fstat(fd)) or sha(stream.read(1024 * 1024 + 1)) not in expected:
+                        raise SetupError("state_changed")
+            elif expected is not None:
+                raise SetupError("state_changed")
+            temporary = ".aegis-" + secrets.token_hex(16)
+            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    os.fchown(fd, owner, gid if group is None else group)
+                    os.fchmod(fd, mode)
+                    stream.write(body)
+                    stream.flush()
+                    os.fsync(fd)
+                os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
+                os.fsync(parent)
+            finally:
+                try:
+                    os.unlink(temporary, dir_fd=parent)
+                except FileNotFoundError:
+                    pass
+
+
+class Commands:
+    def __init__(self, fs):
+        self.fs = fs
+
+    def run(self, name, *args, data=None):
+        # Resolve distro executable aliases, then validate root-only provenance.
+        executable = Path(COMMANDS[name]).resolve(strict=True)
+        self.fs.trusted(executable)
+        output = [bytearray(), bytearray()]
+        overflow = []
+        proc = subprocess.Popen([str(executable), *args], stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"})
+        def drain(pipe, target):
+            while chunk := pipe.read(8192):
+                if len(target) + len(chunk) > 4 * 1024 * 1024:
+                    overflow.append(True)
+                    proc.kill()
+                    break
+                target.extend(chunk)
+            pipe.close()
+        threads = [threading.Thread(target=drain, args=(pipe, target), daemon=True)
+                   for pipe, target in zip((proc.stdout, proc.stderr), output)]
+        for thread in threads:
+            thread.start()
+        try:
+            if data is not None:
+                proc.stdin.write(data)
+                proc.stdin.close()
+            proc.wait(timeout=45)
+        except (OSError, subprocess.TimeoutExpired):
+            proc.kill()
+            proc.wait(timeout=5)
+            raise SetupError("command_failed") from None
+        finally:
+            for thread in threads:
+                thread.join(timeout=5)
+        if proc.returncode or overflow or any(t.is_alive() for t in threads):
+            raise SetupError("command_failed")
+        return bytes(output[0]), bytes(output[1])
+
+
+class LinuxHost:
+    def __init__(self, *, fs=None, commands=None, bundle=None):
+        self.fs = fs if fs is not None else SecureFS()
+        self.commands = commands if commands is not None else Commands(self.fs)
+        self.bundle = Path(bundle) if bundle is not None else Path(__file__).resolve().parent.parent
+
+    @staticmethod
+    def require_root():
+        if os.name != "posix" or not hasattr(os, "geteuid") or os.geteuid() != 0:
+            raise SetupError("root_required")
+
+    def run(self, name, *args, data=None):
+        return self.commands.run(name, *args, data=data)[0]
+
+    def vread(self, path):
+        return self.fs.vendor_read(path, self.uid, self.gid)
+
+    def vstat(self, path):
+        return self.fs.vendor_stat(path, self.uid, self.gid)
+
+    def service_identity(self):
+        import pwd
+        import grp
+        account = pwd.getpwnam("wazuh-indexer")
+        group = grp.getgrgid(account.pw_gid)
+        if (account.pw_uid == 0 or account.pw_gid == 0 or group.gr_name != "wazuh-indexer" or
+                set(group.gr_mem) - {account.pw_name} or
+                any(user.pw_gid == account.pw_gid and user.pw_uid != account.pw_uid for user in pwd.getpwall())):
+            raise SetupError("host_unsupported")
+        self.uid, self.gid = account.pw_uid, account.pw_gid
+
+    def properties(self, unit, keys):
+        text = self.run("systemctl", "show", unit, "--no-pager", "--property=" + ",".join(keys)).decode()
+        props = dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
+        if set(props) != set(keys):
+            raise SetupError("host_unsupported")
+        return props
+
+    def firewall(self):
+        return json.loads(self.run("nft", "--json", "list", "ruleset"))
+
+    def table(self, ruleset):
+        result = []
+        for obj in ruleset["nftables"]:
+            kind, body = next(iter(obj.items()))
+            if kind != "metainfo" and body.get("family") == "inet" and (
+                    body.get("table") == TABLE or kind == "table" and body.get("name") == TABLE):
+                result.append(obj)
+        return {"nftables": result}
+
+    def bundle_files(self, *, required=True):
+        manifest_path = self.bundle / MANIFEST
+        if not manifest_path.exists() and not required:
+            # A root-staged check remains available before native qualification.
+            return {name: self.fs.read(self.bundle / name) for name in KIT_FILES}
+        try:
+            manifest = json.loads(self.fs.read(manifest_path, private=True))
+            if (set(manifest) != {"schema_version", "source_commit", "native_proof", "files"} or
+                    manifest["schema_version"] != 1 or not re.fullmatch("[0-9a-f]{40}", manifest["source_commit"]) or
+                    not (manifest["native_proof"] is None or type(manifest["native_proof"]) is dict) or
+                    set(manifest["files"]) != set(KIT_FILES)):
+                raise ValueError
+            files = {name: self.fs.read(self.bundle / name) for name in KIT_FILES}
+            if any(sha(body) != manifest["files"][name] for name, body in files.items()):
+                raise ValueError
+            files[MANIFEST] = encoded(manifest)
+            return files
+        except (ValueError, KeyError, TypeError, FileNotFoundError):
+            raise SetupError("manifest_invalid") from None
+
+    def prepare_state(self):
+        self.require_root()
+        self.fs.trusted(STATE_ROOT, missing=True)
+
+    def preflight(self, profile_path):
+        self.require_root()
+        raw = self.fs.read(profile_path, private=True, limit=16384)
+        p = load_profile(raw)
+        self.service_identity()
+        owners = {0, self.uid}
+        files = self.bundle_files(required=False)
+        props = self.properties("wazuh-indexer.service", UNIT_PROPERTIES)
+        validate_unit(props)
+        unit_path = self.fs.resolve(props["FragmentPath"])
+        unit = self.fs.read(unit_path)
+        environment = self.startup_environment(unit, p)
+        # Package metadata, never executing vendor Java or Manager processes.
+        version = self.run("dpkg-query", "-W", "-f=${Version}", "wazuh-indexer").decode().strip()
+        jar = Path("/usr/share/wazuh-indexer/lib/opensearch-2.19.4.jar")
+        jar_bytes = self.fs.read(jar, owners=owners, limit=32 * 1024 * 1024)
+        try:
+            with zipfile.ZipFile(io.BytesIO(jar_bytes)) as zipped:
+                info = zipped.getinfo("META-INF/MANIFEST.MF")
+                if info.file_size > 65536:
+                    raise ValueError
+                manifest = zipped.read(info).decode()
+            versions = re.findall(r"^Implementation-Version: ([^\r\n]+)", manifest, re.MULTILINE)
+            if versions != ["2.19.4"]:
+                raise ValueError
+        except (ValueError, KeyError, zipfile.BadZipFile):
+            raise SetupError("host_unsupported") from None
+        addresses = [a["local"] for entry in json.loads(self.run("ip", "-j", "-4", "address", "show"))
+                     for a in entry.get("addr_info", []) if a.get("family") == "inet"]
+        validate_identity(p, socket.gethostname(), version, "2.19.4", addresses)
+        listeners = self.run("ss", "-H", "-ltn").decode()
+        verify_listeners(listeners, p, expanded=False)
+        loaders = {}
+        for name in ("nftables.service", "ufw.service", "firewalld.service"):
+            state = self.properties(name, ("ActiveState", "UnitFileState", "LoadState"))
+            if state["ActiveState"] not in {"inactive", "failed"} or state["UnitFileState"] not in {"disabled", "masked", ""}:
+                raise SetupError("host_unsupported")
+            loaders[name] = state
+        config = self.vread(p.config_path)
+        patch_http_config(config, p)
+        retained = self.config_files(config, p, owners)
+        ca = self.vread(p.ca_path)
+        leaf = self.vread(p.leaf_path)
+        if (sha(ca) != p.expected_ca_file_sha256 or
+                sha(ssl.PEM_cert_to_DER_cert(ca.decode("ascii"))) != p.expected_ca_der_sha256 or
+                sha(ssl.PEM_cert_to_DER_cert(leaf.decode("ascii"))) != p.expected_leaf_der_sha256):
+            raise SetupError("certificate_invalid")
+        archive = self.fs.archive_stat(p.ca_archive)
+        # Check intentionally reads zero archive bytes (even gzip magic is optional).
+        firewall = stable_firewall(self.firewall())
+        if self.table(firewall)["nftables"]:
+            raise SetupError("firewall_mismatch")
+        if HTTP_ROOT.exists() or HTTP_ROOT.is_symlink():
+            raise SetupError("intent_exists")
+        for path in (PROFILE_ROOT, INSTALL_ROOT, GUARD_UNIT, DROPIN):
+            # Parents that do not yet exist are checked up to the nearest existing
+            # root-owned ancestor; a kit-owned path must not already be present.
+            if path.exists() or path.is_symlink():
+                raise SetupError("intent_exists")
+            parent = path.parent
+            while not parent.exists():
+                parent = parent.parent
+            self.fs.trusted(parent)
+        self.fs.trusted(STATE_ROOT, missing=True)
+        if (STATE_ROOT / "intent.json").exists():
+            raise SetupError("intent_exists")
+        return p, sha(raw), {"hostname": p.hostname, "wazuh_version": version, "opensearch_version": "2.19.4",
+               "uid": self.uid, "gid": self.gid, "config": sha(config), "config_metadata": identity(self.vstat(p.config_path)),
+               "opensearch_jar": sha(jar_bytes),
+               "unit_path": str(unit_path), "unit": sha(unit), "unit_properties": props,
+               "environment_files": environment,
+               "loaders": loaders, "retained": retained, "archive": archive, "firewall": firewall,
+               "bundle": {name: sha(body) for name, body in files.items()}}
+
+    def config_files(self, raw, p, owners):
+        values = {}
+        for line in raw.decode().splitlines():
+            match = re.match(r"^([A-Za-z0-9_.]+):\s*(.*)$", line)
+            if match:
+                try:
+                    values[match[1]] = _yaml_value(match[2])
+                except ValueError:
+                    continue  # Unsupported non-target lists were validated by patcher.
+        if values.get("network.host") not in ("127.0.0.1", ["127.0.0.1"]) or values.get("plugins.security.ssl.http.enabled") != "true":
+            raise SetupError("config_unsupported")
+        for key in ("transport.host", "transport.bind_host", "transport.publish_host"):
+            if key in values and values[key] not in ("127.0.0.1", ["127.0.0.1"]):
+                raise SetupError("config_unsupported")
+        retained = {}
+        for section in ("http", "transport"):
+            for kind in ("pemcert_filepath", "pemkey_filepath", "pemtrustedcas_filepath"):
+                value = values.get(f"plugins.security.ssl.{section}.{kind}")
+                if not isinstance(value, str):
+                    raise SetupError("config_unsupported")
+                path = PurePosixPath(value)
+                if not path.is_absolute():
+                    path = PurePosixPath("/etc/wazuh-indexer") / path
+                if not path.is_relative_to("/etc/wazuh-indexer") or ".." in path.parts or str(path).startswith(str(HTTP_ROOT)):
+                    raise SetupError("path_untrusted")
+                if section == "http" and kind == "pemcert_filepath" and str(path) != p.leaf_path:
+                    raise SetupError("config_unsupported")
+                if kind == "pemtrustedcas_filepath" and str(path) != p.ca_path:
+                    raise SetupError("config_unsupported")
+                info = self.vstat(path)
+                # Private stock keys are stat-only: no hashes or key reads in check.
+                retained[str(path)] = {"metadata": identity(info), "private": kind == "pemkey_filepath"}
+                if kind != "pemkey_filepath":
+                    retained[str(path)]["sha256"] = sha(self.vread(path))
+        return retained
+
+    def startup_environment(self, unit, p):
+        """Read selected config-directory settings privately; return only hashes.
+
+        Refuse unit continuation/specifier syntax rather than guessing at systemd
+        parsing. Environment files never get sourced or returned in diagnostics.
+        """
+        if p.config_path != "/etc/wazuh-indexer/opensearch.yml":
+            raise SetupError("config_unsupported")
+        settings = {}
+        environment = {}
+        start = []
+        for line in unit.decode().splitlines():
+            if line.strip().startswith(("#", ";")) or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            if key == "ExecStart":
+                start.append(value)
+            if key not in {"Environment", "EnvironmentFile"}:
+                continue
+            if "\\" in value or "%" in value:
+                raise SetupError("host_unsupported")
+            words = shlex.split(value)
+            if key == "Environment":
+                for word in words:
+                    name, sep, selected = word.partition("=")
+                    if sep and name in {"OPENSEARCH_PATH_CONF", "WAZUH_INDEXER_PATH_CONF"}:
+                        settings[name] = selected
+            else:
+                for word in words:
+                    optional = word.startswith("-")
+                    path = word.removeprefix("-")
+                    if not re.fullmatch(r"/etc/(?:default|sysconfig)/wazuh-indexer", path):
+                        raise SetupError("host_unsupported")
+                    if self.fs.trusted(path, missing=True) is None:
+                        if not optional:
+                            raise SetupError("host_unsupported")
+                        environment[path] = None
+                        continue
+                    body = self.fs.read(path)
+                    environment[path] = sha(body)
+                    for entry in body.decode().splitlines():
+                        entry = entry.strip()
+                        if not entry or entry.startswith(("#", ";")):
+                            continue
+                        name, sep, selected = entry.partition("=")
+                        if sep and name.strip() in {"OPENSEARCH_PATH_CONF", "WAZUH_INDEXER_PATH_CONF"}:
+                            pieces = shlex.split(selected)
+                            if len(pieces) != 1:
+                                raise SetupError("host_unsupported")
+                            settings[name.strip()] = pieces[0]
+        if (len(start) != 1 or not start[0].startswith("/usr/share/wazuh-indexer/bin/systemd-entrypoint ") or
+                any("path.conf" in token.lower() or "path_conf" in token.lower() or token.startswith(("-E", "--config"))
+                    for token in shlex.split(start[0])[1:]) or
+                settings.get("OPENSEARCH_PATH_CONF") != "/etc/wazuh-indexer" or
+                any(value != "/etc/wazuh-indexer" for value in settings.values())):
+            raise SetupError("host_unsupported")
+        return environment
+
+    def capture(self, p, facts, work):
+        # Revalidate the release before copying anything; only manifest files
+        # can enter the installed privileged interpreter tree.
+        files = self.bundle_files()
+        if {name: sha(body) for name, body in files.items()} != facts["bundle"]:
+            raise SetupError("state_changed")
+        config = self.vread(p.config_path)
+        if sha(config) != facts["config"] or identity(self.vstat(p.config_path)) != facts["config_metadata"]:
+            raise SetupError("state_changed")
+        unit = self.fs.read(facts["unit_path"])
+        if sha(unit) != facts["unit"] or stable_firewall(self.firewall()) != facts["firewall"]:
+            raise SetupError("state_changed")
+        patched = patch_http_config(config, p)
+        self.fs.write(work / "original.yml", config)
+        self.fs.write(work / "original-metadata.json", encoded(facts["config_metadata"]))
+        self.fs.write(work / "patched.yml", patched)
+        self.fs.write(work / "original-unit.service", unit)
+        self.fs.write(work / "original-firewall.json", encoded(facts["firewall"]))
+        self.fs.write(work / "original-unit-properties.json", encoded(facts["unit_properties"]))
+        return {"original_sha256": sha(config), "patched_sha256": sha(patched),
+                "metadata": facts["config_metadata"], "uid": self.uid, "gid": self.gid,
+                "guard_unit_absent": True, "dropin_absent": True, "table_absent": True}
+
+    def stage(self, p, facts, work):
+        if stable_firewall(self.firewall()) != facts["firewall"]:
+            raise SetupError("state_changed")
+        with self.fs.archive(p.ca_archive, facts["archive"]) as stream:
+            ca, key = read_vendor_ca_archive(stream, p)
+        if ca != self.vread(p.ca_path):
+            raise SetupError("certificate_invalid")
+        try:
+            cert, http_key = create_http_certificate(work, p, ca, key, self.vread(p.leaf_path))
+        finally:
+            # Signing helper unlinks temporary CA/key on all exits, including
+            # interruption. No signing key is written by this coordinator.
+            del key
+        self.fs.write(work / "http.pem", cert)
+        self.fs.write(work / "http-key.pem", http_key)
+        return {"certificate_sha256": sha(cert), "key_sha256": sha(http_key), "bundle": facts["bundle"]}
+
+    def install(self, p, staged, work):
+        files = self.bundle_files()
+        if {name: sha(body) for name, body in files.items()} != staged["bundle"]:
+            raise SetupError("state_changed")
+        self.fs.mkdir(INSTALL_ROOT)
+        self.fs.mkdir(INSTALL_ROOT / "https_setup")
+        for name, body in files.items():
+            self.fs.write(INSTALL_ROOT / name, body)
+        self.fs.mkdir(PROFILE_ROOT)
+        self.fs.write(PROFILE, encoded(p.as_dict()))
+        self.fs.vendor_mkdir(HTTP_ROOT, self.uid, self.gid)
+        self.fs.vendor_mkdir(HTTP_ROOT / "tls", self.uid, self.gid)
+        for name, pin in (("http.pem", "certificate_sha256"), ("http-key.pem", "key_sha256")):
+            body = self.fs.read(work / name, private=True)
+            if sha(body) != staged[pin]:
+                raise SetupError("state_changed")
+            self.fs.vendor_write(HTTP_ROOT / "tls" / ("indexer-" + name), body, self.uid, self.gid)
+
+    def ensure_guard(self, p):
+        table = self.table(self.firewall())
+        if table["nftables"]:
+            verify_table(table, p)
+            return
+        # nft 'create' is exclusive. A racing table creator cannot cause our
+        # batch to append rules to a table we did not create.
+        script = ("create " + firewall_text(p)).encode()
+        self.run("nft", "--check", "--file", "-", data=script)
+        self.run("nft", "--file", "-", data=script)
+        self.verify_guard(p)
+
+    def verify_guard(self, p):
+        verify_table(self.table(self.firewall()), p)
+
+    def install_units(self, p, work):
+        self.fs.write(GUARD_UNIT, guard_unit().encode())
+        if not DROPIN.parent.exists():
+            self.fs.mkdir(DROPIN.parent, mode=0o755)
+        self.fs.write(DROPIN, indexer_dropin().encode())
+        self.run("systemctl", "daemon-reload")
+        self.run("systemd-analyze", "verify", str(GUARD_UNIT), "wazuh-indexer.service")
+        props = self.properties("wazuh-indexer.service", ("DropInPaths", "ExecStartPre", "Requires", "After"))
+        if (props["DropInPaths"].split() != [str(DROPIN)] or
+                ENTRYPOINT not in props["ExecStartPre"] or "guard-verify" not in props["ExecStartPre"] or
+                "aegis-wazuh-http-guard.service" not in props["Requires"].split() or
+                "aegis-wazuh-http-guard.service" not in props["After"].split()):
+            raise SetupError("host_unsupported")
+        self.run("systemctl", "enable", "--now", "aegis-wazuh-http-guard.service")
+        self.verify_guard(p)
+
+    def patch_config(self, p, work):
+        original = self.fs.read(work / "original.yml", private=True)
+        body = self.fs.read(work / "patched.yml", private=True)
+        if body != patch_http_config(original, p):
+            raise SetupError("state_changed")
+        info = self.vstat(p.config_path)
+        if identity(info) != json.loads(self.fs.read(work / "original-metadata.json", private=True)):
+            raise SetupError("state_changed")
+        self.fs.vendor_write(p.config_path, body, self.uid, self.gid, owner=info.st_uid,
+                             group=info.st_gid, mode=stat.S_IMODE(info.st_mode), expected={sha(original)})
+
+    def restart(self):
+        self.run("systemctl", "restart", "wazuh-indexer.service")
+
+    def verify(self, p, facts, work, *, restored=False):
+        self.uid, self.gid = facts["uid"], facts["gid"]
+        verify_listeners(self.run("ss", "-H", "-ltn").decode(), p, expanded=not restored)
+        expected_config = self.fs.read(work / ("original.yml" if restored else "patched.yml"), private=True)
+        if self.vread(p.config_path) != expected_config or sha(self.fs.read(facts["unit_path"])) != facts["unit"]:
+            raise SetupError("verification_failed")
+        if self.startup_environment(self.fs.read(facts["unit_path"]), p) != facts["environment_files"]:
+            raise SetupError("state_changed")
+        for path, saved in facts["retained"].items():
+            if identity(self.vstat(path)) != saved["metadata"] or (
+                    not saved["private"] and sha(self.vread(path)) != saved["sha256"]):
+                raise SetupError("verification_failed")
+        baseline = stable_firewall(self.firewall())
+        own = self.table(baseline)
+        without = {"nftables": [obj for obj in baseline["nftables"] if obj not in own["nftables"]]}
+        if without != facts["firewall"]:
+            raise SetupError("firewall_mismatch")
+        if not restored:
+            self.verify_guard(p)
+        ca = self.vread(p.ca_path)
+        context = ssl.create_default_context(cadata=ca.decode("ascii"))
+        with socket.create_connection(("127.0.0.1", 9200), timeout=10) as tcp:
+            with context.wrap_socket(tcp, server_hostname="127.0.0.1") as tls:
+                actual = sha(tls.getpeercert(binary_form=True))
+        expected = p.expected_leaf_der_sha256 if restored else sha(ssl.PEM_cert_to_DER_cert(self.fs.read(work / "http.pem").decode("ascii")))
+        if actual != expected:
+            raise SetupError("verification_failed")
+
+    def restore(self, p, snapshot, work):
+        self.uid, self.gid = snapshot["uid"], snapshot["gid"]
+        if not (snapshot["guard_unit_absent"] and snapshot["dropin_absent"] and snapshot["table_absent"]):
+            raise SetupError("recovery_required")
+        original = self.fs.read(work / "original.yml", private=True)
+        if sha(original) != snapshot["original_sha256"]:
+            raise SetupError("recovery_required")
+        meta = snapshot["metadata"]
+        self.fs.vendor_write(p.config_path, original, self.uid, self.gid, owner=meta["uid"], group=meta["gid"],
+                             mode=stat.S_IMODE(meta["mode"]), expected={snapshot["original_sha256"], snapshot["patched_sha256"]})
+        if DROPIN.exists():
+            if self.fs.read(DROPIN) != indexer_dropin().encode():
+                raise SetupError("recovery_required")
+            self.fs.unlink(DROPIN)
+        # Keep the guard unit/rules armed until old listener and TLS verify.
+        self.run("systemctl", "daemon-reload")
+
+    def remove_guard(self, p):
+        table = self.table(self.firewall())
+        if table["nftables"]:
+            verify_table(table, p)
+        if GUARD_UNIT.exists():
+            if self.fs.read(GUARD_UNIT) != guard_unit().encode():
+                raise SetupError("recovery_required")
+            # No ExecStop in this unit; stop/disable cannot delete the rules.
+            self.run("systemctl", "disable", "--now", "aegis-wazuh-http-guard.service")
+            self.fs.unlink(GUARD_UNIT)
+            self.run("systemctl", "daemon-reload")
+        if table["nftables"]:
+            self.verify_guard(p)
+            self.run("nft", "delete", "table", "inet", TABLE)
+        if self.table(self.firewall())["nftables"]:
+            raise SetupError("recovery_required")
+
+    def cleanup(self, work):
+        # Clean orphaned issuance work after interrupted recovery, without ever
+        # reading signing material. Preserve generated leaf/key and backups.
+        if not work.exists():
+            return
+        self.fs.trusted(work)
+        allowed = {"ca.pem", "ca-key.pem", "old.pem", "http-key.pem", "http.csr", "extensions.cnf", "http.pem"}
+        for directory in work.glob("issue-*"):
+            self.fs.trusted(directory)
+            entries = list(directory.iterdir())
+            if any(entry.name not in allowed for entry in entries):
+                raise SetupError("recovery_required")
+            for entry in entries:
+                self.fs.unlink(entry)
+            directory.rmdir()
+            fsync_directory(work)
+
+    def guard(self, profile_path, *, ensure):
+        self.require_root()
+        if self.bundle != INSTALL_ROOT or str(profile_path) != PROFILE:
+            raise SetupError("installed_only")
+        self.bundle_files()
+        p = load_profile(self.fs.read(PROFILE, private=True, limit=16384))
+        self.ensure_guard(p) if ensure else self.verify_guard(p)
+        return {"status": "guard_verified"}
