@@ -38,7 +38,8 @@ downloads or new product dependencies.
 ### Task 1: Read-only disabled-wrapper qualification
 
 **Files:** create `deploy/wazuh/https_setup/ufw.py` and
-`deploy/wazuh/tests/test_ufw.py`. No host integration in this task.
+`deploy/wazuh/tests/test_ufw.py`; extend the fixed SetupError vocabulary in
+`contracts.py` only with `ufw_unsupported` and `ufw_drift`. No host integration.
 
 **Interfaces:** frozen `RootFile` with content bytes, canonical path and held-read
 stat metadata. `UfwReader` protocol exposes `root_file(path, limit) -> RootFile`,
@@ -46,7 +47,9 @@ stat metadata. `UfwReader` protocol exposes `root_file(path, limit) -> RootFile`
 `backend_identity(name) -> dict`. `qualify_disabled_ufw(reader, loader_state) ->
 dict` checks eligibility and returns the closed stable fingerprint;
 `verify_disabled_ufw(reader, loader_state, expected) -> None` requalifies and
-compares it. Use existing SetupError fixed codes; no config bodies in output.
+compares it. Use `ufw_unsupported` for refused classification and `ufw_drift`
+for a changed fingerprint; existing trusted-I/O errors retain their fixed codes.
+No config bodies enter output.
 
 Fingerprint exact outer keys: `schema_version=1`, `package_version`, `files`,
 `unit`, `backends`. File entries contain canonical path, SHA-256, uid/gid,
