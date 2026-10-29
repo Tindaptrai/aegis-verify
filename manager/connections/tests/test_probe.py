@@ -75,6 +75,7 @@ class ProbeTests(unittest.TestCase):
                         ca_pem=certificate(),policy_provider=lambda *_:target)
             context = conn.call_args.args[2]
             self.assertTrue(context.check_hostname)
+            self.assertFalse(context.hostname_checks_common_name)
             self.assertEqual(context.verify_mode, probe.ssl.CERT_REQUIRED)
             args = conn.return_value.request.call_args.args
             self.assertEqual(args[:2],('POST','/wazuh-alerts-*/_search'))
@@ -129,7 +130,7 @@ class ProbeTests(unittest.TestCase):
 
 class SyntheticTlsTests(unittest.TestCase):
     """Real local TLS, generated ephemeral CA/leaf; no production policy bypass."""
-    def handshake(self, hostname, *, trust=True, expired=False):
+    def handshake(self, hostname, *, trust=True, expired=False, san=True, through_probe=False):
         now = datetime.now(timezone.utc)
         key = rsa.generate_private_key(public_exponent=65537,key_size=2048)
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,'synthetic-root')])
@@ -138,12 +139,13 @@ class SyntheticTlsTests(unittest.TestCase):
               .not_valid_after(now+timedelta(days=2)).add_extension(x509.BasicConstraints(ca=True,path_length=None),True)
               .sign(key,hashes.SHA256()))
         leaf_key = rsa.generate_private_key(public_exponent=65537,key_size=2048)
-        leaf_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,'synthetic-leaf')])
+        leaf_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME,'indexer.example')])
         leaf = (x509.CertificateBuilder().subject_name(leaf_name).issuer_name(name).public_key(leaf_key.public_key())
                 .serial_number(x509.random_serial_number()).not_valid_before(now-timedelta(days=2))
-                .not_valid_after(now+timedelta(days=-1 if expired else 1))
-                .add_extension(x509.SubjectAlternativeName([x509.DNSName('indexer.example')]),False)
-                .sign(key,hashes.SHA256()))
+                .not_valid_after(now+timedelta(days=-1 if expired else 1)))
+        if san:
+            leaf = leaf.add_extension(x509.SubjectAlternativeName([x509.DNSName('indexer.example')]),False)
+        leaf = leaf.sign(key,hashes.SHA256())
         observed = []
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -175,14 +177,41 @@ class SyntheticTlsTests(unittest.TestCase):
                 transport = probe._PinnedHTTPS(hostname,port,context,
                     ((socket.AF_INET,socket.SOCK_STREAM,6,'',('127.0.0.1',port)),),time.monotonic()+2)
                 try:
-                    transport.connect()
+                    if through_probe:
+                        endpoint = f'https://{hostname}:{port}'
+                        target = probe.Target(endpoint,('192.0.2.10',),('wazuh-alerts-*',))
+                        # Synthetic resolver injection reaches only this ephemeral
+                        # local server; production policy remains unchanged.
+                        answers = ((socket.AF_INET,socket.SOCK_STREAM,6,'',('127.0.0.1',port)),)
+                        with patch.object(probe,'resolve',return_value=answers), \
+                             patch.object(probe._PinnedHTTPS,'request') as request, \
+                             patch.object(probe._PinnedHTTPS,'getresponse') as getresponse:
+                            getresponse.return_value.status = 200
+                            getresponse.return_value.getheaders.return_value = [('Content-Type','application/json')]
+                            getresponse.return_value.read.return_value = b'{"timed_out":false,"_shards":{"failed":0},"hits":{"hits":[]}}'
+                            try:
+                                probe.probe(endpoint=endpoint,index='wazuh-alerts-*',username='synthetic-reader',
+                                    password='synthetic-password',ca_pem=ca.public_bytes(serialization.Encoding.PEM).decode(),
+                                    policy_provider=lambda *_:target)
+                            finally:
+                                if san:
+                                    request.assert_called_once()
+                                else:
+                                    request.assert_not_called()
+                    else:
+                        transport.connect()
                 finally:
                     transport.close()
                     thread.join(timeout=2)
         return observed
 
     def test_trusted_san_and_sni(self):
-        self.assertEqual(self.handshake('indexer.example'),['indexer.example'])
+        self.assertEqual(self.handshake('indexer.example',through_probe=True),['indexer.example'])
+
+    def test_cn_only_leaf_is_refused_before_any_auth_request(self):
+        with self.assertRaises(probe.ProbeError) as caught:
+            self.handshake('indexer.example',san=False,through_probe=True)
+        self.assertEqual(str(caught.exception),'tls_failed')
 
     def test_wrong_san_chain_and_expired_leaf_are_refused(self):
         for hostname, trust, expired in [('wrong.example',True,False),('indexer.example',False,False),

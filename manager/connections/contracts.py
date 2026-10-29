@@ -52,6 +52,10 @@ def test_input(data):
         value = data[key]
         if type(value) is not str or not value.strip() or len(value) > maximum or any(ord(c) < 32 for c in value):
             fail()
+        try:
+            value.encode('utf-8')
+        except UnicodeError:
+            fail()
     if ':' in data['username'] or not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', data['environment_id']):
         fail()
     uuid_value(data['source_id'], nullable=True)
@@ -60,7 +64,10 @@ def test_input(data):
             fail()
     elif type(data['expected_version']) is not int or not 1 <= data['expected_version'] <= 2147483647:
         fail()
-    if type(data['ca_pem']) is not str or len(data['ca_pem'].encode('utf-8')) > 65536:
+    try:
+        if type(data['ca_pem']) is not str or len(data['ca_pem'].encode('utf-8')) > 65536:
+            fail()
+    except UnicodeError:
         fail()
     origin(data['endpoint'])
     validate_index(data['index'])

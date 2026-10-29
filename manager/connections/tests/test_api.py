@@ -54,6 +54,18 @@ class ConnectionsCase(ConnectionsFixture, AccountsCase):
 
 
 class ApiTests(ConnectionsCase):
+    def test_lone_surrogates_are_bounded_errors_before_probe(self):
+        for field in ('ca_pem','username','password','name','environment_id','endpoint','index'):
+            for scalar in ('\ud800','\udfff'):
+                with self.subTest(field=field,scalar=ascii(scalar)):
+                    response = self.post('wazuh/test',{**self.data,field:scalar})
+                    self.assertEqual(response.status_code,400)
+                    self.assertEqual(response.json(),{'error':{'code':'invalid_request'}})
+                    self.assertEqual(response['Cache-Control'],'no-store')
+                    self.assertLess(len(response.content),100)
+        self.probe.assert_not_called()
+        self.assertEqual(self.files,{})
+
     def test_authority_csrf_and_closed_requests(self):
         for role in (self.viewer, self.operator):
             client = self.login_human(role)

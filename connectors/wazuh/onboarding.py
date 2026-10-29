@@ -209,6 +209,7 @@ def probe(*, endpoint, index, username, password, ca_pem, policy_provider):
             raise ProbeError('policy_denied')
         remaining(deadline)
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.hostname_checks_common_name = False
         context.load_verify_locations(cadata=ca_pem)
         connection = _PinnedHTTPS(host, port, context, answers, deadline)
         # Complete chain + SAN verification before constructing/sending Basic auth.
