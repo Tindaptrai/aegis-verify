@@ -89,10 +89,14 @@ wrapper always requires a valid installed record at startup.
   restart drift, rollback ordering and unchanged UFW/foreign state.
 - [ ] Implement held no-follow root reads, fixed trusted backend alias resolution
   and the adapter. Classify only this exception; other loader refusal remains.
-- [ ] Require fresh bounded C-locale CLI inactive status after actual executable
-  provenance, full current nft baseline, and effective dependency/graph checks;
-  preserve these host gates beyond the pure Task1 qualifier. Bind probe trust to
-  frozen evidence and document the exact representation before native handoff.
+- [ ] Require fresh bounded complete nft data after wrapper/backend qualification,
+  closed ENABLED=no and no ufw-/ufw6- chains. Strict coherent ordinary object
+  subset, no duplicate/unknown/malformed/dangling identities; keep complete foreign
+  baseline and re-read static facts. Never authorize from cached caller data.
+  Probe is exactly {method: nft-no-ufw-chains-v1}; reject old schema. Remove UFW
+  executable dispatch: the stock CLI's runtime-lock write contradicts read-only
+  preservation. No CLI/dry-run inactivity claim, no compatibility list/save probe.
+  Keep effective dependency/graph checks and document the exact native handoff.
 - [ ] Include fingerprint in frozen facts/digests, durably install private record
   before guard use and capture its original state for recovery. Revalidate all
   startup conditions without calling full Indexer-active preflight from prestart.
@@ -122,6 +126,10 @@ seven required IDs remain mandatory. No portable skip qualifies this gate.
   positive admission. Do not mask unsupported fixture unit/root/argv differences;
   preserve actual facts when mapping owned namespace-scoped loader identities.
   Document that real full-class positive admission still needs the owner check.
+- [ ] Exercise actual fresh kernel reader in the owned namespace with empty,
+  foreign and partial-UFW chains, and compare complete baseline before/after.
+  Confirm existing sentinel lock bytes/metadata and absent lock stay unchanged;
+  no UFW CLI or compatibility-list call. Keep ordinary/unknown parser refusals.
 - [ ] Exercise cold/active guard, normal wrapper stop/restart/direct reload,
   absent ExecReload, concurrent start/stop ordering, enabled-policy/static-record
   drift refusal, Manager allowed and another source denied across transitions.

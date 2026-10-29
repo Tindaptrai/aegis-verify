@@ -36,10 +36,28 @@ versions, custom wrapper behavior and active policy remain unsupported.
   the original inactive/disabled path remains separate.
 - Require actual selected IPv4/IPv6 nf_tables backend identities and a complete
   current nft baseline. An inactive CLI message is not an empty-ruleset proof.
-  After executable provenance, require fresh bounded C-locale `ufw status`
-  to report inactive. Never substitute `ufw-init status` or execute a hook.
+  After wrapper/backend qualification, require a fresh bounded complete native
+  `nft --json list ruleset` observation and closed `ENABLED=no`. Initially admit
+  only coherent, unique metainfo/table/chain/rule shapes; unknown object kinds,
+  families, malformed identities or dangling references refuse. Reject every
+  `ufw-`/`ufw6-` chain across admitted families/tables, including partial leftovers.
+  Compare the same fresh foreign baseline with earlier facts and re-read static
+  inputs for consistency. Never authorize from a cached caller dictionary alone.
+  Do not execute `ufw status`, compatibility list/save commands, `ufw-init status`
+  or a hook, and do not claim observed CLI inactivity.
   Strictly reject other conflicting active/enabled loaders. A finite inventory
   does not prove the absence of arbitrary root automation.
+
+The original CLI-status mechanism is superseded by this stricter kernel-state
+predicate. The exact Ubuntu package opens its runtime lock with write/truncate
+mode even for status; its dry-run only prints planned checks. Removing that
+execution preserves the owner's no-mutation requirement. This is deliberately
+more restrictive than the CLI's missing-first-chain status, not an emulation of
+the CLI or proof about legacy rules outside the qualified nf_tables backend.
+Valid foreign ordinary policy is retained; unsupported shapes require separate
+review, never automatic repair. Probe identity is exactly
+`{"method":"nft-no-ufw-chains-v1"}`; old status-based records refuse without
+migration or automatic refresh.
 
 ## Persistence and lifecycle
 
@@ -102,7 +120,9 @@ apply; passing a synthetic CI gate does not establish that result.
 ## Primary sources
 
 - https://archive.ubuntu.com/ubuntu/pool/main/u/ufw/ufw_0.36.2.orig.tar.gz
+- https://archive.ubuntu.com/ubuntu/pool/main/u/ufw/ufw_0.36.2-6_all.deb
 - https://archive.ubuntu.com/ubuntu/pool/main/u/ufw/ufw_0.36.2-6.debian.tar.xz
 - https://manpages.ubuntu.com/manpages/noble/man8/ufw.8.html
 - https://www.freedesktop.org/software/systemd/man/latest/systemd.unit.html
 - https://netfilter.org/projects/nftables/manpage.html
+- https://manpages.ubuntu.com/manpages/noble/man8/xtables-nft.8.html
