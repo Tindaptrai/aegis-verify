@@ -635,6 +635,87 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(self.host.config, "intervening operator edit")
 
 
+class PropertiesTests(unittest.TestCase):
+    def setUp(self):
+        self.h = importlib.import_module("deploy.wazuh.https_setup.host")
+        self.host = self.h.LinuxHost(fs=object(), commands=object())
+        self.props = {key: "" for key in self.h.UNIT_EMPTY}
+        self.props.update({key: "no" for key in self.h.UNIT_NO})
+        self.props.update(User="wazuh-indexer", Group="wazuh-indexer", LoadState="loaded", ActiveState="active",
+                          FragmentPath="/usr/lib/systemd/system/wazuh-indexer.service",
+                          CapabilityBoundingSet="cap_net_admin cap_dac_override")
+        self.calls = []
+
+    def reader(self, *, omitted=(), response=b"a(sasbttttuii) 0\n", failed=False):
+        def run(name, *args, **kwargs):
+            self.calls.append((name, args))
+            if name == "systemctl":
+                return "".join(key + "=" + value + "\n" for key, value in self.props.items() if key not in omitted).encode()
+            self.assertEqual(name, "busctl")
+            if failed:
+                raise SetupError("command_failed")
+            return response
+        self.host.run = run
+        return self.host
+
+    def test_complete_output_does_not_query_dbus(self):
+        actual = self.reader().properties("synthetic-unit.service", self.h.UNIT_PROPERTIES)
+        self.assertEqual(actual, self.props)
+        self.assertEqual([name for name, _ in self.calls], ["systemctl"])
+        self.h.validate_unit(actual)
+
+    def test_only_omitted_execstartpre_needs_exact_independent_empty(self):
+        actual = self.reader(omitted={"ExecStartPre"}).properties("synthetic-unit.service", self.h.UNIT_PROPERTIES)
+        self.assertEqual(actual, self.props)
+        self.assertEqual(self.h.COMMANDS["busctl"], "/usr/bin/busctl")
+        self.assertEqual(self.calls[-1], ("busctl", ("--system", "get-property", "org.freedesktop.systemd1",
+                         "/org/freedesktop/systemd1/unit/synthetic_2dunit_2eservice",
+                         "org.freedesktop.systemd1.Service", "ExecStartPre")))
+        self.h.validate_unit(actual)
+
+    def test_other_missing_fields_never_query_fallback(self):
+        for omitted in ({"RootImage"}, {"ExecStartPre", "RootImage"}, {"User"}):
+            with self.subTest(omitted=omitted):
+                self.calls.clear()
+                with self.assertRaisesRegex(SetupError, "host_unsupported"):
+                    self.reader(omitted=omitted).properties("synthetic.service", self.h.UNIT_PROPERTIES)
+                self.assertEqual([name for name, _ in self.calls], ["systemctl"])
+        self.calls.clear()
+        self.props["UnexpectedProperty"] = ""
+        with self.assertRaisesRegex(SetupError, "host_unsupported"):
+            self.reader(omitted={"ExecStartPre"}).properties("synthetic.service", self.h.UNIT_PROPERTIES)
+        self.assertEqual([name for name, _ in self.calls], ["systemctl"])
+
+    def test_nonempty_wrong_signature_or_malformed_dbus_refuses(self):
+        for response in (b'a(sasbttttuii) 1 "/usr/bin/true"\n', b"as 0\n", b"a(sasbttttuii) 0 extra\n",
+                         b"a(sasbttttuii) 00\n", b"a(sasbttttuii)  0\n", b"", b"a(sasbttttuii) 0\nextra"):
+            with self.subTest(response=response), self.assertRaisesRegex(SetupError, "host_unsupported"):
+                self.reader(omitted={"ExecStartPre"}, response=response).properties("synthetic.service", self.h.UNIT_PROPERTIES)
+
+    def test_failed_dbus_lookup_refuses(self):
+        with self.assertRaises(SetupError):
+            self.reader(omitted={"ExecStartPre"}, failed=True).properties("synthetic.service", self.h.UNIT_PROPERTIES)
+
+    def test_unsafe_unit_refuses_before_commands(self):
+        for unit in (None, "--synthetic.service", "../synthetic.service", "synthetic\n.service", "synthetic.service;true",
+                     "synthetic.timer", "a" * 256 + ".service"):
+            with self.subTest(unit=unit):
+                self.calls.clear()
+                with self.assertRaisesRegex(SetupError, "host_unsupported"):
+                    self.reader(omitted={"ExecStartPre"}).properties(unit, self.h.UNIT_PROPERTIES)
+                self.assertEqual(self.calls, [])
+
+    def test_dbus_object_path_escapes_punctuation_and_initial_digit(self):
+        self.reader(omitted={"ExecStartPre"}).properties("1-fixture_name@demo.service", self.h.UNIT_PROPERTIES)
+        self.assertIn("/org/freedesktop/systemd1/unit/_31_2dfixture_5fname_40demo_2eservice", self.calls[-1][1])
+
+    def test_confirmed_empty_does_not_bypass_unit_sandbox_validation(self):
+        self.props["RootImage"] = "/synthetic.img"
+        actual = self.reader(omitted={"ExecStartPre"}).properties("synthetic.service", self.h.UNIT_PROPERTIES)
+        with self.assertRaisesRegex(SetupError, "host_unsupported"):
+            self.h.validate_unit(actual)
+
+
 class PublicationKernel:
     """In-memory syscall adapter; names and held fds have independent lifetimes."""
     def __init__(self):

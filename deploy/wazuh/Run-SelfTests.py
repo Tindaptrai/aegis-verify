@@ -75,7 +75,7 @@ def platform_errors(*, native, system=None):
         errors.append("root_required")
     if not Path("/run/systemd/system").is_dir():
         errors.append("systemd_required")
-    for tool in ("openssl", "nft", "ip", "systemctl", "systemd-analyze"):
+    for tool in ("openssl", "nft", "ip", "systemctl", "systemd-analyze", "busctl"):
         if not shutil.which(tool):
             errors.append(tool.replace("-", "_") + "_required")
     return errors

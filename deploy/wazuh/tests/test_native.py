@@ -824,6 +824,43 @@ class NativeTests(unittest.TestCase):
 
     def test_systemd_every_start_guard(self):
         with network_fixture(self) as fixture:
+            # Real service properties/DBus; no vendor service or nft mutation.
+            property_service = '''[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=nobody
+Group=nogroup
+TimeoutStartSec=15
+TimeoutStopSec=5
+ExecStart=/usr/bin/true
+'''
+            empty_name = fixture.unit("empty-prestart", property_service)
+            nonempty_name = fixture.unit("nonempty-prestart", property_service + "ExecStartPre=/usr/bin/true\n")
+            fixture.systemctl("daemon-reload")
+            fixture.systemctl("start", empty_name)
+            fixture.systemctl("start", nonempty_name)
+            self.assertEqual(h.LinuxHost().properties(empty_name, ("ExecStartPre", "LoadState"))["ExecStartPre"], "")
+            owned_property_units = {empty_name, nonempty_name}
+            class OmittedPropertyCommands(h.Commands):
+                bus_reads = 0
+                def run(adapter, name, *args, **kwargs):
+                    # Only reproduce the systemctl serialization omission. The
+                    # independent busctl query and response are actual/unmodified.
+                    output, errors = super().run(name, *args, **kwargs)
+                    if name == "systemctl" and len(args) >= 2 and args[0] == "show" and args[1] in owned_property_units:
+                        output = b"\n".join(line for line in output.splitlines() if not line.startswith(b"ExecStartPre=")) + b"\n"
+                    if name == "busctl":
+                        adapter.bus_reads += 1
+                    return output, errors
+            fs = h.SecureFS()
+            commands = OmittedPropertyCommands(fs)
+            reader = h.LinuxHost(fs=fs, commands=commands)
+            self.assertEqual(reader.properties(empty_name, ("ExecStartPre", "LoadState")), {"ExecStartPre": "", "LoadState": "loaded"})
+            with self.assertRaisesRegex(SetupError, "host_unsupported"):
+                reader.properties(nonempty_name, ("ExecStartPre", "LoadState"))
+            self.assertEqual(commands.bus_reads, 2)
+            OBSERVATIONS.setdefault(self.id(), {}).update(empty_execstartpre_dbus_confirmed=True,
+                                                         nonempty_execstartpre_dbus_refused=True)
             # Reachability proof precedes guard, with exactly the listener used by systemd.
             fixture.start_listener()
             fixture.processes[0].terminate()

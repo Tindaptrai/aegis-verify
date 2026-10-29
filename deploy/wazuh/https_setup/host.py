@@ -38,7 +38,8 @@ KIT_FILES = ("Setup-Wazuh-HTTPS.py", *("https_setup/" + name + ".py" for name in
              ("__init__", "contracts", "certificates", "firewall", "host", "transaction", "cli")))
 COMMANDS = {"systemctl": "/usr/bin/systemctl", "nft": "/usr/sbin/nft",
             "ss": "/usr/bin/ss", "ip": "/usr/sbin/ip", "dpkg-query": "/usr/bin/dpkg-query",
-            "systemd-analyze": "/usr/bin/systemd-analyze", "openssl": "/usr/bin/openssl"}
+            "systemd-analyze": "/usr/bin/systemd-analyze", "openssl": "/usr/bin/openssl",
+            "busctl": "/usr/bin/busctl"}
 UNIT_EMPTY = ("RootDirectory", "RootImage", "ExecStartPre", "DropInPaths", "ReadOnlyPaths",
               "InaccessiblePaths", "BindPaths", "BindReadOnlyPaths", "RestrictAddressFamilies",
               "SystemCallFilter", "IPAddressDeny", "NetworkNamespacePath")
@@ -647,8 +648,21 @@ class LinuxHost:
         self.uid, self.gid = account.pw_uid, account.pw_gid
 
     def properties(self, unit, keys):
+        if (type(unit) is not str or len(unit) > 255 or
+                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*\.service", unit)):
+            raise SetupError("host_unsupported")
         text = self.run("systemctl", "show", unit, "--no-pager", "--property=" + ",".join(keys)).decode()
         props = dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
+        if set(props) == set(keys) - {"ExecStartPre"} and "ExecStartPre" in keys:
+            # Match systemd's bus_label_escape, not filesystem/unit-name escaping.
+            label = "".join(char if char.isalpha() or index > 0 and char.isdigit()
+                            else "_%02x" % ord(char) for index, char in enumerate(unit))
+            response = self.run("busctl", "--system", "get-property", "org.freedesktop.systemd1",
+                                "/org/freedesktop/systemd1/unit/" + label,
+                                "org.freedesktop.systemd1.Service", "ExecStartPre")
+            if response not in (b"a(sasbttttuii) 0", b"a(sasbttttuii) 0\n"):
+                raise SetupError("host_unsupported")
+            props["ExecStartPre"] = ""
         if set(props) != set(keys):
             raise SetupError("host_unsupported")
         return props
