@@ -1,0 +1,107 @@
+name: Optional Wazuh HTTP operator
+
+on:
+  pull_request:
+    paths:
+      - 'deploy/wazuh/**'
+      - 'docs/manager/wazuh-http-preparation.md'
+      - '.github/workflows/wazuh-http-operator.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'deploy/wazuh/**'
+      - 'docs/manager/wazuh-http-preparation.md'
+      - '.github/workflows/wazuh-http-operator.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wazuh-http-operator-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-required:
+    name: Wazuh HTTP required native qualification
+    # VM with actual PID1/systemd; a container or Windows adapter is insufficient.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      REQUESTED_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Install native test tools (no application dependencies)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nftables iproute2 openssl
+          /usr/bin/python3 --version
+          systemctl --version
+      - name: Prepare runner-readable sanitized proof destination
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          directory = Path(os.environ["RUNNER_TEMP"]) / "aegis-wazuh-http-proof"
+          directory.mkdir(exist_ok=True)
+          directory.chmod(0o755)
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as output:
+              output.write("PROOF_DIRECTORY=" + str(directory) + "\n")
+      - name: Require exact source and all native gates
+        run: |
+          sudo /usr/bin/python3 -I -B deploy/wazuh/Run-SelfTests.py --native --source-commit "$REQUESTED_SOURCE_COMMIT" --output "$PROOF_DIRECTORY/native-results.json"
+      - name: Verify exact-head qualification and readable proof files
+        if: always()
+        shell: python
+        run: |
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          directory = Path(os.environ["PROOF_DIRECTORY"])
+          path = directory / "native-results.json"
+          if not path.is_file() or path.stat().st_size == 0:
+              raise SystemExit("native_proof_missing")
+          proof = json.loads(path.read_text(encoding="utf-8"))
+          source = proof.get("source")
+          if not isinstance(source, dict) or source.get("source_commit") != os.environ["REQUESTED_SOURCE_COMMIT"]:
+              raise SystemExit("native_source_mismatch")
+          source_path = directory / "native-source.json"
+          source_path.write_text(json.dumps(source, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+          os.chmod(source_path, 0o644)
+          spec = importlib.util.spec_from_file_location("operator_gate", "deploy/wazuh/Run-SelfTests.py")
+          gate = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(gate)
+          if source != gate.source_snapshot(os.environ["REQUESTED_SOURCE_COMMIT"]):
+              raise SystemExit("native_source_bytes_mismatch")
+          for name in ("native-results.json", "native-source.json"):
+              with (directory / name).open("rb") as stream:
+                  if not stream.read(1):
+                      raise SystemExit("native_proof_empty")
+          required = proof.get("required", {})
+          for method in ("test_nft_allowed_denied_sources", "test_systemd_every_start_guard"):
+              identity = gate.NATIVE_MODULE + ".NativeTests." + method
+              observation = proof.get("native_observations", {}).get(identity, {})
+              before = observation.get("host_firewall_before_sha256")
+              if (not isinstance(before, str) or len(before) != 64 or
+                  before != observation.get("host_firewall_after_sha256") or
+                  observation.get("fixture_cleanup_verified") is not True):
+                  raise SystemExit("native_firewall_or_cleanup_evidence_missing")
+          if (proof.get("mode") != "native" or proof.get("status") != "passed" or proof.get("errors") or
+              set(required) != set(gate.REQUIRED_NATIVE) or any(value != "passed" for value in required.values()) or
+              any(proof["counts"][key] != 0 for key in ("failures", "errors", "skipped")) or
+              proof["platform"]["system"] != "Linux" or not proof["platform"]["python"].startswith("3.12.")):
+              raise SystemExit("native_required_gate_failed")
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: Wazuh-HTTP-native-required-${{ github.run_id }}-${{ github.run_attempt }}
+          # Deliberate exact whitelist: never upload /run fixtures, keys or journals.
+          path: |
+            ${{ env.PROOF_DIRECTORY }}/native-results.json
+            ${{ env.PROOF_DIRECTORY }}/native-source.json
+          if-no-files-found: error
+          retention-days: 14
