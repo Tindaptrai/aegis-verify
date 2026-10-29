@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "hostname": "REPLACE_WITH_APPROVED_HOSTNAME",
+  "indexer_ip": "REPLACE_WITH_APPROVED_INDEXER_IPV4",
+  "manager_ip": "REPLACE_WITH_APPROVED_MANAGER_IPV4",
+  "config_path": "/etc/wazuh-indexer/opensearch.yml",
+  "ca_path": "/etc/wazuh-indexer/certs/REPLACE_WITH_CA_FILE",
+  "leaf_path": "/etc/wazuh-indexer/certs/REPLACE_WITH_OLD_HTTP_LEAF",
+  "ca_archive": "/REPLACE_WITH_PRIVATE_ARCHIVE_PATH",
+  "ca_member": "REPLACE_WITH_EXACT_CA_MEMBER",
+  "key_member": "REPLACE_WITH_EXACT_CA_KEY_MEMBER",
+  "expected_ca_file_sha256": "REPLACE_WITH_APPROVED_CA_FILE_SHA256",
+  "expected_ca_der_sha256": "REPLACE_WITH_APPROVED_CA_DER_SHA256",
+  "expected_leaf_der_sha256": "REPLACE_WITH_APPROVED_OLD_LEAF_DER_SHA256"
+}
