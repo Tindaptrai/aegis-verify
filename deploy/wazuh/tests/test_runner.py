@@ -428,6 +428,60 @@ class NativeFixtureSafety(unittest.TestCase):
         with self.assertRaisesRegex(native.SetupError, "ufw_unsupported"):
             native.uh.UfwHostReader(host).dependency_facts()
 
+    def test_generated_guard_drivers_recheck_identity_at_later_nft_execution(self):
+        from deploy.wazuh.tests import test_native as native
+        module = ast.parse(Path(native.__file__).read_text(encoding="utf-8"))
+        context = dict(vars(native), source=Path("/run/owned/source"), root=Path("/run/owned/root"),
+                       profile=Path("/run/owned/profile"), record=Path("/run/owned/record"),
+                       profile_path=Path("/run/owned/profile"), audit=Path("/run/owned/audit"),
+                       fixture=SimpleNamespace(root=Path("/run/owned"), inode=123),
+                       loader_mapping={"ufw.service": "owned-ufw.service"})
+        programs = [eval(compile(ast.Expression(node.value), "fixture-expression", "eval"), context)
+                    for node in ast.walk(module) if isinstance(node, ast.Assign) and
+                    len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "driver"]
+        self.assertEqual(len(programs), 2)
+        raw = native.profile_dict()
+        octet = native.secrets.randbelow(250) + 1
+        raw.update(indexer_ip=f"10.{octet}.45.10", manager_ip=f"10.{octet}.45.20")
+        profile = native.load_profile(native.tx.encoded(raw))
+        for number, source in enumerate(programs):
+            for later_uid, later_inode in ((0, 999), (1000, 123)):
+                with self.subTest(driver=number, uid=later_uid, inode=later_inode):
+                    identity = {"uid": 0, "inode": 123}
+                    fake_os = SimpleNamespace(geteuid=lambda: identity["uid"],
+                                              stat=lambda path: SimpleNamespace(st_ino=identity["inode"]))
+                    fake_sys = SimpleNamespace(path=[], argv=["fixture-driver.py", "guard-ensure"])
+                    host = SimpleNamespace(LinuxHost=native.h.LinuxHost, Commands=native.h.Commands)
+                    def importing(name, *args, **kwargs):
+                        if name == "os": return fake_os
+                        if name == "sys": return fake_sys
+                        if name == "https_setup": return SimpleNamespace(host=host, ufw=SimpleNamespace(), ufw_host=SimpleNamespace())
+                        if name == "https_setup.cli": return SimpleNamespace(main=lambda: 71)
+                        if name == "deploy.wazuh.tests.test_ufw":
+                            return SimpleNamespace(FakeReader=type("FakeReader", (), {}), loaders=lambda: {})
+                        return builtins.__import__(name, *args, **kwargs)
+                    # Both generated startup checks succeed with the correct identity.
+                    with self.assertRaises(SystemExit) as initialized:
+                        exec(compile(source, "generated-guard-driver", "exec"),
+                             {"__builtins__": {**vars(builtins), "__import__": importing}})
+                    self.assertEqual(initialized.exception.code, 71)
+                    instance = host.LinuxHost()
+                    instance.verify_installed_firewall_compatibility = lambda p: None
+                    instance.firewall = lambda: {"nftables": []}
+                    # Model a later identity change, after driver/host initialization.
+                    identity.update(uid=later_uid, inode=later_inode)
+                    with patch.object(instance.fs, "trusted"), \
+                            patch.object(native.h.Path, "resolve", return_value=Path("/usr/sbin/nft")), \
+                            patch.object(native.h.subprocess, "Popen", side_effect=AssertionError("NFT_EXECUTED")) as execute:
+                        with self.assertRaisesRegex(AssertionError, "fixture_namespace_required"):
+                            instance.ensure_guard(profile)  # real guard -> run -> execution boundary
+                        execute.assert_not_called()
+                    identity.update(uid=0, inode=123)
+                    with patch.object(native.h.Commands, "_execute", return_value=(b"observed", b"warning")) as inherited:
+                        result = instance.commands._execute("/actual/nft", ("--file", "-"), data=b"batch", argv0="nft")
+                    self.assertEqual(result, (b"observed", b"warning"))
+                    inherited.assert_called_once_with("/actual/nft", ("--file", "-"), data=b"batch", argv0="nft")
+
     def test_generated_native_programs_compile_without_linux_execution(self):
         from deploy.wazuh.tests import test_native as native
         module = ast.parse(Path(native.__file__).read_text(encoding="utf-8"))
@@ -479,7 +533,7 @@ class NativeFixtureSafety(unittest.TestCase):
             with patch.dict(os.environ, {"AEGIS_NATIVE_SOURCE_COMMIT": "f" * 40}), patch.object(native, "private_file", side_effect=write):
                 path, _, _ = native.synthetic_guard_driver(fixture, root / "vendor-root", {})
             source = path.read_text()
-            host = SimpleNamespace(LinuxHost=type("OriginalHost", (), {}))
+            host = SimpleNamespace(LinuxHost=type("OriginalHost", (), {}), Commands=native.h.Commands)
             fake_os = SimpleNamespace(geteuid=lambda: 0, stat=lambda path: SimpleNamespace(st_ino=123))
             fake_sys = SimpleNamespace(path=[], argv=["fixture-driver.py", "guard-verify"])
             def importing(name, *args, **kwargs):

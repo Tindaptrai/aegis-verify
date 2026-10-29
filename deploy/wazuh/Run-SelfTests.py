@@ -116,7 +116,8 @@ def source_snapshot(commit):
 UFW_RELOCATIONS = ["owned_root:vendor_paths", "owned_units:wrapper_guard_indexer",
                    "wrapper:RootDirectory,NetworkNamespacePath", "host.INSTALL_ROOT", "host.PROFILE",
                    "host.RECORD_PATH", "ufw_host.RECORD_PATH", "loader_query:owned_inactive_inventory",
-                   "dependency_roles:bijective_all_observed_units_readonly_external", "positive_reader:synthetic_package_unit_backend_dependencies"]
+                   "dependency_roles:bijective_all_observed_units_readonly_external", "positive_reader:synthetic_package_unit_backend_dependencies",
+                   "fixture.Commands:root_netns_before_each_execute"]
 UFW_CHECKS = ("vendor_bytes_preserved", "vendor_state_preserved", "real_ufw_baseline_preserved",
               "namespace_assertion_before_mutations", "no_unintended_wrapper_start", "cold_guard_verified",
               "active_guard_verified", "concurrent_start_order_verified", "concurrent_stop_order_verified",

@@ -834,6 +834,11 @@ host.INSTALL_ROOT=Path({str(source)!r})
 host.PROFILE={str(profile)!r}
 host.RECORD_PATH=ufw_host.RECORD_PATH={str(record)!r}
 assert os.geteuid()==0 and os.stat('/proc/self/ns/net').st_ino=={fixture.inode}
+class FixtureCommands(host.Commands):
+    def _execute(self, executable, args, *, data=None, argv0=None):
+        if os.geteuid() != 0 or os.stat("/proc/self/ns/net").st_ino != {fixture.inode}:
+            raise AssertionError("fixture_namespace_required")
+        return super()._execute(executable, args, data=data, argv0=argv0)
 RealHost=host.LinuxHost
 class SyntheticReader(FakeReader):
     def __init__(self, owner):
@@ -849,6 +854,9 @@ class SyntheticReader(FakeReader):
     def dependency_facts(self):
         return {{name:{{key:[] for key in ufw_host.DEPENDENCIES}} for name in ('ufw.service',ufw_host.INDEXER)}}
 class FixtureHost(RealHost):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.commands = FixtureCommands(self.fs)
     def ufw_reader(self): return SyntheticReader(self)
     def firewall_loaders(self): return loaders()
 host.LinuxHost=FixtureHost
@@ -1294,13 +1302,21 @@ ExecStart=/usr/bin/true
             private_file(profile_path, tx.encoded(fixture.profile.as_dict()))
             audit = fixture.root / "audit"
             # Declared paths and owned loader query identities relocate. CLI/manifest checks,
-            # LinuxHost.guard, Commands and nft verifier run unchanged in copied modules.
+            # Guard/verifier remain unchanged; FixtureCommands fences each real execution.
             driver = f'''import os, sys
 from pathlib import Path
 sys.path.insert(0, {str(source)!r})
 from https_setup import host, ufw_host
 loader_mapping = {loader_mapping!r}
+class FixtureCommands(host.Commands):
+    def _execute(self, executable, args, *, data=None, argv0=None):
+        if os.geteuid() != 0 or os.stat("/proc/self/ns/net").st_ino != {fixture.inode}:
+            raise AssertionError("fixture_namespace_required")
+        return super()._execute(executable, args, data=data, argv0=argv0)
 class FixtureHost(host.LinuxHost):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.commands = FixtureCommands(self.fs)
     def firewall_loaders(self):
         return {{role: self.properties(unit, host.LOADER_KEYS) for role, unit in loader_mapping.items()}}
     def ufw_reader(self):

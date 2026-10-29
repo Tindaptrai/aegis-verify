@@ -28,7 +28,10 @@ relocation: code/profile/compatibility record, tên unit, root vendor và netns.
 Gate strict ánh xạ truy vấn ba loader sang ba unit fixture thực sự
 inactive/disabled, giữ nguyên facts và không dùng exception UFW. Đây là inventory
 fixture, không qualify loader của CI host. CLI, manifest, guard và nft verifier
-thực vẫn chạy. Mỗi thay đổi firewall phải kiểm tra inode netns. Cleanup phải xác
+thực vẫn chạy. Hai guard driver dùng adapter fixture `Commands._execute` để
+kiểm tra lại root và inode netns ngay trước mỗi lần gọi executor production;
+command/argv/input và giới hạn của executor được giữ nguyên. Startup check không
+thay thế kiểm tra tại boundary này. Mỗi thay đổi firewall phải kiểm tra inode netns. Cleanup phải xác
 nhận unit dừng, netns không còn process và host firewall không đổi; không chắc
 chắn thì gate thất bại và giữ cây fixture.
 
