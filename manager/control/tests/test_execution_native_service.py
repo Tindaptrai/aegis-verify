@@ -547,8 +547,8 @@ ConvertTo-Json -InputObject $rows -Compress
                 self.assertNotIn('private', json.dumps(report))
 
     def test_execution_report_uses_actual_native_first_and_cleanup_snapshots(self):
-        for cleanup_fails in (False, True):
-            with self.subTest(cleanup_fails=cleanup_fails), tempfile.TemporaryDirectory() as temporary:
+        for platform, cleanup_fails in (('nt', False), ('nt', True), ('posix', False), ('posix', True)):
+            with self.subTest(platform=platform, cleanup_fails=cleanup_fails), tempfile.TemporaryDirectory() as temporary:
                 case = ExecutionPublishedNativeTests('test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default')
                 case.owner = object(); case.root = Path(temporary); case.origin='https://synthetic.invalid'
                 case.server = SimpleNamespace(routes=[],execution_reports=[{'ready':False}])
@@ -558,8 +558,14 @@ ConvertTo-Json -InputObject $rows -Compress
                         return dict(service_status='Running',device_id='synthetic-id')
                     return presence.PublishedConnectionTests.native_phase(case,action,**kwargs)
                 case.native_phase=native
+                # Replace only the presence module's binding; changing global os.name
+                # would also change pathlib's host behavior on Windows/POSIX.
+                native_os=SimpleNamespace(name=platform,environ=dict(os.environ,
+                    AEGIS_CONNECTION_SERVICE_PACKAGE=temporary,
+                    SystemRoot=os.environ.get('SystemRoot',str(Path(temporary)/'synthetic-system-root'))))
                 def child(command, **kwargs):
-                    action=command[command.index('-Action')+1]
+                    action_flag='-Action' if '-Action' in command else '--action'
+                    action=command[command.index(action_flag)+1]
                     if action == 'ExecutionUpgrade':
                         return subprocess.CompletedProcess([],1,'','{"stage":"status_upgrade_stopped","code":"state_invalid"}')
                     if action == 'Uninstall' and cleanup_fails:
@@ -568,7 +574,8 @@ ConvertTo-Json -InputObject $rows -Compress
                         state='enrolled',service_status='absent',identity_preserved=True)),'')
                 with patch.dict(os.environ,AEGIS_EXECUTION_NATIVE_OUTPUT_ROOT=temporary,AEGIS_CONNECTION_SERVICE_PACKAGE=temporary), \
                         patch.object(presence,'create_pairing_code',return_value={'code':'synthetic-code'}), \
-                        patch.object(presence.Device,'objects',Mock()), patch.object(presence.subprocess,'run',side_effect=child):
+                        patch.object(presence.Device,'objects',Mock()), patch.object(presence,'os',native_os), \
+                        patch.object(presence.subprocess,'run',side_effect=child):
                     with self.assertRaises(AssertionError) as caught:
                         case.test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default()
                 self.assertEqual(caught.exception.gate_native_action,'ExecutionUpgrade')
