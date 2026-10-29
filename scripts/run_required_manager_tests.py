@@ -139,6 +139,11 @@ def safe_diagnostic(test, err):
     stage = stage if type(stage) is str and stage in DIAGNOSTIC_STAGES else None
     native_failure = safe_native_failure(getattr(test, "gate_native_failure", None))
     if native_failure: stage = NATIVE_ACTION_STAGES.get(native_failure["action"])
+    native_cleanup_failure = safe_native_failure(getattr(test, "gate_native_cleanup_failure", None))
+    if native_cleanup_failure and native_cleanup_failure["action"] not in ("Uninstall", "Cleanup"): native_cleanup_failure = {}
+    traceback_action = getattr(err[1], "gate_native_action", None) if err is not None else None
+    if type(traceback_action) is not str or traceback_action not in (*NATIVE_ACTION_STAGES, "ExecutionUpgrade", "MissingVendor", "Cleanup", "unknown"):
+        traceback_action = None
     codes = getattr(test, "gate_codes", ())
     codes = sorted({code for code in codes[:16] if type(code) is str and code in DIAGNOSTIC_CODES}) if type(codes) in (tuple, list) else []
     service = getattr(test, "gate_service_status", None)
@@ -168,6 +173,7 @@ def safe_diagnostic(test, err):
     return dict(test_id=diagnostic_id(test), exception_class=exception, frames=frames[-8:],
                 stage=stage, codes=codes, service_status=service_status, runtime_status=runtime_status,
                 cleanup_status=cleanup_status, native_failure=native_failure,
+                native_cleanup_failure=native_cleanup_failure, native_traceback_action=traceback_action,
                 revocation_status=safe_revocation_status(getattr(test, "gate_revocation_status", None)))
 
 

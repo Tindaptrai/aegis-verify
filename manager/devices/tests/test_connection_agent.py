@@ -250,6 +250,8 @@ class NativeDiagnosticsTests(SimpleTestCase):
         self.assertEqual(getattr(case, "gate_native_failure", None), dict(action="Status", stage="status", code="state_invalid", exit_code=1))
         self.assertEqual(case.gate_stage, "published_native_status")
         self.assertEqual(case.gate_codes, ("published_native_failed",))
+        self.assertEqual(case.gate_native_cleanup_failure,
+                         dict(action="Uninstall", stage="configuration", code="service_operation_failed", exit_code=1))
 
     def test_native_input_leak_guard_prevents_diagnostic_projection(self):
         case = PublishedConnectionTests("test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall")
@@ -651,8 +653,15 @@ class PublishedConnectionTests(TransactionTestCase):
             if identity:
                 self.assertEqual(data["device_id"], identity)
             return data
-        except Exception:
-            if not hasattr(self, "gate_native_failure"):
+        except Exception as error:
+            known_actions = ("Install", "Restart", "Reinstall", "Status", "Uninstall", "ExecutionUpgrade", "MissingVendor", "Cleanup")
+            safe_action = action if action in known_actions else "unknown"
+            # The propagated exception can be cleanup's exception, while the
+            # primary snapshot still belongs to the original native action.
+            error.gate_native_action = safe_action
+            first_failure = not hasattr(self, "gate_native_failure")
+            cleanup_failure = not first_failure and action in ("Uninstall", "Cleanup") and not hasattr(self, "gate_native_cleanup_failure")
+            if first_failure or cleanup_failure:
                 # Input-leak and output-cap guards run before diagnostic projection.
                 diagnostic = None
                 if result is not None and len(result.stdout) < 4096 and (code is None or code not in result.stdout + result.stderr):
@@ -660,11 +669,14 @@ class PublishedConnectionTests(TransactionTestCase):
                 native_stage, native_code = diagnostic.split(":", 1) if diagnostic else (None, None)
                 exit_code = result.returncode if result is not None else None
                 if type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31: exit_code = None
-                known_actions = ("Install", "Restart", "Reinstall", "Status", "Uninstall", "ExecutionUpgrade", "MissingVendor", "Cleanup")
-                self.gate_native_failure = dict(action=action if action in known_actions else "unknown",
+                snapshot = dict(action=safe_action,
                     stage=native_stage, code=native_code, exit_code=exit_code)
-                self.gate_stage = stage
-                if result is not None and result.returncode != 0: self.gate_codes = ("published_native_failed",)
+                if first_failure:
+                    self.gate_native_failure = snapshot
+                    self.gate_stage = stage
+                    if result is not None and result.returncode != 0: self.gate_codes = ("published_native_failed",)
+                else:
+                    self.gate_native_cleanup_failure = snapshot
             raise
 
     @skipUnless(os.environ.get("AEGIS_CONNECTION_SERVICE_PACKAGE"), "Disposable native service CI package required")

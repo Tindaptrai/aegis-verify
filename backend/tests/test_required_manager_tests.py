@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -329,6 +330,85 @@ def test_native_and_revocation_diagnostics_reject_raw_extra_oversize_cycles_and_
         diagnostic = gate.safe_diagnostic(case, None)
         assert diagnostic["revocation_status"] == {}
         assert "PRIVATE" not in json.dumps(diagnostic)
+
+
+def test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_raw_output(tmp_path, monkeypatch):
+    gate = gate_module()
+    path = ROOT / 'manager/devices/tests/test_connection_agent.py'
+    tree = ast.parse(path.read_text())
+    selected = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                and node.name in {'native_diagnostic', 'assert_native_result', 'native_process_environment'}]
+    published = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'PublishedConnectionTests')
+    selected.append(next(node for node in published.body if isinstance(node, ast.FunctionDef) and node.name == 'native_phase'))
+    scope = dict(__file__=str(path), Path=Path, json=json, re=__import__('re'), os=os,
+                 NATIVE_DIAGNOSTIC_STAGES=gate.NATIVE_STAGES, NATIVE_DIAGNOSTIC_CODES=gate.NATIVE_CODES)
+    # Execute the actual functions with only the child-process boundary replaced.
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(path), 'exec'), scope)
+    class Case(unittest.TestCase):
+        native_phase = scope['native_phase']
+        def id(self): return gate.EXACT['published_service']
+        def runTest(self):
+            try:
+                self.native_phase('Status', identity='synthetic-id')
+            finally:
+                self.native_phase('Uninstall', identity='synthetic-id')
+    monkeypatch.setenv('AEGIS_CONNECTION_SERVICE_PACKAGE', str(tmp_path))
+    success = json.dumps(dict(action='Uninstall', device_id='synthetic-id', state='identity_denied',
+                              service_status='absent', identity_preserved=True))
+    for cleanup_exit, stderr, stdout, expected_pair in (
+        (0, '', success, None),
+        (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary"}', '', ('uninstall', 'uninstall_left_service_or_binary')),
+        (1, 'PRIVATE_KEY_AND_PATH', 'PRIVATE_STDOUT', (None, None)),
+        (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary","raw":"PRIVATE"}', '', (None, None)),
+        (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary","code":"PRIVATE"}', '', (None, None)),
+        (1, 'PRIVATE' * 100, '', (None, None)),
+        (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary"}', 'PRIVATE' * 700, (None, None)),
+    ):
+        children = iter((subprocess.CompletedProcess([], 1, '', '{"stage":"status","code":"state_invalid"}'),
+                         subprocess.CompletedProcess([], cleanup_exit, stdout, stderr)))
+        scope['subprocess'] = SimpleNamespace(run=lambda *args, **kwargs: next(children))
+        case = Case(); case.root = tmp_path; case.origin = 'https://synthetic.invalid'
+        result = gate.GateResult(io.StringIO(), True, 0)
+        case.run(result)
+        value = gate.build_report(result, ('published_service',), 'a' * 40,
+                                 'https://github.com/example/project/actions/runs/1')
+        assert value['result'] == 'failed' and value['totals']['failed'] == 1
+        diagnostic = value['diagnostics'][0]
+        assert diagnostic['stage'] == 'published_native_status'
+        assert diagnostic['native_failure'] == dict(action='Status', stage='status', code='state_invalid', exit_code=1)
+        expected_cleanup = {} if expected_pair is None else dict(
+            action='Uninstall', stage=expected_pair[0], code=expected_pair[1], exit_code=1)
+        assert diagnostic.get('native_cleanup_failure') == expected_cleanup
+        assert diagnostic.get('native_traceback_action') == ('Status' if cleanup_exit == 0 else 'Uninstall')
+        assert diagnostic['frames'] and all(frame['path'] == 'manager/devices/tests/test_connection_agent.py' for frame in diagnostic['frames'][-2:])
+        assert 'PRIVATE' not in json.dumps(value)
+
+
+def test_cleanup_failure_and_traceback_action_reject_malformed_and_cyclic_metadata():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    cycle = {}; cycle['cycle'] = cycle
+    cleanup = dict(action='Uninstall', stage='uninstall', code='uninstall_left_service_or_binary', exit_code=1)
+    error = AssertionError('PRIVATE')
+    for value in ('PRIVATE', cycle, cleanup | {'raw': 'PRIVATE'}, cleanup | {'stage': cycle},
+                  cleanup | {'code': 'x' * 65537}, cleanup | {'exit_code': True}, cleanup | {'exit_code': 2 ** 31},
+                  cleanup | {'code': 'win32_65536'}, cleanup | {'action': 'Status'}):
+        case.gate_native_cleanup_failure = value
+        error.gate_native_action = cycle
+        diagnostic = gate.safe_diagnostic(case, (AssertionError, error, None))
+        assert diagnostic.get('native_cleanup_failure') == {}
+        assert diagnostic.get('native_traceback_action') is None
+        assert 'PRIVATE' not in json.dumps(diagnostic)
+    case.gate_native_cleanup_failure = cleanup
+    error.gate_native_action = 'Uninstall'
+    diagnostic = gate.safe_diagnostic(case, (AssertionError, error, None))
+    assert diagnostic.get('native_cleanup_failure') == cleanup
+    assert diagnostic.get('native_traceback_action') == 'Uninstall'
+    for value in ('PRIVATE', 'x' * 65537, True, cycle):
+        error.gate_native_action = value
+        diagnostic = gate.safe_diagnostic(case, (AssertionError, error, None))
+        assert diagnostic.get('native_traceback_action') is None
+        assert 'PRIVATE' not in json.dumps(diagnostic)
 
 
 def test_deep_traceback_and_class_setup_errors_remain_bounded_without_fake_execution():
