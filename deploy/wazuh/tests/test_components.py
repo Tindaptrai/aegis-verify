@@ -376,6 +376,23 @@ class Components(unittest.TestCase):
             with self.subTest(mutate=mutate), self.assertRaises(self.c.SetupError):
                 self.f.verify_table(bad, self.p)
 
+    def test_observed_native_table_only_document_still_refuses(self):
+        # CI40914859647 observed create-table block input install only this
+        # container. Missing chain/rules is a real defect, not ignorable JSON.
+        document = {"nftables": [{"table": {"family": "inet", "name": "aegis_wazuh_http_v1"}}]}
+        with self.assertRaisesRegex(self.c.SetupError, "firewall_mismatch"):
+            self.f.verify_table(document, self.p)
+
+    def test_exclusive_firewall_batch_explicitly_adds_chain_and_all_rules(self):
+        render = getattr(self.f, "firewall_create_text", lambda p: "create " + self.f.firewall_text(p))
+        lines = render(self.p).splitlines()
+        self.assertEqual(lines, [
+            "create table inet aegis_wazuh_http_v1",
+            "add chain inet aegis_wazuh_http_v1 input { type filter hook input priority -50; policy accept; }",
+            'add rule inet aegis_wazuh_http_v1 input ip daddr 10.23.45.10 tcp dport 9200 iifname "lo" accept',
+            "add rule inet aegis_wazuh_http_v1 input ip daddr 10.23.45.10 tcp dport 9200 ip saddr 10.23.45.20 accept",
+            "add rule inet aegis_wazuh_http_v1 input ip daddr 10.23.45.10 tcp dport 9200 drop"])
+
     def test_rendered_firewall_and_boot_guards_preserve_fail_closed_order(self):
         text = self.f.firewall_text(self.p)
         self.assertIn("type filter hook input priority -50; policy accept;", text)

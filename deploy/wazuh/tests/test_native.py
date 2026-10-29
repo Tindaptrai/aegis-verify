@@ -30,7 +30,7 @@ from deploy.wazuh.https_setup import host as h
 from deploy.wazuh.https_setup import transaction as tx
 from deploy.wazuh.https_setup.certificates import create_http_certificate
 from deploy.wazuh.https_setup.contracts import SetupError, load_profile
-from deploy.wazuh.https_setup.firewall import TABLE, firewall_text, verify_table, guard_unit, indexer_dropin
+from deploy.wazuh.https_setup.firewall import TABLE, firewall_create_text, verify_table, guard_unit, indexer_dropin
 from deploy.wazuh.tests.test_components import profile_dict
 
 KIT = Path(__file__).resolve().parents[1]
@@ -805,12 +805,18 @@ class NativeTests(unittest.TestCase):
         with network_fixture(self) as fixture:
             fixture.start_listener()
             # Both sources have already completed CA-verified TLS before guard.
-            text = firewall_text(fixture.profile)
+            text = firewall_create_text(fixture.profile)
             fixture.nft("--check", "--file", "-", data=text.encode())
-            # Match production's exclusive creation, then semantic verification.
-            fixture.nft("--file", "-", data=text.replace("table inet", "create table inet", 1).encode())
+            # A failing suffix must not commit even the successful create prefix.
+            invalid = text + f"add rule inet {TABLE} missing_chain counter\n"
+            self.assertNotEqual(fixture.nft("--file", "-", data=invalid.encode(), check=False).returncode, 0)
+            self.assertNotEqual(fixture.nft("list", "table", "inet", TABLE, check=False).returncode, 0)
+            # Match production's one exclusive batch, then exact verification.
+            fixture.nft("--file", "-", data=text.encode())
             fixture.verify_table()
-            self.assertNotEqual(fixture.nft("--file", "-", data=text.replace("table inet", "create table inet", 1).encode(), check=False).returncode, 0)
+            before = fixture.table()
+            self.assertNotEqual(fixture.nft("--file", "-", data=text.encode(), check=False).returncode, 0)
+            self.assertEqual(fixture.table(), before)  # includes every handle
             self.assertTrue(fixture.reachable(fixture.allowed))
             self.assertFalse(fixture.reachable(fixture.denied))
             fixture.nft("delete", "table", "inet", TABLE)
@@ -921,7 +927,7 @@ ExecStart=+/usr/bin/python3 -I -B {entry} guard-ensure --profile {profile_path}
             self.assertNotEqual(fixture.systemctl("restart", indexer_name, check=False).returncode, 0)
             self.assertFalse(fixture.reachable(fixture.allowed))
             self.assertEqual(fixture.systemctl("show", indexer_name, "--property=MainPID", "--value").stdout.strip(), b"0")
-            fixture.nft("--file", "-", data=firewall_text(fixture.profile).replace("table inet", "create table inet", 1).encode())
+            fixture.nft("--file", "-", data=firewall_create_text(fixture.profile).encode())
             fixture.systemctl("reset-failed", indexer_name)
             fixture.systemctl("start", indexer_name)
             fixture.wait_reachable(fixture.allowed)

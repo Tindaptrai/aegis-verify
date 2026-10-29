@@ -19,6 +19,19 @@ def firewall_text(p: Profile) -> str:
 '''
 
 
+def firewall_create_text(p: Profile) -> str:
+    """One nft batch: exclusive container, then explicit chain/rule commands.
+
+    Nested dump objects are expanded for ADD, not a CREATE-table command.
+    Keep the exclusive create in this same atomic batch as every policy object.
+    """
+    return (f"create table inet {TABLE}\n"
+            f"add chain inet {TABLE} input {{ type filter hook input priority -50; policy accept; }}\n"
+            f'add rule inet {TABLE} input ip daddr {p.indexer_ip} tcp dport 9200 iifname "lo" accept\n'
+            f"add rule inet {TABLE} input ip daddr {p.indexer_ip} tcp dport 9200 ip saddr {p.manager_ip} accept\n"
+            f"add rule inet {TABLE} input ip daddr {p.indexer_ip} tcp dport 9200 drop\n")
+
+
 def _expected(p: Profile) -> list:
     def match(left, right):
         return {"match": {"op": "==", "left": left, "right": right}}

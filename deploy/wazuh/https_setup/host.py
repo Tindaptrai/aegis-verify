@@ -25,7 +25,7 @@ import errno
 from .contracts import (SetupError, load_profile, patch_http_config,
                         read_vendor_ca_archive, _yaml_value)
 from .certificates import create_http_certificate
-from .firewall import TABLE, PROFILE, ENTRYPOINT, firewall_text, verify_table, guard_unit, indexer_dropin
+from .firewall import TABLE, PROFILE, ENTRYPOINT, firewall_create_text, verify_table, guard_unit, indexer_dropin
 from .transaction import STATE_ROOT, atomic_write, encoded, fsync_directory
 
 INSTALL_ROOT = Path(ENTRYPOINT).parent
@@ -920,9 +920,9 @@ class LinuxHost:
         if table["nftables"]:
             verify_table(table, p)
             return
-        # nft 'create' is exclusive. A racing table creator cannot cause our
-        # batch to append rules to a table we did not create.
-        script = ("create " + firewall_text(p)).encode()
+        # Exclusive table creation and all policy objects share one nft batch.
+        # A racing table creator aborts it without appending to an existing table.
+        script = firewall_create_text(p).encode()
         self.run("nft", "--check", "--file", "-", data=script)
         self.run("nft", "--file", "-", data=script)
         self.verify_guard(p)

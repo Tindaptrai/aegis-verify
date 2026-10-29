@@ -534,7 +534,12 @@ class TransactionTests(unittest.TestCase):
         host.run = run
         host.ensure_guard(self.host.p)
         self.assertEqual(len(observed), 2)
-        self.assertTrue(all(body.startswith(b"create table inet aegis_wazuh_http_v1") for body in observed))
+        for body in observed:
+            lines = body.splitlines()
+            self.assertEqual(lines[0], b"create table inet aegis_wazuh_http_v1")
+            self.assertTrue(lines[1].startswith(b"add chain inet aegis_wazuh_http_v1 input "))
+            self.assertEqual(sum(line.startswith(b"add rule inet aegis_wazuh_http_v1 input ") for line in lines), 3)
+        self.assertEqual(observed[0], observed[1])
 
     def test_config_metadata_drift_after_signing_refuses_patch(self):
         from deploy.wazuh.https_setup.contracts import patch_http_config
