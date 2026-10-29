@@ -8,10 +8,12 @@ from contextlib import contextmanager
 import hashlib
 import importlib.util
 import io
+import ipaddress
 import json
 import os
 from pathlib import Path
 import secrets
+import re
 import select
 import shutil
 import signal
@@ -33,6 +35,73 @@ from deploy.wazuh.tests.test_components import profile_dict
 
 KIT = Path(__file__).resolve().parents[1]
 OBSERVATIONS = {}  # Sanitized test facts only; never paths, addresses or key material.
+
+
+def fixture_nft_diagnostic(document, p):
+    """Bounded owned-table shape only; this does not normalize verification."""
+    try:
+        if (type(document) is not dict or set(document) != {"nftables"} or
+                type(document["nftables"]) is not list or len(document["nftables"]) > 16 or
+                len(tx.encoded(document)) > 16384):
+            return {"capture_error": "document_shape_or_size"}
+        objects = []
+        for item in document["nftables"]:
+            if type(item) is not dict or len(item) != 1:
+                return {"capture_error": "document_shape_or_size"}
+            kind, body = next(iter(item.items()))
+            if kind == "metainfo":
+                continue
+            if (kind not in {"table", "chain", "rule"} or type(body) is not dict or
+                    body.get("family") != "inet" or
+                    (body.get("name") if kind == "table" else body.get("table")) != TABLE):
+                return {"capture_error": "non_fixture_object"}
+            objects.append({kind: body})
+        def scrub(value):
+            if type(value) is dict:
+                return {key: ("<redacted>" if key in {"comment", "userdata"} else scrub(item))
+                        for key, item in value.items() if key != "handle"}
+            if type(value) is list:
+                return [scrub(item) for item in value]
+            if type(value) is str:
+                if value == p.indexer_ip:
+                    return "<indexer_ip>"
+                if value == p.manager_ip:
+                    return "<manager_ip>"
+                try:
+                    ipaddress.ip_network(value, strict=False)
+                    return "<other_ip>"
+                except ValueError:
+                    pass
+                return value if re.fullmatch(r"[A-Za-z0-9_.:+<>=!@/-]{1,80}", value) and not value.startswith("/") else "<redacted>"
+            return value
+        return {"nftables": scrub(objects)}
+    except (ValueError, TypeError, RecursionError):
+        return {"capture_error": "document_shape_or_size"}
+
+
+def fixture_service_diagnostic(properties, journal):
+    """Never export raw journal, command text, unit names or filesystem paths."""
+    fields = {"LoadState", "ActiveState", "SubState", "Result", "ExecMainCode", "ExecMainStatus"}
+    clean = {}
+    for line in properties[:8192].decode("ascii", "replace").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key in fields and re.fullmatch(r"[a-z0-9-]{1,48}", value):
+            clean[key] = value
+    errors = []
+    if len(journal) <= 65536:
+        for line in journal.splitlines():
+            try:
+                message = json.loads(line).get("MESSAGE")
+                if not isinstance(message, str) or len(message) > 256:
+                    continue
+                result = json.loads(message)
+                if (type(result) is dict and set(result) == {"status", "error"} and
+                        result["status"] == "error" and type(result["error"]) is str and
+                        SetupError(result["error"]).code == result["error"] and result["error"] not in errors):
+                    errors.append(result["error"])
+            except (ValueError, TypeError, AttributeError):
+                continue
+    return {"properties": clean, "cli_errors": errors}
 
 
 def command(*args, data=None, check=True, timeout=20):
@@ -208,6 +277,7 @@ class NetworkFixture:
         self.client = "avn-c-" + self.token
         self.namespaces = []
         self.units = []
+        self.unit_roles = {}
         self.processes = []
         self.root = Path("/run/aegis-native-" + self.token)
         self.owns_root = False
@@ -258,6 +328,14 @@ class NetworkFixture:
     def table(self):
         return json.loads(self.nft("--json", "list", "table", "inet", TABLE).stdout)
 
+    def verify_table(self):
+        document = self.table()
+        try:
+            verify_table(document, self.profile)
+        except SetupError:
+            OBSERVATIONS.setdefault(self.test.id(), {})["fixture_nft_document"] = fixture_nft_diagnostic(document, self.profile)
+            raise
+
     def reachable(self, source):
         return self.net(self.client, "/usr/bin/python3", "-I", "-B", "-c", CLIENT,
                         self.credentials / "ca.pem", self.indexer, source, check=False, timeout=5).returncode == 0
@@ -284,10 +362,35 @@ class NetworkFixture:
         self.test.assertFalse(path.exists())
         private_file(path, body.encode(), 0o644)
         self.units.append((full_name, path))
+        self.unit_roles[full_name] = name
         return full_name
 
     def systemctl(self, *args, check=True):
-        return command("systemctl", *args, check=check, timeout=25)
+        result = command("systemctl", *args, check=False, timeout=25)
+        if check and result.returncode:
+            self.capture_service_failure()
+            raise AssertionError("native command failed: systemctl")
+        return result
+
+    def capture_service_failure(self):
+        observation = OBSERVATIONS.setdefault(self.test.id(), {})
+        services = observation.setdefault("fixture_services", {})
+        for name, _ in self.units:
+            try:
+                properties = command("systemctl", "show", name,
+                                     "--property=LoadState,ActiveState,SubState,Result,ExecMainCode,ExecMainStatus",
+                                     check=False, timeout=10).stdout
+                journal = command("journalctl", "--unit", name, "--no-pager", "--output=json", "--lines=12",
+                                  check=False, timeout=10).stdout
+                services[self.unit_roles[name]] = fixture_service_diagnostic(properties, journal)
+            except (OSError, AssertionError, subprocess.SubprocessError):
+                services[self.unit_roles[name]] = {"capture_error": "service_query_failed"}
+        try:
+            result = self.nft("--json", "list", "table", "inet", TABLE, check=False, timeout=10)
+            observation["fixture_nft_document"] = (fixture_nft_diagnostic(json.loads(result.stdout), self.profile)
+                                                   if result.returncode == 0 else {"capture_error": "table_absent_or_unreadable"})
+        except (OSError, AssertionError, subprocess.SubprocessError, ValueError):
+            observation["fixture_nft_document"] = {"capture_error": "table_query_failed"}
 
     def cleanup(self):
         problems = []
@@ -706,7 +809,7 @@ class NativeTests(unittest.TestCase):
             fixture.nft("--check", "--file", "-", data=text.encode())
             # Match production's exclusive creation, then semantic verification.
             fixture.nft("--file", "-", data=text.replace("table inet", "create table inet", 1).encode())
-            verify_table(fixture.table(), fixture.profile)
+            fixture.verify_table()
             self.assertNotEqual(fixture.nft("--file", "-", data=text.replace("table inet", "create table inet", 1).encode(), check=False).returncode, 0)
             self.assertTrue(fixture.reachable(fixture.allowed))
             self.assertFalse(fixture.reachable(fixture.denied))
@@ -802,7 +905,7 @@ ExecStart=+/usr/bin/python3 -I -B {entry} guard-ensure --profile {profile_path}
             fixture.systemctl("start", indexer_name)
             fixture.wait_reachable(fixture.allowed)
             self.assertFalse(fixture.reachable(fixture.denied))
-            verify_table(fixture.table(), fixture.profile)
+            fixture.verify_table()
             pid = int(fixture.systemctl("show", indexer_name, "--property=MainPID", "--value").stdout)
             self.assertEqual(Path(f"/proc/{pid}/status").read_text().split("Uid:")[1].split()[0], "65534")
             self.assertEqual(os.stat(f"/proc/{pid}/ns/net").st_ino, fixture.inode)

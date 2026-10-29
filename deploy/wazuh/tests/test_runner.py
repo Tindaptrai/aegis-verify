@@ -160,6 +160,67 @@ class RunnerTests(unittest.TestCase):
 
 class NativeFixtureSafety(unittest.TestCase):
     """Portable refusal tests only; these mocks supply no native OS proof."""
+    def test_owned_nft_diagnostic_preserves_shape_and_redacts_fixture_data(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "fixture_nft_diagnostic"), "bounded synthetic nft diagnostics missing")
+        p = SimpleNamespace(indexer_ip="10.21.22.10", manager_ip="10.21.22.20")
+        document = {"nftables": [
+            {"metainfo": {"private": "/root/do-not-export"}},
+            {"table": {"family": "inet", "name": native.TABLE, "handle": 7}},
+            {"rule": {"family": "inet", "table": native.TABLE, "chain": "input",
+                      "comment": "DO_NOT_EXPORT", "expr": [
+                          {"match": {"left": {"payload": {"protocol": "ip", "field": "daddr"}}, "right": p.indexer_ip}},
+                          {"match": {"left": {"payload": {"protocol": "tcp", "field": "dport"}}, "right": "unexpected-service-name"}}]}}]}
+        captured = native.fixture_nft_diagnostic(document, p)
+        text = json.dumps(captured)
+        self.assertIn("unexpected-service-name", text)
+        self.assertIn("<indexer_ip>", text)
+        self.assertNotIn(p.indexer_ip, text)
+        self.assertNotIn("DO_NOT_EXPORT", text)
+        self.assertNotIn("/root/", text)
+        document["nftables"][1]["table"]["name"] = "unrelated-host-table"
+        self.assertEqual(native.fixture_nft_diagnostic(document, p), {"capture_error": "non_fixture_object"})
+
+    def test_service_failure_capture_exports_only_fixed_status_and_cli_error(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "fixture_service_diagnostic"), "sanitized service diagnostic missing")
+        properties = b"ActiveState=failed\nResult=exit-code\nExecMainStatus=1\nFragmentPath=/root/DO_NOT_EXPORT\n"
+        journal = b'\n'.join([
+            json.dumps({"MESSAGE": '{"status":"error","error":"firewall_mismatch"}'}).encode(),
+            json.dumps({"MESSAGE": '{"status":"error","error":"DO_NOT_EXPORT"}'}).encode(),
+            json.dumps({"MESSAGE": "/root/private-key DO_NOT_EXPORT"}).encode()])
+        captured = native.fixture_service_diagnostic(properties, journal)
+        self.assertEqual(captured["properties"], {"ActiveState": "failed", "Result": "exit-code", "ExecMainStatus": "1"})
+        self.assertEqual(captured["cli_errors"], ["firewall_mismatch"])
+        self.assertNotIn("DO_NOT_EXPORT", json.dumps(captured))
+
+    def test_failed_owned_unit_captures_diagnostics_and_still_fails(self):
+        from deploy.wazuh.tests import test_native as native
+        fixture = object.__new__(native.NetworkFixture)
+        fixture.test = self
+        fixture.server = "synthetic-server"
+        fixture.namespaces = [fixture.server]
+        fixture.units = [("synthetic-guard.service", Path("/run/synthetic-guard.service"))]
+        fixture.unit_roles = {"synthetic-guard.service": "guard"}
+        fixture.profile = SimpleNamespace(indexer_ip="10.21.22.10", manager_ip="10.21.22.20")
+        document = {"nftables": [{"table": {"family": "inet", "name": native.TABLE}}]}
+        def command(*args, **kwargs):
+            if args[0] == "systemctl" and args[1] == "start":
+                if kwargs.get("check", True):
+                    raise AssertionError("native command failed: systemctl")
+                return SimpleNamespace(returncode=1, stdout=b"", stderr=b"")
+            if args[0] == "systemctl":
+                return SimpleNamespace(returncode=0, stdout=b"ActiveState=failed\nExecMainStatus=1\n")
+            if args[0] == "journalctl":
+                return SimpleNamespace(returncode=0, stdout=b'{"MESSAGE":"{\\"status\\":\\"error\\",\\"error\\":\\"firewall_mismatch\\"}"}\n')
+            return SimpleNamespace(returncode=0, stdout=json.dumps(document).encode())
+        with patch.dict(native.OBSERVATIONS, clear=True), patch.object(native, "command", side_effect=command):
+            with self.assertRaisesRegex(AssertionError, "native command failed: systemctl"):
+                fixture.systemctl("start", "synthetic-guard.service")
+            observed = native.OBSERVATIONS.get(self.id(), {})
+            self.assertIn("fixture_nft_document", observed)
+            self.assertEqual(observed["fixture_services"]["guard"]["cli_errors"], ["firewall_mismatch"])
+
     def test_unknown_systemd_state_refuses_before_namespace_mutation(self):
         from deploy.wazuh.tests import test_native as native
         with patch.object(native.os.path, "lexists", return_value=False), \
