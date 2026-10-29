@@ -29,7 +29,7 @@ from .firewall import TABLE, PROFILE, ENTRYPOINT, firewall_create_text, verify_t
 from .transaction import STATE_ROOT, atomic_write, encoded, fsync_directory
 from .ufw_host import (UfwHostReader, LOADERS, LOADER_KEYS, DEPENDENCIES, RECORD_PATH,
                        strict_loaders, qualify_host, read_record, validate_record,
-                       compatibility_record, same_record)
+                       compatibility_record, same_record, decode_nft_json)
 
 INSTALL_ROOT = Path(ENTRYPOINT).parent
 PROFILE_ROOT = Path(PROFILE).parent
@@ -590,10 +590,10 @@ class Commands:
     def run_selected(self, name, *args):
         # Called only after the UFW adapter's held-file and fixed-alias gates.
         # xtables-multi dispatches on argv[0]; resolving its name loses that.
-        allowed = {"ufw": ("status",), "iptables": ("--version",), "ip6tables": ("--version",)}
+        allowed = {"iptables": ("--version",), "ip6tables": ("--version",)}
         if allowed.get(name) != args:
             raise SetupError("ufw_unsupported")
-        executable = "/usr/sbin/ufw" if name == "ufw" else "/usr/sbin/xtables-nft-multi"
+        executable = "/usr/sbin/xtables-nft-multi"
         self.fs.trusted(executable)
         return self._execute(executable, args, argv0="/usr/sbin/" + name)
 
@@ -685,7 +685,7 @@ class LinuxHost:
         return props
 
     def firewall(self):
-        return json.loads(self.run("nft", "--json", "list", "ruleset"))
+        return decode_nft_json(self.run("nft", "--json", "list", "ruleset"))
 
     def ufw_reader(self):
         return UfwHostReader(self)
@@ -719,8 +719,8 @@ class LinuxHost:
             raise SetupError("ufw_unsupported")
         return present
 
-    def foreign_firewall(self):
-        rules = stable_firewall(self.firewall())
+    def foreign_firewall(self, observation=None):
+        rules = stable_firewall(self.firewall() if observation is None else observation)
         own = self.table(rules)
         return {"nftables": [obj for obj in rules["nftables"] if obj not in own["nftables"]]}
 
@@ -729,7 +729,7 @@ class LinuxHost:
         loaders = self.firewall_loaders() if loaders is None else loaders
         if strict_loaders(loaders):
             return None
-        return qualify_host(self, loaders, self.foreign_firewall() if firewall is None else firewall)
+        return qualify_host(self, loaders, firewall)
 
     def read_firewall_compatibility(self):
         return read_record(self)
@@ -742,7 +742,7 @@ class LinuxHost:
                 raise SetupError("ufw_drift")
             return
         validate_record(record, profile)
-        current = qualify_host(self, loaders, self.foreign_firewall())
+        current = qualify_host(self, loaders)
         if not same_record(record, compatibility_record(profile, current)):
             raise SetupError("ufw_drift")
 

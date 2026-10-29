@@ -4,7 +4,7 @@ Local package references are consistency anchors at the trusted-root OS boundary
 not independent package authenticity. No init, hook or mutating UFW command runs.
 """
 from contextlib import contextmanager
-import hashlib
+import math
 import json
 import os
 from pathlib import PurePosixPath
@@ -13,7 +13,7 @@ import stat
 
 from .contracts import SetupError
 from .transaction import digest
-from .ufw import (RootFile, LIMIT, SUMS_PATH, FUNCTIONS_PATH, file_identity,
+from .ufw import (RootFile, LIMIT, FUNCTIONS_PATH, file_identity,
                   qualify_disabled_ufw, _same_record, _pairs)
 
 RECORD_PATH = "/etc/aegis-wazuh-https/ufw-compat.json"
@@ -139,37 +139,6 @@ class UfwHostReader:
         if actual != wrapper["files"][FUNCTIONS_PATH] or self.alias("/lib") != before:
             raise SetupError("ufw_drift")
 
-    def probe_identity(self, wrapper):
-        path = "/usr/sbin/ufw"
-        snapshot = self.root_file(path, LIMIT)
-        identity = file_identity(snapshot, path=path)
-        sums = self.root_file(SUMS_PATH, LIMIT)
-        if (file_identity(sums, path=SUMS_PATH) != wrapper["files"][SUMS_PATH] or
-                not identity["mode"] & 0o100 or not snapshot.body.startswith(b"#!/usr/bin/python3\n")):
-            raise SetupError("ufw_unsupported")
-        refs = {}
-        try:
-            for line in sums.body.decode("ascii").split("\n"):
-                if not line:
-                    continue
-                match = re.fullmatch(r"([0-9a-f]{32})  ([-A-Za-z0-9_./]+)", line)
-                if not match or match[2] in refs:
-                    raise ValueError
-                refs[match[2]] = match[1]
-            reference = refs[path[1:]]
-            if hashlib.md5(snapshot.body).hexdigest() != reference:
-                raise ValueError
-        except (ValueError, KeyError, UnicodeError):
-            raise SetupError("ufw_unsupported") from None
-        # Only after actual CLI provenance; Commands supplies bounded C-locale I/O.
-        status = self.host.commands.run_selected("ufw", "status")[0]
-        if status not in (b"Status: inactive", b"Status: inactive\n"):
-            raise SetupError("ufw_unsupported")
-        if (identity != file_identity(self.root_file(path, LIMIT), path=path) or
-                file_identity(self.root_file(SUMS_PATH, LIMIT), path=SUMS_PATH) != wrapper["files"][SUMS_PATH]):
-            raise SetupError("state_changed")
-        return {"file": identity, "package_md5": reference}
-
     def dependency_facts(self):
         """Check the effective ordering closure plus proposed owned edges.
 
@@ -282,12 +251,152 @@ def strict_loaders(loaders):
         state["UnitFileState"] in {"disabled", "masked", ""} for state in loaders.values()))
 
 
-def qualify_host(host, loaders, firewall):
+def decode_nft_json(raw):
+    """Reject ambiguous/truncated command output before any consumer sees it."""
+    def finite_number(value):
+        number = float(value)
+        if not math.isfinite(number):
+            raise ValueError
+        return number
+    try:
+        if type(raw) is not bytes or not 0 < len(raw) <= 4 * LIMIT:
+            raise ValueError
+        document = json.loads(raw, object_pairs_hook=_pairs, parse_float=finite_number,
+                              parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        if type(document) is not dict or set(document) != {"nftables"} or type(document["nftables"]) is not list:
+            raise ValueError
+        return document
+    except (ValueError, UnicodeError, RecursionError):
+        raise SetupError("firewall_mismatch") from None
+
+
+def validate_nft_observation(document):
+    """Narrow complete-output shape, not an nft expression/policy evaluator.
+
+    Only ordinary tables/chains/rules are initially qualified. Statements are
+    preserved, not interpreted; stable_firewall still refuses dynamic state.
+    Output metainfo and handles follow libnftables-json(5), schema version 1.
+    """
+    def name(value, *, limit=255, empty=False):
+        if (type(value) is not str or not empty and not value or
+                len(value.encode("utf-8")) > limit or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+            raise ValueError
+    def handle(value):
+        if type(value) is not int or not 0 < value < 2**64:
+            raise ValueError
+    try:
+        if (type(document) is not dict or set(document) != {"nftables"} or
+                type(document["nftables"]) is not list or not 1 <= len(document["nftables"]) <= 16384):
+            raise ValueError
+        # Also validate synthetic/object callers: nonfinite values and excessive
+        # nesting must not become absence evidence or exhaust recursive cleaning.
+        pending, count = [(document, 0)], 0
+        while pending:
+            value, depth = pending.pop()
+            count += 1
+            if depth > 64 or count > 131072:
+                raise ValueError
+            if type(value) is dict:
+                if any(type(key) is not str for key in value):
+                    raise ValueError
+                pending.extend((item, depth + 1) for item in value.values())
+            elif type(value) is list:
+                pending.extend((item, depth + 1) for item in value)
+            elif type(value) is float:
+                if not math.isfinite(value):
+                    raise ValueError
+            elif type(value) not in (str, int, bool, type(None)):
+                raise ValueError
+        tables, chains, handles, references = set(), set(), set(), []
+        for position, obj in enumerate(document["nftables"]):
+            if type(obj) is not dict or len(obj) != 1:
+                raise ValueError
+            kind, body = next(iter(obj.items()))
+            if type(body) is not dict:
+                raise ValueError
+            if position == 0:
+                if (kind != "metainfo" or set(body) != {"version", "release_name", "json_schema_version"} or
+                        type(body["json_schema_version"]) is not int or body["json_schema_version"] != 1):
+                    raise ValueError
+                name(body["version"], limit=128)
+                name(body["release_name"], limit=128)
+                continue
+            required = {"family", "handle"}
+            if kind == "table":
+                required |= {"name"}
+                optional = {"comment"}
+            elif kind == "chain":
+                required |= {"table", "name"}
+                optional = {"type", "hook", "prio", "policy", "dev", "comment"}
+            elif kind == "rule":
+                required |= {"table", "chain", "expr"}
+                optional = {"comment"}
+            else:
+                raise ValueError
+            if not required <= set(body) or set(body) - required - optional:
+                raise ValueError
+            if body["family"] not in {"ip", "ip6", "inet", "arp", "bridge", "netdev"}:
+                raise ValueError
+            handle(body["handle"])
+            for key in ("name", "table", "chain", "dev"):
+                if key in body:
+                    name(body[key])
+            if "comment" in body:
+                name(body["comment"], limit=256, empty=True)
+            family = body["family"]
+            identity = (kind, family, body.get("table"), body["handle"])
+            if identity in handles:
+                raise ValueError
+            handles.add(identity)
+            if kind == "table":
+                key = (family, body["name"])
+                if key in tables:
+                    raise ValueError
+                tables.add(key)
+            elif kind == "chain":
+                key = (family, body["table"], body["name"])
+                if key in chains or body["name"].startswith(("ufw-", "ufw6-")):
+                    raise ValueError
+                chains.add(key)
+                references.append(("table", key[:2]))
+                base = {"type", "hook", "prio", "policy"}
+                if base.intersection(body) or "dev" in body:
+                    if (not base <= set(body) or body["type"] not in {"filter", "nat", "route"} or
+                            body["hook"] not in {"prerouting", "input", "forward", "output", "postrouting", "ingress", "egress"} or
+                            type(body["prio"]) is not int or not -(2**31) <= body["prio"] < 2**31 or
+                            body["policy"] not in {"accept", "drop"} or family == "netdev" and "dev" not in body):
+                        raise ValueError
+            else:
+                references.append(("chain", (family, body["table"], body["chain"])))
+                if (type(body["expr"]) is not list or not body["expr"] or
+                        any(type(statement) is not dict or len(statement) != 1 for statement in body["expr"])):
+                    raise ValueError
+                for statement in body["expr"]:
+                    name(next(iter(statement)))
+        if any(key not in (tables if kind == "table" else chains) for kind, key in references):
+            raise ValueError
+    except (ValueError, TypeError, KeyError, UnicodeError, RecursionError):
+        raise SetupError("ufw_unsupported") from None
+
+
+def qualify_host(host, loaders, firewall=None):
     reader = host.ufw_reader()
     wrapper = qualify_disabled_ufw(reader, loaders)
     reader.validate_library_alias(wrapper)
-    return {"wrapper": wrapper, "probe": reader.probe_identity(wrapper),
-            "dependencies": reader.dependency_facts(), "foreign_firewall": firewall}
+    dependencies = reader.dependency_facts()
+    # Always take the observation internally, after wrapper/backend qualification.
+    # A caller's earlier dump is comparison evidence, never proof of absence.
+    observation = host.firewall()
+    validate_nft_observation(observation)
+    current = host.foreign_firewall(observation)
+    if firewall is not None and not same_record(firewall, current):
+        raise SetupError("state_changed")
+    after = qualify_disabled_ufw(reader, host.firewall_loaders())
+    reader.validate_library_alias(after)
+    if not same_record(wrapper, after) or not same_record(dependencies, reader.dependency_facts()):
+        raise SetupError("state_changed")
+    return {"wrapper": wrapper, "probe": {"method": "nft-no-ufw-chains-v1"},
+            "dependencies": dependencies, "foreign_firewall": current}
 
 
 def compatibility_record(profile, fingerprint):
@@ -299,7 +408,8 @@ def validate_record(record, profile):
             type(record["schema_version"]) is not int or record["schema_version"] != 1 or
             record["profile_sha256"] != digest(profile.as_dict()) or
             type(record["fingerprint"]) is not dict or
-            set(record["fingerprint"]) != {"wrapper", "probe", "dependencies", "foreign_firewall"}):
+            set(record["fingerprint"]) != {"wrapper", "probe", "dependencies", "foreign_firewall"} or
+            not same_record(record["fingerprint"]["probe"], {"method": "nft-no-ufw-chains-v1"})):
         raise SetupError("ufw_drift")
 
 

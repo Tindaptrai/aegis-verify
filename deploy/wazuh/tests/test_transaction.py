@@ -21,6 +21,15 @@ from deploy.wazuh.https_setup.contracts import Profile, SetupError
 from deploy.wazuh.tests.test_components import profile_dict
 
 
+def nft_observation(objects=()):
+    """Synthetic complete JSON output shape, not a native nft observation."""
+    values = copy.deepcopy(list(objects))
+    for number, entry in enumerate(values, 1):
+        next(iter(entry.values())).setdefault("handle", number)
+    return {"nftables": [{"metainfo": {"version": "1.0.9", "release_name": "synthetic",
+                                      "json_schema_version": 1}}, *values]}
+
+
 class SyntheticHost:
     """External host boundary: files, services and firewall are synthetic state."""
     def __init__(self):
@@ -658,11 +667,11 @@ class UfwHostIntegrationTests(unittest.TestCase):
         self.states = loaders()
         self.host = self.h.LinuxHost(fs=object(), commands=object())
         self.p = Profile(**profile_dict())
-        self.rules = {"nftables": [{"table": {"family": "ip", "name": "foreign"}}]}
+        self.rules = nft_observation([{"table": {"family": "ip", "name": "foreign"}}])
         self.host.firewall = lambda: copy.deepcopy(self.rules)
         self.host.properties = lambda unit, keys: {k: self.states[unit][k] for k in keys}
-        self.probe = {"file": {"sha256": "a" * 64}, "package_md5": "b" * 32}
-        self.reader.probe_identity = lambda wrapper: copy.deepcopy(self.probe)
+        self.probe = {"method": "nft-no-ufw-chains-v1"}
+        self.reader.probe_identity = lambda wrapper: self.fail("obsolete CLI probe must not be called")
         self.reader.dependency_facts = lambda: {"ufw.service": {"After": []}}
         self.reader.validate_library_alias = lambda wrapper: None
         self.host.ufw_reader = lambda: self.reader
@@ -672,6 +681,11 @@ class UfwHostIntegrationTests(unittest.TestCase):
     def admission(self):
         self.assertTrue(hasattr(self.host, "admit_firewall_loaders"), "Task 2 host admission missing")
         return self.host.admit_firewall_loaders()
+
+    def drift_config(self):
+        from deploy.wazuh.tests.test_ufw import snapshot
+        path = self.u.CONF_PATH
+        self.reader.files[path] = snapshot(self.u, path, self.reader.files[path].body + b"# changed\n")
 
     def pin(self):
         from deploy.wazuh.https_setup.transaction import digest
@@ -686,7 +700,7 @@ class UfwHostIntegrationTests(unittest.TestCase):
         result = self.admission()
         self.assertEqual(set(result), {"wrapper", "probe", "dependencies", "foreign_firewall"})
         self.assertEqual(set(result["wrapper"]), {"schema_version", "package_version", "files", "unit", "backends"})
-        self.assertEqual(result["foreign_firewall"], self.rules)
+        self.assertEqual(result["foreign_firewall"], self.h.stable_firewall(self.rules))
         self.assertEqual(result["probe"], self.probe)
 
     def test_active_wrapper_startup_cannot_bootstrap_missing_record(self):
@@ -697,9 +711,9 @@ class UfwHostIntegrationTests(unittest.TestCase):
     def test_startup_requalifies_pinned_record_even_with_active_guard(self):
         from deploy.wazuh.https_setup.firewall import _expected
         self.pin()
-        self.rules["nftables"].extend(_expected(self.p))
+        self.rules["nftables"].extend(nft_observation(_expected(self.p))["nftables"][1:])
         self.host.verify_installed_firewall_compatibility(self.p)
-        self.probe["package_md5"] = "c" * 32
+        self.drift_config()
         with self.assertRaisesRegex(SetupError, "ufw_drift"):
             self.host.verify_installed_firewall_compatibility(self.p)
 
@@ -729,7 +743,7 @@ class UfwHostIntegrationTests(unittest.TestCase):
         with self.assertRaises(SetupError):
             self.host.verify_installed_firewall_compatibility(self.p)
         self.states["nftables.service"]["ActiveState"] = "inactive"
-        self.rules["nftables"].append({"table": {"family": "ip6", "name": "new"}})
+        self.rules["nftables"].append({"table": {"family": "ip6", "name": "new", "handle": 1}})
         with self.assertRaisesRegex(SetupError, "ufw_drift"):
             self.host.verify_installed_firewall_compatibility(self.p)
 
@@ -769,7 +783,7 @@ class UfwHostIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(SetupError, "ufw_drift"):
             self.host.install_firewall_compatibility(self.p, fingerprint)
         self.record = None
-        self.probe["package_md5"] = "f" * 32
+        self.drift_config()
         with self.assertRaisesRegex(SetupError, "state_changed"):
             self.host.install_firewall_compatibility(self.p, fingerprint)
         self.assertEqual(events, ["write"])
@@ -799,7 +813,7 @@ class UfwHostIntegrationTests(unittest.TestCase):
         synthetic.facts["ufw_compatibility"] = copy.deepcopy(self.record["fingerprint"])
         c = Coordinator(synthetic)
         first = c.check("profile")["check_sha256"]
-        synthetic.facts["ufw_compatibility"]["probe"]["package_md5"] = "d" * 32
+        synthetic.facts["ufw_compatibility"]["probe"]["method"] = "obsolete"
         self.assertNotEqual(first, c.check("profile")["check_sha256"])
 
     def test_install_record_precedes_any_vendor_file_or_guard(self):
@@ -841,7 +855,7 @@ class UfwHostIntegrationTests(unittest.TestCase):
         with patch.object(self.h, "GUARD_UNIT", Path("synthetic-absent-guard")), patch.object(self.h, "DROPIN", Path("synthetic-absent-dropin")):
             self.host.restore_firewall_compatibility(self.p, snapshot, Path("synthetic"))
         snapshot = self.recovery_fixture()
-        self.record["fingerprint"]["probe"]["package_md5"] = "d" * 32
+        self.record["fingerprint"]["probe"]["method"] = "obsolete"
         changed = copy.deepcopy(self.record)
         with self.assertRaisesRegex(SetupError, "ufw_drift"):
             self.host.restore_firewall_compatibility(self.p, snapshot, Path("synthetic"))
@@ -850,7 +864,7 @@ class UfwHostIntegrationTests(unittest.TestCase):
     def test_recovery_missing_record_with_expanded_state_retains_protection(self):
         from deploy.wazuh.https_setup.firewall import _expected
         snapshot = self.recovery_fixture()
-        self.rules["nftables"].extend(_expected(self.p))
+        self.rules["nftables"].extend(nft_observation(_expected(self.p))["nftables"][1:])
         self.record = None
         with self.assertRaisesRegex(SetupError, "recovery_required"):
             self.host.check_recovery_firewall_compatibility(self.p, snapshot, Path("synthetic"))
@@ -858,11 +872,93 @@ class UfwHostIntegrationTests(unittest.TestCase):
 
     def test_host_gate_drift_after_capture_stops_before_signing_archive(self):
         fingerprint = self.admission()
-        facts = {"firewall": copy.deepcopy(self.rules), "ufw_compatibility": fingerprint}
-        self.probe["package_md5"] = "f" * 32
+        facts = {"firewall": self.h.stable_firewall(self.rules), "ufw_compatibility": fingerprint}
+        self.drift_config()
         self.host.fs = SimpleNamespace(archive=lambda *args: self.fail("CA archive opened after host drift"))
         with self.assertRaisesRegex(SetupError, "state_changed"):
             self.host.stage(self.p, facts, Path("synthetic"))
+
+    def test_fresh_observation_overrides_cached_absence_and_preserves_same_baseline(self):
+        cached = self.h.stable_firewall(self.rules)
+        self.rules["nftables"].append({"chain": {"family": "ip", "table": "foreign",
+            "name": "ufw-user-input", "handle": 2}})
+        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            self.host.admit_firewall_loaders(self.states, cached)
+        self.rules = nft_observation([{"table": {"family": "ip6", "name": "changed"}}])
+        with self.assertRaisesRegex(SetupError, "state_changed"):
+            self.host.admit_firewall_loaders(self.states, cached)
+
+    def test_static_config_and_backend_are_requalified_after_fresh_nft_read(self):
+        for drift in ("config", "backend"):
+            with self.subTest(drift=drift):
+                self.setUp()
+                def read():
+                    if drift == "config":
+                        self.drift_config()
+                    else:
+                        for name, facts in self.reader.backends.items():
+                            facts["version"] = (name + " v1.8.99 (nf_tables)\n").encode()
+                    return copy.deepcopy(self.rules)
+                self.host.firewall = read
+                with self.assertRaisesRegex(SetupError, "state_changed"):
+                    self.admission()
+
+    def test_empty_fresh_state_qualifies_without_any_cli_read_or_execution(self):
+        self.rules = nft_observation()
+        reads = []
+        original = self.reader.root_file
+        def root_file(path, limit):
+            self.assertNotIn(path, {"/usr/sbin/ufw", "/usr/bin/python3"})
+            reads.append(path)
+            return original(path, limit)
+        self.reader.root_file = root_file
+        result = self.admission()
+        self.assertEqual(result["probe"], {"method": "nft-no-ufw-chains-v1"})
+        self.assertEqual(result["foreign_firewall"], {"nftables": []})
+        self.assertGreaterEqual(reads.count(self.u.CONF_PATH), 2)
+
+    def test_old_missing_extra_probe_method_records_refuse_without_refresh(self):
+        self.pin()
+        for probe in ({}, {"method": "obsolete"}, {"method": "nft-no-ufw-chains-v1", "extra": 1},
+                      {"file": {"sha256": "a" * 64}, "package_md5": "b" * 32}):
+            with self.subTest(probe=probe):
+                self.record["fingerprint"]["probe"] = probe
+                before = copy.deepcopy(self.record)
+                with self.assertRaisesRegex(SetupError, "ufw_drift"):
+                    self.host.verify_installed_firewall_compatibility(self.p)
+                self.assertEqual(before, self.record)
+
+    def test_every_start_and_prewrite_reads_current_nft_state(self):
+        self.pin()
+        observations = []
+        self.host.firewall = lambda: observations.append(1) or copy.deepcopy(self.rules)
+        for _ in range(2):
+            before = len(observations)
+            self.host.verify_installed_firewall_compatibility(self.p)
+            self.assertGreater(len(observations), before)
+        self.record = None
+        expected = self.admission()
+        self.rules["nftables"].append({"chain": {"family": "ip", "table": "foreign",
+            "name": "ufw6-partial", "handle": 2}})
+        self.host.fs = SimpleNamespace(write=lambda *args: self.fail("record written after incompatible fresh state"))
+        with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            self.host.install_firewall_compatibility(self.p, expected)
+
+    def test_same_fresh_foreign_rules_are_preserved_and_dynamic_state_refuses(self):
+        self.rules = nft_observation([
+            {"table": {"family": "inet", "name": "foreign"}},
+            {"chain": {"family": "inet", "table": "foreign", "name": "input",
+                       "type": "filter", "hook": "input", "prio": 0, "policy": "drop"}},
+            {"rule": {"family": "inet", "table": "foreign", "chain": "input",
+                      "expr": [{"counter": {"packets": 7, "bytes": 700}}, {"accept": None}]}},
+        ])
+        before = copy.deepcopy(self.rules)
+        result = self.admission()
+        self.assertEqual(result["foreign_firewall"], self.h.stable_firewall(before))
+        self.assertEqual(self.rules, before)
+        self.rules["nftables"][-1]["rule"]["expr"] = [{"quota": {"val": 1}}]
+        with self.assertRaisesRegex(SetupError, "host_unsupported"):
+            self.admission()
 
 
 class UfwAdapterTests(unittest.TestCase):
@@ -877,39 +973,117 @@ class UfwAdapterTests(unittest.TestCase):
         self.fake = FakeReader(self.u)
         self.reader.root_file = self.fake.root_file
 
-    def test_probe_provenance_precedes_inactive_command_and_is_frozen(self):
-        body = b"#!/usr/bin/python3\n# synthetic CLI, never executed\n"
-        self.fake.files["/usr/sbin/ufw"] = self.snapshot("/usr/sbin/ufw", body, mode=0o755)
-        sums = self.fake.files[self.u.SUMS_PATH].body + hashlib.md5(body).hexdigest().encode() + b"  usr/sbin/ufw\n"
-        self.fake.files[self.u.SUMS_PATH] = self.snapshot(self.u.SUMS_PATH, sums)
-        wrapper = {"files": {self.u.SUMS_PATH: self.u.file_identity(self.fake.files[self.u.SUMS_PATH], path=self.u.SUMS_PATH)}}
-        calls = []
-        self.host.commands = SimpleNamespace(run_selected=lambda *args: (calls.append(args) or b"Status: inactive\n", b""))
-        identity = self.reader.probe_identity(wrapper)
-        self.assertEqual(calls, [("ufw", "status")])
-        self.assertEqual(identity["package_md5"], hashlib.md5(body).hexdigest())
-        self.assertEqual(set(identity), {"file", "package_md5"})
-        self.fake.files["/usr/sbin/ufw"] = self.snapshot("/usr/sbin/ufw", body + b"# drift\n", mode=0o755)
-        with self.assertRaises(SetupError):
-            self.reader.probe_identity(wrapper)
-        self.assertEqual(len(calls), 1)
+    def test_normal_and_dry_run_ufw_dispatch_are_forbidden(self):
+        command = self.h.Commands(SimpleNamespace(trusted=lambda path: None))
+        command._execute = lambda *args, **kwargs: self.fail("UFW CLI must never execute")
+        for arguments in (("status",), ("--dry-run", "status")):
+            with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                command.run_selected("ufw", *arguments)
 
-    def test_probe_active_localized_oversized_or_changed_status_refuses(self):
-        body = b"#!/usr/bin/python3\n# synthetic\n"
-        self.fake.files["/usr/sbin/ufw"] = self.snapshot("/usr/sbin/ufw", body, mode=0o755)
-        sums = hashlib.md5(body).hexdigest().encode() + b"  usr/sbin/ufw\n"
-        self.fake.files[self.u.SUMS_PATH] = self.snapshot(self.u.SUMS_PATH, sums)
-        wrapper = {"files": {self.u.SUMS_PATH: self.u.file_identity(self.fake.files[self.u.SUMS_PATH], path=self.u.SUMS_PATH)}}
-        for output in (b"Status: active\n", b"localized inactive\n", b"Status: inactive\nextra", b"x" * 65537):
-            self.host.commands = SimpleNamespace(run_selected=lambda *args: (output, b""))
-            with self.assertRaises(SetupError):
-                self.reader.probe_identity(wrapper)
-        def raced(*args):
-            self.fake.files["/usr/sbin/ufw"] = self.snapshot("/usr/sbin/ufw", body + b"# drift\n", mode=0o755)
-            return b"Status: inactive\n", b""
-        self.host.commands = SimpleNamespace(run_selected=raced)
-        with self.assertRaisesRegex(SetupError, "state_changed"):
-            self.reader.probe_identity(wrapper)
+    def nft_fixture(self, family="ip"):
+        return nft_observation([
+            {"table": {"family": family, "name": "foreign"}},
+            {"chain": {"family": family, "table": "foreign", "name": "ordinary"}},
+            {"rule": {"family": family, "table": "foreign", "chain": "ordinary",
+                      "expr": [{"counter": {"packets": 2, "bytes": 60}}, {"accept": None}]}},
+        ])
+
+    def nft_validate(self, document):
+        self.assertTrue(hasattr(self.a, "validate_nft_observation"), "fresh nft validator missing")
+        return self.a.validate_nft_observation(document)
+
+    def test_nft_empty_and_foreign_objects_preserve_scoped_handles(self):
+        self.nft_validate(nft_observation())
+        document = self.nft_fixture()
+        other = self.nft_fixture("ip6")["nftables"][1:]
+        # Handles may repeat across families and separate tables.
+        document["nftables"].extend(other)
+        other = self.nft_fixture()["nftables"][1:]
+        other[0]["table"].update(name="separate", handle=10)
+        for obj in other[1:]:
+            next(iter(obj.values()))["table"] = "separate"
+        document["nftables"].extend(other)
+        before = copy.deepcopy(document)
+        self.nft_validate(document)
+        self.assertEqual(document, before)
+
+    def test_nft_duplicate_identity_and_handle_checks_are_independent(self):
+        for kind in ("table", "chain", "rule"):
+            for same_handle in (False, True):
+                if kind == "rule" and not same_handle:
+                    continue  # Rules are identified by handle, not expression bytes.
+                with self.subTest(kind=kind, same_handle=same_handle):
+                    document = self.nft_fixture()
+                    extra = copy.deepcopy(next(obj for obj in document["nftables"] if kind in obj))
+                    if same_handle and kind != "rule":
+                        extra[kind]["name"] = "different"
+                    elif not same_handle:
+                        extra[kind]["handle"] = 20
+                    document["nftables"].append(extra)
+                    with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                        self.nft_validate(document)
+        document = self.nft_fixture()
+        document["nftables"][-1]["rule"]["handle"] = document["nftables"][2]["chain"]["handle"]
+        self.nft_validate(document)  # Separate object kinds are not a global ID space.
+
+    def test_nft_all_ufw_prefixes_refuse_even_partial_unreferenced_chains(self):
+        for family in ("ip", "ip6", "inet", "arp", "bridge", "netdev"):
+            for prefix in ("ufw-", "ufw6-"):
+                with self.subTest(family=family, prefix=prefix):
+                    document = self.nft_fixture(family)
+                    document["nftables"].pop()  # Chain alone is enough to refuse.
+                    document["nftables"][2]["chain"]["name"] = prefix + "partial"
+                    with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                        self.nft_validate(document)
+
+    def test_nft_malformed_unknown_duplicate_and_dangling_objects_refuse(self):
+        cases = [None, {}, {"nftables": []}, {"nftables": None},
+                 {"nftables": [], "unknown": []}]
+        for index in range(4):
+            doc = self.nft_fixture()
+            doc["nftables"].append(copy.deepcopy(doc["nftables"][index]))
+            cases.append(doc)
+        for kind, changes in (
+                ("table", {"name": ""}), ("table", {"family": "unknown"}),
+                ("table", {"name": "x" * 256}), ("table", {"name": "a\x00b"}),
+                ("table", {"handle": True}), ("table", {"handle": -1}),
+                ("table", {"handle": 1.0}), ("table", {"extra": "unknown"}),
+                ("chain", {"table": "missing"}), ("chain", {"name": None}),
+                ("chain", {"policy": "accept"}), ("rule", {"chain": "missing"}),
+                ("rule", {"expr": []}), ("rule", {"expr": [None]}),
+                ("rule", {"expr": [{"accept": None, "drop": None}]}),
+                ("rule", {"expr": [{"counter": {"bytes": float("inf")}}]}),
+                ("metainfo", {"json_schema_version": True}), ("metainfo", {"json_schema_version": 2})):
+            doc = self.nft_fixture()
+            next(entry[kind] for entry in doc["nftables"] if kind in entry).update(changes)
+            cases.append(doc)
+        for kind, key in (("table", "family"), ("chain", "name"), ("rule", "handle"), ("rule", "expr")):
+            doc = self.nft_fixture()
+            del next(entry[kind] for entry in doc["nftables"] if kind in entry)[key]
+            cases.append(doc)
+        for kind in ("set", "map", "counter", "flowtable", "unknown", "add"):
+            doc = self.nft_fixture()
+            doc["nftables"].append({kind: {"name": "unreviewed"}})
+            cases.append(doc)
+        for doc in cases:
+            with self.subTest(document=doc), self.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                self.nft_validate(doc)
+
+    def test_firewall_json_rejects_duplicate_nonfinite_truncated_and_oversized_data(self):
+        for raw in (b'{"nftables":[],"nftables":[]}', b'{"nftables":[{"table":{"name":"a","name":"b"}}]}',
+                    b'{"nftables":[NaN]}', b'{"nftables":[Infinity]}', b'{"nftables":[1e999]}',
+                    b'null', b'{}', b'{"nftables":', b'{"nftables":[]}' + b' ' * (4 * 1024 * 1024)):
+            self.host.run = lambda *args: raw
+            with self.subTest(raw=raw[:80]), self.assertRaisesRegex(SetupError, "firewall_mismatch"):
+                self.host.firewall()
+        calls = []
+        value = self.nft_fixture()
+        self.host.run = lambda *args: calls.append(args) or json.dumps(value).encode()
+        self.assertEqual(self.host.firewall(), value)
+        self.assertEqual(calls, [("nft", "--json", "list", "ruleset")])
+        self.host.run = lambda *args: (_ for _ in ()).throw(SetupError("command_failed"))
+        with self.assertRaisesRegex(SetupError, "command_failed"):
+            self.host.firewall()
 
     def test_backend_checks_wrapper_sbin_alias_and_preserves_selected_argv(self):
         paths = []
