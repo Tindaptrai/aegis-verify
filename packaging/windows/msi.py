@@ -113,10 +113,17 @@ def _write_build_diagnostic(options, stage, error):
     if options.diagnostic_result is None: return
     try:
         target = options.diagnostic_result.expanduser().absolute()
-        release = options.release.expanduser().absolute().resolve()
+        release_path = options.release.expanduser().absolute()
+        try:
+            release = release_path.resolve()
+            resolved_target = target.resolve()
+        except RuntimeError:
+            # Python 3.12 reports resolution loops as RuntimeError. This
+            # reporting-path failure must not replace the caught build error.
+            return
         # One explicit work-root sink; never allocate the MSI output to report it.
         if (target.name != 'msi-build-result.json' or target.parent != options.out.expanduser().absolute().parent
-                or target.resolve().is_relative_to(CHECKOUT) or target.resolve().is_relative_to(release)):
+                or resolved_target.is_relative_to(CHECKOUT) or resolved_target.is_relative_to(release)):
             return
         for ancestor in target.parents:
             _plain_path(ancestor)

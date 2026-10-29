@@ -431,6 +431,35 @@ class MsiBuildBoundaryTests(unittest.TestCase):
         self.assertEqual(result[0],2)
         self.assertTrue(sink.is_dir())
 
+    def test_looping_sink_preserves_main_probe_failure_and_existing_bytes(self):
+        original_resolve = Path.resolve
+        for existing in (False, True):
+            for timeout in (False, True):
+                with self.subTest(existing=existing, timeout=timeout):
+                    parent = self.root / f'loop-{existing}-{timeout}'; parent.mkdir()
+                    self.output = parent / 'msi'
+                    sink = parent / 'msi-build-result.json'
+                    if existing: sink.write_bytes(b'PRESERVE')
+                    probes = []
+                    def resolve(path, *args, **kwargs):
+                        if path == sink: raise RuntimeError('PRIVATE_SYMLINK_LOOP')
+                        return original_resolve(path, *args, **kwargs)
+                    def probe(command, **kwargs):
+                        probes.append(command[1:])
+                        if timeout: raise subprocess.TimeoutExpired('PRIVATE_COMMAND', 30, output='PRIVATE_OUTPUT')
+                        return subprocess.CompletedProcess(command, 0, stdout='5.0.1', stderr='')
+                    escaped = False
+                    with patch.object(Path, 'resolve', resolve):
+                        try: result = self.invoke_main(probe, sink)
+                        except RuntimeError: escaped = True
+                    self.assertFalse(escaped, 'diagnostic resolution replaced the original main failure')
+                    code = 'msi_build_failed' if timeout else 'wix_version_mismatch'
+                    self.assertEqual(result, (2, '', f'AEGIS MSI build: {code}\n'))
+                    self.assertEqual(probes, [['--version']])
+                    self.assertFalse(self.output.exists())
+                    self.assertEqual(sink.exists(), existing)
+                    if existing: self.assertEqual(sink.read_bytes(), b'PRESERVE')
+
     def test_workflow_curates_closed_report_before_msi_output_exists(self):
         workflow=(CHECKOUT/'.github/workflows/windows-distribution.yml').read_text()
         block=workflow.split('      - name: Curate delivery files and validation logs\n',1)[1]
