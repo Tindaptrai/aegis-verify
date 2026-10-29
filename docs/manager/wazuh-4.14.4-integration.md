@@ -97,8 +97,8 @@ example, not a promise about custom installations. The administrator must resolv
 the configured path and supply the correct public CA bundle. See the official
 [HTTP API configuration](https://documentation.wazuh.com/current/user-manual/indexer-api/configuration.html).
 
-Transfer only public certificate PEM using a trusted channel. Compare its SHA-256
-fingerprint through a separate trusted channel with the administrator. Never copy
+Transfer only public certificate PEM using a trusted channel. Compare each CA's SHA-256
+certificate fingerprint through a separate trusted channel with the administrator. Never copy
 `root-ca.key`, server/admin private keys or any other private key. Do not confuse
 a leaf certificate with a CA certificate. See the official
 [certificate deployment guide](https://documentation.wazuh.com/current/user-manual/wazuh-indexer-cluster/certificate-deployment.html).
@@ -109,6 +109,36 @@ placeholder with the administrator-confirmed public CA path:
 ```text
 openssl x509 -in <configured-public-ca.pem> -noout -subject -issuer -dates -fingerprint -sha256
 ```
+
+This command reports the SHA-256 fingerprint of the first certificate's DER
+encoding, not a hash of the whole PEM file. For a bundle, separate copies of the
+public certificates into individual PEM files, run the command for each, and
+compare **every certificate fingerprint** with the administrator through the
+independent trusted channel.
+
+The UI label **Nội dung PEM/bundle SHA-256** (`ca_sha256`) instead identifies the
+SHA-256 of the entire submitted ASCII PEM content: all certificates, their order,
+whitespace and line endings. This immutable integrity digest is not a certificate
+fingerprint. For an ASCII PEM file without a BOM it equals the whole-file hash:
+
+```text
+sha256sum <configured-public-ca.pem>
+```
+
+The existing browser upload decodes UTF-8 with `File.text()`, which removes an
+initial UTF-8 BOM but preserves CRLF/LF. Therefore an original file with a BOM
+does **not** have the same whole-file hash as the submitted content. This read-only
+Python command computes the displayed content digest for either case without
+changing the file or normalizing line endings (replace the placeholder):
+
+```text
+python -c "from pathlib import Path; import hashlib; print(hashlib.sha256(Path('<configured-public-ca.pem>').read_bytes().decode('utf-8-sig').encode('ascii')).hexdigest())"
+```
+
+Keep the approved file unchanged. Changing whitespace, line endings or certificate
+order changes the content digest even if individual DER fingerprints stay the
+same. Compare the content digest at confirmation and verify trust separately using
+each certificate fingerprint. The API and stored digest meaning are unchanged.
 
 Check validity dates and CA basic constraints, and inspect the deployed HTTPS leaf
 certificate to ensure its DNS/IP SAN matches the URL. A CA fingerprint differs
@@ -127,7 +157,11 @@ requires explicit CA upload; it has no system-trust or insecure mode.
 2. Kiểm tra runs policy → TLS chain/SAN → authentication → bounded `size:0`
    query, with a total 10-second probe deadline and 64 KiB response limit.
    An Indexer 401 means authentication failed, even if the endpoint responded.
-3. Xác nhận snapshot shows name, environment, endpoint, index, CA SHA-256 and
+   Success requires a positive, complete shard summary with exact integer counts,
+   no failed shards, no timeout or early termination and an empty hit list. Zero
+   target shards, missing or inconsistent counts fail with `query_failed`; actual
+   alert hits are never required.
+3. Xác nhận snapshot shows name, environment, endpoint, index, **Nội dung PEM/bundle SHA-256** and
    tested_at. Save within the five-minute draft TTL. Any input edit invalidates
    the test. Closing the form, logout or a session/CSRF change clears private
    browser memory. Saving clears the password and does not bind a machine.

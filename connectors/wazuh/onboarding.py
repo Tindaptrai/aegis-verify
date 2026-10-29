@@ -184,8 +184,13 @@ def check_response(status, headers, raw):
                 or headers.get('content-type', '').split(';')[0].strip().lower() != 'application/json'):
             raise ValueError
         value = json.loads(raw, object_pairs_hook=_unique, parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        shards = value.get('_shards') if type(value) is dict else None
         if (type(value) is not dict or value.get('timed_out') is not False or 'error' in value
-                or value.get('_shards', {}).get('failed') != 0 or value.get('hits', {}).get('hits') != []):
+                or value.get('terminated_early', False) is not False or type(shards) is not dict
+                or any(type(shards.get(key)) is not int for key in ('total', 'successful', 'skipped', 'failed'))
+                or shards['total'] <= 0 or shards['successful'] != shards['total'] or shards['failed'] != 0
+                or not 0 <= shards['skipped'] <= shards['successful']
+                or type(value.get('hits')) is not dict or value['hits'].get('hits') != []):
             raise ValueError
     except (ValueError, TypeError, AttributeError, UnicodeError, RecursionError):
         raise ProbeError('query_failed') from None

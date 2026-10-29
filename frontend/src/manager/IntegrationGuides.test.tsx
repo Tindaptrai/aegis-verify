@@ -2,6 +2,21 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { IntegrationGuides, wazuhGuide, guideHash, parseGuideHash } from './IntegrationGuides';
 describe('versioned integration guide', () => {
+  it('separates submitted PEM bundle digest from each certificate DER fingerprint', () => {
+    const props = { onStep: vi.fn(), onBack: vi.fn() };
+    const view = render(<IntegrationGuides step="ca" {...props} />);
+    const article = screen.getByRole('article');
+    expect(article).toHaveTextContent('Nội dung PEM/bundle SHA-256');
+    expect(article).toHaveTextContent('sha256sum <configured-public-ca.pem>');
+    expect(article).toHaveTextContent('DER');
+    expect(article).toHaveTextContent('từng certificate');
+    expect(article).toHaveTextContent('BOM');
+    expect(article).toHaveTextContent('CRLF');
+    expect(article).toHaveTextContent("read_bytes().decode('utf-8-sig').encode('ascii')");
+    view.rerender(<IntegrationGuides step="verify" {...props} />);
+    expect(article).toHaveTextContent('Nội dung PEM/bundle SHA-256');
+    expect(article).not.toHaveTextContent('CA fingerprint');
+  });
   it('records deployment, docs review status and unavailable screenshot provenance', () => {
     expect(wazuhGuide).toMatchObject({ vendor: 'Wazuh', product: 'Indexer', version_range: '4.14.4', deployment: 'self-managed', guide_revision: 1, reviewed_at: '2026-10-29', validation_status: 'docs-reviewed; native lab acceptance pending', screenshot_provenance: 'unavailable' });
     render(<IntegrationGuides step="account" onStep={vi.fn()} onBack={vi.fn()} />);

@@ -54,6 +54,24 @@ class ConnectionsCase(ConnectionsFixture, AccountsCase):
 
 
 class ApiTests(ConnectionsCase):
+    def test_incomplete_query_never_publishes_tested_snapshot(self):
+        from aegis_verify.connectors.wazuh.onboarding import check_response
+        from connections.models import ConnectionAudit, ConnectionDraft, ManagedSource
+        for shards in ({'total': 0, 'successful': 0, 'skipped': 0, 'failed': 0}, {'failed': False}):
+            with self.subTest(shards=shards):
+                raw = json.dumps({'timed_out': False, '_shards': shards, 'hits': {'hits': []}}).encode()
+                self.probe.side_effect = lambda **kwargs: check_response(200, {'content-type': 'application/json'}, raw)
+                response = self.post('wazuh/test', self.data)
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json(), {'error': {'code': 'query_failed'}})
+                self.assertEqual(self.files, {})
+                self.assertFalse(ConnectionDraft.objects.exclude(state='failed').exists())
+                self.assertFalse(ConnectionDraft.objects.filter(tested_at__isnull=False).exists())
+                self.assertFalse(ConnectionAudit.objects.exists())
+                failed = ConnectionDraft.objects.latest('created_at')
+                self.assertEqual(self.save({'draft_id': str(failed.pk)}).json()['error']['code'], 'draft_conflict')
+                self.assertFalse(ManagedSource.objects.exists())
+
     def test_lone_surrogates_are_bounded_errors_before_probe(self):
         for field in ('ca_pem','username','password','name','environment_id','endpoint','index'):
             for scalar in ('\ud800','\udfff'):

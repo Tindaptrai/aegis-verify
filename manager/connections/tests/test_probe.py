@@ -1,5 +1,6 @@
 """Synthetic certificates only; these tests make no lab compatibility claim."""
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 import socket
 import ssl
 import tempfile
@@ -30,6 +31,48 @@ def certificate(*, ca=True, expired=False):
 
 
 class ProbeTests(unittest.TestCase):
+    def test_query_requires_complete_positive_integer_shard_counts(self):
+        good = {'timed_out': False, '_shards': {'total': 2, 'successful': 2, 'skipped': 0, 'failed': 0},
+                'hits': {'hits': []}}
+        malformed = [
+            {'_shards': {'total': 0, 'successful': 0, 'skipped': 0, 'failed': 0}},
+            {'_shards': {'failed': 0}}, {'_shards': {'failed': False}},
+            {'_shards': None}, {'_shards': []}, {'hits': None}, {'hits': []},
+            {'hits': {}}, {'hits': {'hits': [{'synthetic': True}]}},
+            {'terminated_early': True}, {'terminated_early': 0}, {'timed_out': True},
+        ]
+        for field in ('total', 'successful', 'skipped', 'failed'):
+            malformed.append({'_shards': {k: v for k, v in good['_shards'].items() if k != field}})
+            for value in (False, True, None, '0', 0.0, -1):
+                malformed.append({'_shards': {**good['_shards'], field: value}})
+        for counts in ({'successful': 1}, {'successful': 3}, {'failed': 1}, {'skipped': 3}):
+            malformed.append({'_shards': {**good['_shards'], **counts}})
+        for changes in malformed:
+            with self.subTest(changes=changes):
+                with self.assertRaises(probe.ProbeError) as caught:
+                    probe.check_response(200, {'content-type': 'application/json'}, probe.json.dumps({**good, **changes}).encode())
+                self.assertEqual(str(caught.exception), 'query_failed')
+        for skipped in (0, 1, 2):
+            good['_shards']['skipped'] = skipped
+            probe.check_response(200, {'content-type': 'application/json'}, probe.json.dumps(good).encode())
+
+    def test_ca_digest_tracks_submitted_bundle_content_not_der_fingerprints(self):
+        pem = certificate()
+        cert = x509.load_pem_x509_certificate(pem.encode('ascii'))
+        digest = probe.validate_ca(pem)
+        self.assertEqual(digest, sha256(pem.encode('ascii')).hexdigest())
+        self.assertNotEqual(digest, cert.fingerprint(hashes.SHA256()).hex())
+        self.assertNotEqual(digest, probe.validate_ca(pem + '\n'))
+        bundle = pem + certificate()
+        self.assertEqual(probe.validate_ca(bundle), sha256(bundle.encode('ascii')).hexdigest())
+        # The documented recipe mirrors File.text UTF-8 decoding without universal-newline conversion.
+        crlf = pem.replace('\n', '\r\n')
+        uploaded = b'\xef\xbb\xbf' + crlf.encode('ascii')
+        submitted = uploaded.decode('utf-8-sig').encode('ascii')
+        self.assertEqual(submitted, crlf.encode('ascii'))
+        self.assertEqual(probe.validate_ca(crlf), sha256(submitted).hexdigest())
+        self.assertNotEqual(probe.validate_ca(crlf), sha256(uploaded).hexdigest())
+
     def test_shared_ipv4_and_non_global_ipv6_fail_closed_even_if_policy_listed(self):
         for address in ('100.64.1.2','fd12:3456:789a::1234','2001:db8::1234'):
             with self.subTest(address=address), self.assertRaises(probe.ProbeError):
@@ -70,7 +113,7 @@ class ProbeTests(unittest.TestCase):
             response = conn.return_value.getresponse.return_value
             response.status = 200
             response.getheaders.return_value = [('Content-Type','application/json')]
-            response.read.return_value = b'{"timed_out":false,"_shards":{"failed":0},"hits":{"hits":[]}}'
+            response.read.return_value = b'{"timed_out":false,"_shards":{"total":2,"successful":2,"skipped":0,"failed":0},"hits":{"hits":[]}}'
             probe.probe(endpoint=target.origin,index='wazuh-alerts-*',username='synthetic',password='synthetic',
                         ca_pem=certificate(),policy_provider=lambda *_:target)
             context = conn.call_args.args[2]
@@ -116,7 +159,7 @@ class ProbeTests(unittest.TestCase):
         self.assertLess(time.monotonic() - start, .12)
 
     def test_response_schema_and_auth_errors_do_not_expose_body(self):
-        good = b'{"timed_out":false,"_shards":{"failed":0},"hits":{"hits":[]}}'
+        good = b'{"timed_out":false,"_shards":{"total":2,"successful":2,"skipped":0,"failed":0},"hits":{"hits":[]}}'
         probe.check_response(200, {'content-type': 'application/json'}, good)
         for status, headers, body, code in (
             (401, {}, b'secret', 'authentication_failed'), (403, {}, b'secret', 'query_denied'),
@@ -188,7 +231,7 @@ class SyntheticTlsTests(unittest.TestCase):
                              patch.object(probe._PinnedHTTPS,'getresponse') as getresponse:
                             getresponse.return_value.status = 200
                             getresponse.return_value.getheaders.return_value = [('Content-Type','application/json')]
-                            getresponse.return_value.read.return_value = b'{"timed_out":false,"_shards":{"failed":0},"hits":{"hits":[]}}'
+                            getresponse.return_value.read.return_value = b'{"timed_out":false,"_shards":{"total":2,"successful":2,"skipped":0,"failed":0},"hits":{"hits":[]}}'
                             try:
                                 probe.probe(endpoint=endpoint,index='wazuh-alerts-*',username='synthetic-reader',
                                     password='synthetic-password',ca_pem=ca.public_bytes(serialization.Encoding.PEM).decode(),

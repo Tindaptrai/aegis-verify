@@ -32,12 +32,14 @@ describe('Connections workspace', () => {
     expect(screen.queryByRole('button', { name: 'Lưu nguồn' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Xác nhận snapshot' }));
     expect(screen.getByText('a'.repeat(64))).toBeVisible();
+    expect(screen.getByText('Nội dung PEM/bundle SHA-256')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: 'Lưu nguồn' }));
     await screen.findByText('Nguồn mới đã lưu — máy vẫn dùng nguồn cũ.');
     expect(screen.queryByLabelText('Mật khẩu Indexer')).not.toBeInTheDocument();
     fireEvent.click(await screen.findByRole('button', { name: 'Chuẩn bị nguồn Synthetic source v1' }));
     await waitFor(() => expect(api.prepare).toHaveBeenCalledWith(sourceId, null, 'csrf', expect.any(AbortSignal)));
     expect(await screen.findByText('Đã chọn, chưa kích hoạt')).toBeVisible();
+    expect(screen.getByText(/Kiểm tra query:/)).toHaveTextContent('Nội dung PEM/bundle SHA-256');
     expect(screen.getByText(/Worker: waiting_configuration/)).not.toBeVisible();
     expect(storage).not.toHaveBeenCalled(); storage.mockRestore();
   });
