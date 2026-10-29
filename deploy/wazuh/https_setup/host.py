@@ -19,6 +19,8 @@ import secrets
 import io
 import zipfile
 import shlex
+import ctypes
+import errno
 
 from .contracts import (SetupError, load_profile, patch_http_config,
                         read_vendor_ca_archive, _yaml_value)
@@ -70,6 +72,196 @@ def validate_vendor_metadata(info, *, uid, gid, directory=False):
             or info.st_mode & 0o002 or info.st_mode & 0o020 and info.st_gid != gid
             or not directory and info.st_nlink != 1):
         raise SetupError("path_untrusted")
+
+
+def publication_identity(info):
+    """Rename changes ctime; all other frozen inode/content facts still apply."""
+    return {key: value for key, value in identity(info).items() if key != "ctime_ns"}
+
+
+class VendorPublisher:
+    """Publication algorithm over held fds; staging parent is root-controlled.
+
+    EXCHANGE preserves the actual displaced inode. This is deliberately not
+    described as compare-and-swap: a writer inside the syscall window causes
+    recovery-required, with displaced evidence retained and no service restart.
+    """
+    def __init__(self, ops, *, stage_fd):
+        self.ops, self.stage = ops, stage_fd
+
+    def _same(self, parent, name, fd, frozen, *, body=None, renamed=False):
+        current = self.ops.stat(parent, name)
+        held = self.ops.fstat(fd)
+        compare = publication_identity if renamed else identity
+        if current is None or compare(current) != compare(frozen) or compare(held) != compare(frozen):
+            raise SetupError("vendor_drift")
+        if body is not None:
+            if self.ops.read(fd) != body or compare(self.ops.fstat(fd)) != compare(frozen):
+                raise SetupError("vendor_drift")
+            current = self.ops.stat(parent, name)
+            if current is None or compare(current) != compare(frozen):
+                raise SetupError("vendor_drift")
+
+    def directory(self, parent, name, *, gid):
+        if self.ops.stat(parent, name) is not None:
+            raise SetupError("vendor_drift")
+        # The only mkdir/open/metadata sequence is under the protected staging
+        # fd. No chmod/chown is ever issued against a vendor-directory name.
+        self.ops.mkdir(self.stage, "new")
+        fd = self.ops.open(self.stage, "new", directory=True)
+        try:
+            self.ops.metadata(fd, 0, gid, 0o750)
+            frozen = self.ops.fstat(fd)
+            self._same(self.stage, "new", fd, frozen)
+            self.ops.sync(fd)
+            self.ops.rename(self.stage, "new", parent, name)
+            self.ops.sync(self.stage)
+            self.ops.sync(parent)
+            self._same(parent, name, fd, frozen, renamed=True)
+        finally:
+            self.ops.close(fd)
+
+    def file(self, parent, name, body, *, uid, gid, mode, owner, group, expected):
+        before = self.ops.stat(parent, name)
+        target_fd = new_fd = displaced_fd = None
+        try:
+            original = None
+            if before is not None:
+                validate_vendor_metadata(before, uid=uid, gid=gid)
+                if expected is None:
+                    raise SetupError("vendor_drift")
+                target_fd = self.ops.open(parent, name)
+                self._same(parent, name, target_fd, before)
+                original = self.ops.read(target_fd)
+                self._same(parent, name, target_fd, before, body=original)
+                if sha(original) not in expected:
+                    raise SetupError("vendor_drift")
+            elif expected is not None:
+                raise SetupError("vendor_drift")
+            new_fd = self.ops.open(self.stage, "new", create=True)
+            # Construct privately as root0600; desired service metadata is set
+            # only after writing, while the containing directory is still0700.
+            self.ops.write(new_fd, body)
+            self.ops.metadata(new_fd, owner, group, mode)
+            self.ops.sync(new_fd)
+            prepared = self.ops.fstat(new_fd)
+            if (not stat.S_ISREG(prepared.st_mode) or prepared.st_nlink != 1 or
+                    (prepared.st_uid, prepared.st_gid, stat.S_IMODE(prepared.st_mode)) != (owner, group, mode)):
+                raise SetupError("vendor_drift")
+            self._same(self.stage, "new", new_fd, prepared, body=body)
+            if before is not None:
+                self._same(parent, name, target_fd, before, body=original)
+            elif self.ops.stat(parent, name) is not None:
+                raise SetupError("vendor_drift")
+            self.ops.rename(self.stage, "new", parent, name, exchange=before is not None)
+            self.ops.sync(self.stage)
+            self.ops.sync(parent)
+            if before is not None:
+                # Keep the displaced entry even on failure; it may be somebody
+                # else's intervening edit, and must never be unlinked/overwritten.
+                displaced = self.ops.stat(self.stage, "new")
+                if displaced is None or not stat.S_ISREG(displaced.st_mode):
+                    raise SetupError("vendor_drift")
+                displaced_fd = self.ops.open(self.stage, "new")
+                self.ops.preserve("displaced", displaced_fd)
+                self._same(self.stage, "new", displaced_fd, before, body=original, renamed=True)
+            self._same(parent, name, new_fd, prepared, body=body, renamed=True)
+        finally:
+            for fd in (displaced_fd, new_fd, target_fd):
+                if fd is not None:
+                    self.ops.close(fd)
+
+
+class PublicationOps:
+    """Linux syscall adapter, used only inside a root-owned staging directory."""
+    def __init__(self, stage_fd):
+        self.stage = stage_fd
+        try:
+            self.renameat2 = ctypes.CDLL(None, use_errno=True).renameat2
+        except (AttributeError, OSError):
+            raise SetupError("filesystem_unsupported") from None
+        self.renameat2.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint]
+        self.renameat2.restype = ctypes.c_int
+
+    def stat(self, parent, name):
+        try:
+            return os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+
+    def open(self, parent, name, *, create=False, directory=False):
+        flags = os.O_NOFOLLOW | (os.O_RDWR | os.O_CREAT | os.O_EXCL if create else os.O_RDONLY | os.O_NONBLOCK)
+        if directory:
+            flags |= os.O_DIRECTORY
+        return os.open(name, flags, 0o600, dir_fd=parent)
+
+    def mkdir(self, parent, name):
+        os.mkdir(name, 0o700, dir_fd=parent)
+
+    def fstat(self, fd):
+        return os.fstat(fd)
+
+    def read(self, fd):
+        os.lseek(fd, 0, os.SEEK_SET)
+        body = bytearray()
+        while len(body) <= 1024 * 1024:
+            chunk = os.read(fd, min(65536, 1024 * 1024 + 1 - len(body)))
+            if not chunk:
+                return bytes(body)
+            body.extend(chunk)
+        raise SetupError("vendor_drift")
+
+    def write(self, fd, body):
+        offset = 0
+        while offset < len(body):
+            written = os.write(fd, body[offset:])
+            if not written:
+                raise SetupError("vendor_drift")
+            offset += written
+
+    def metadata(self, fd, uid, gid, mode):
+        os.fchown(fd, uid, gid)
+        os.fchmod(fd, mode)
+
+    def sync(self, fd):
+        os.fsync(fd)
+
+    def close(self, fd):
+        os.close(fd)
+
+    def rename(self, src_parent, src, dst_parent, dst, *, exchange=False):
+        # Linux UAPI: RENAME_NOREPLACE=1, RENAME_EXCHANGE=2. No fallback.
+        rc = self.renameat2(src_parent, os.fsencode(src), dst_parent, os.fsencode(dst), 2 if exchange else 1)
+        if rc != 0:
+            code = ctypes.get_errno()
+            if code in {errno.EXDEV, errno.ENOSYS, errno.EINVAL, errno.EOPNOTSUPP}:
+                raise SetupError("filesystem_unsupported")
+            raise SetupError("vendor_drift")
+
+    def preserve(self, name, fd):
+        # Original inode stays under the root-only staging ancestor. A separate
+        # root0600 snapshot preserves observed bytes even if an old writer still
+        # has an fd to the displaced service-owned inode.
+        body = self.read(fd)
+        saved = self.open(self.stage, name + ".snapshot", create=True)
+        try:
+            self.metadata(saved, 0, 0, 0o600)
+            self.write(saved, body)
+            self.sync(saved)
+            self.sync(self.stage)
+        finally:
+            self.close(saved)
+
+    def qualify(self):
+        """Probe both required flags in the private staging directory first."""
+        for name in ("probe-a", "probe-b"):
+            fd = self.open(self.stage, name, create=True)
+            self.close(fd)
+        self.rename(self.stage, "probe-a", self.stage, "probe-c")
+        self.rename(self.stage, "probe-c", self.stage, "probe-b", exchange=True)
+        os.unlink("probe-b", dir_fd=self.stage)
+        os.unlink("probe-c", dir_fd=self.stage)
+        self.sync(self.stage)
 
 
 def verify_listeners(text, p, *, expanded):
@@ -288,50 +480,91 @@ class SecureFS:
         return raw
 
     def vendor_mkdir(self, path, uid, gid):
-        with self.vendor_parent(path, uid, gid) as (parent, name):
-            # Exclusive creation: existing service-replaced destinations refuse.
-            os.mkdir(name, 0o750, dir_fd=parent)
-            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
-            try:
-                os.fchown(fd, 0, gid)
-                os.fchmod(fd, 0o750)
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            os.fsync(parent)
+        try:
+            with self.publication(path, "directory") as publisher:
+                with self.vendor_parent(path, uid, gid) as (parent, name):
+                    if os.fstat(parent).st_dev != publisher.ops.fstat(publisher.stage).st_dev:
+                        raise SetupError("filesystem_unsupported")
+                    publisher.directory(parent, name, gid=gid)
+        except (OSError, SetupError) as exc:
+            if isinstance(exc, SetupError) and exc.code == "filesystem_unsupported":
+                raise
+            raise SetupError("vendor_drift") from None
 
     def vendor_write(self, path, body, uid, gid, *, mode=0o640, owner=0, group=None, expected=None):
-        with self.vendor_parent(path, uid, gid) as (parent, name):
+        try:
+            with self.publication(path, "file") as publisher:
+                with self.vendor_parent(path, uid, gid) as (parent, name):
+                    if os.fstat(parent).st_dev != publisher.ops.fstat(publisher.stage).st_dev:
+                        raise SetupError("filesystem_unsupported")
+                    publisher.file(parent, name, body, uid=uid, gid=gid, mode=mode, owner=owner,
+                                   group=gid if group is None else group, expected=expected)
+        except (OSError, SetupError) as exc:
+            if isinstance(exc, SetupError) and exc.code == "filesystem_unsupported":
+                raise
+            raise SetupError("vendor_drift") from None
+
+    @contextmanager
+    def publication(self, path, kind):
+        """Protected provenance comes from the entire root-owned ancestor chain.
+
+        Staging never lives below the service-owned config tree. All operations,
+        including successful exchanges, retain their evidence for human review.
+        Prepared/failed records block automatic recovery after an interruption.
+        """
+        root_info = self.trusted(PROFILE_ROOT)
+        if stat.S_IMODE(root_info.st_mode) != 0o700:
+            raise SetupError("path_untrusted")
+        root_fd = os.open(PROFILE_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        stage_fd = None
+        try:
+            if identity(os.fstat(root_fd)) != identity(root_info):
+                raise SetupError("vendor_drift")
+            stage_name = "publication-" + secrets.token_hex(16)
+            # Only root can change this parent. This is not a vendor mkdir/open
+            # provenance guess based on owner or ctime of an untrusted entry.
+            os.mkdir(stage_name, 0o700, dir_fd=root_fd)
+            stage_fd = os.open(stage_name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
+            os.fchown(stage_fd, 0, 0)
+            os.fchmod(stage_fd, 0o700)
+            os.fsync(root_fd)
+            record_path = PROFILE_ROOT / stage_name / "publication.json"
+            record = {"schema_version": 1, "kind": kind, "target": str(path), "status": "prepared"}
+            self.write(record_path, encoded(record))
             try:
-                info = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            except FileNotFoundError:
-                info = None
-            if info is not None:
-                validate_vendor_metadata(info, uid=uid, gid=gid)
-                if expected is None:
-                    raise SetupError("state_changed")
-                fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=parent)
-                with os.fdopen(fd, "rb", buffering=0) as stream:
-                    if identity(info) != identity(os.fstat(fd)) or sha(stream.read(1024 * 1024 + 1)) not in expected:
-                        raise SetupError("state_changed")
-            elif expected is not None:
-                raise SetupError("state_changed")
-            temporary = ".aegis-" + secrets.token_hex(16)
-            fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=parent)
+                ops = PublicationOps(stage_fd)
+                ops.qualify()
+                yield VendorPublisher(ops, stage_fd=stage_fd)
+                # Recheck the protected root and opened stage name before marking
+                # completion, after the vendor-parent context has also validated.
+                for held, current in ((os.fstat(root_fd), PROFILE_ROOT.lstat()),
+                                      (os.fstat(stage_fd), os.stat(stage_name, dir_fd=root_fd, follow_symlinks=False))):
+                    if any(getattr(held, "st_" + key) != getattr(current, "st_" + key)
+                           for key in ("dev", "ino", "uid", "gid", "mode")):
+                        raise SetupError("vendor_drift")
+                record["status"] = "complete"
+                self.write(record_path, encoded(record))
+            except BaseException:
+                record["status"] = "failed"
+                self.write(record_path, encoded(record))
+                raise
+        finally:
+            if stage_fd is not None:
+                os.close(stage_fd)
+            os.close(root_fd)
+
+    def check_publications(self):
+        if not PROFILE_ROOT.exists():
+            return
+        self.trusted(PROFILE_ROOT)
+        for directory in PROFILE_ROOT.glob("publication-*"):
+            self.trusted(directory)
             try:
-                with os.fdopen(fd, "wb") as stream:
-                    os.fchown(fd, owner, gid if group is None else group)
-                    os.fchmod(fd, mode)
-                    stream.write(body)
-                    stream.flush()
-                    os.fsync(fd)
-                os.replace(temporary, name, src_dir_fd=parent, dst_dir_fd=parent)
-                os.fsync(parent)
-            finally:
-                try:
-                    os.unlink(temporary, dir_fd=parent)
-                except FileNotFoundError:
-                    pass
+                record = json.loads(self.read(directory / "publication.json", private=True))
+                if record.get("status") != "complete":
+                    raise ValueError
+            except (OSError, ValueError, SetupError):
+                raise SetupError("vendor_drift") from None
 
 
 class Commands:
@@ -714,7 +947,7 @@ class LinuxHost:
             raise SetupError("state_changed")
         info = self.vstat(p.config_path)
         if identity(info) != json.loads(self.fs.read(work / "original-metadata.json", private=True)):
-            raise SetupError("state_changed")
+            raise SetupError("vendor_drift")
         self.fs.vendor_write(p.config_path, body, self.uid, self.gid, owner=info.st_uid,
                              group=info.st_gid, mode=stat.S_IMODE(info.st_mode), expected={sha(original)})
 
@@ -750,6 +983,9 @@ class LinuxHost:
             raise SetupError("verification_failed")
 
     def restore(self, p, snapshot, work):
+        # A killed process may not have persisted the coordinator's drift flag.
+        # Never overwrite a pending/failed exchange's preserved vendor evidence.
+        self.fs.check_publications()
         self.uid, self.gid = snapshot["uid"], snapshot["gid"]
         if not (snapshot["guard_unit_absent"] and snapshot["dropin_absent"] and snapshot["table_absent"]):
             raise SetupError("recovery_required")
@@ -757,8 +993,13 @@ class LinuxHost:
         if sha(original) != snapshot["original_sha256"]:
             raise SetupError("recovery_required")
         meta = snapshot["metadata"]
-        self.fs.vendor_write(p.config_path, original, self.uid, self.gid, owner=meta["uid"], group=meta["gid"],
-                             mode=stat.S_IMODE(meta["mode"]), expected={snapshot["original_sha256"], snapshot["patched_sha256"]})
+        if self.vread(p.config_path) != original:
+            self.fs.vendor_write(p.config_path, original, self.uid, self.gid, owner=meta["uid"], group=meta["gid"],
+                                 mode=stat.S_IMODE(meta["mode"]), expected={snapshot["original_sha256"], snapshot["patched_sha256"]})
+        else:
+            info = self.vstat(p.config_path)
+            if (info.st_uid, info.st_gid, info.st_mode) != (meta["uid"], meta["gid"], meta["mode"]):
+                raise SetupError("vendor_drift")
         if DROPIN.exists():
             if self.fs.read(DROPIN) != indexer_dropin().encode():
                 raise SetupError("recovery_required")

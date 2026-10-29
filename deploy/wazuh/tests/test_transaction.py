@@ -13,6 +13,7 @@ import zipfile
 import sys
 import gzip
 import tarfile
+import errno
 from contextlib import contextmanager
 import unittest
 
@@ -555,7 +556,7 @@ class TransactionTests(unittest.TestCase):
         self.assertEqual(writes[0]["mode"], 0o660)
         writes.clear()
         props["mode"] = stat.S_IFREG | 0o640
-        with self.assertRaisesRegex(SetupError, "state_changed"):
+        with self.assertRaisesRegex(SetupError, "vendor_drift"):
             host.patch_config(self.host.p, Path("synthetic"))
         self.assertEqual(writes, [])
 
@@ -611,6 +612,271 @@ class TransactionTests(unittest.TestCase):
         with patch.object(self.h, "fsync_directory", lambda _: None):
             host.cleanup(work)
         self.assertEqual(list(work.iterdir()), [])
+
+    def test_refused_vendor_publication_never_overwrites_intervening_edit_in_recovery(self):
+        frozen = self.c.check("profile")
+        def refused(p, work):
+            self.host.config = "intervening operator edit"
+            raise SetupError("vendor_drift")
+        self.host.patch_config = refused
+        with self.assertRaisesRegex(SetupError, "recovery_required"):
+            self.c.apply("profile", frozen["profile_sha256"], frozen["check_sha256"])
+        self.assertEqual(self.host.config, "intervening operator edit")
+        self.assertNotIn("restart", self.host.events)
+        self.assertNotIn("restore", self.host.events)
+        self.assertTrue(self.host.guard)
+        with self.assertRaisesRegex(SetupError, "recovery_required"):
+            self.c.rollback()
+        self.assertEqual(self.host.config, "intervening operator edit")
+
+
+class PublicationKernel:
+    """In-memory syscall adapter; names and held fds have independent lifetimes."""
+    def __init__(self):
+        self.entries = {}
+        self.fds = {}
+        self.serial = 10
+        self.hook = lambda event: None
+        self.metadata_changes = []
+        self.snapshots = {}
+        self.renames = []
+
+    def node(self, *, directory=False, body=b"", uid=123, gid=123, mode=0o660):
+        self.serial += 1
+        return dict(ino=self.serial, directory=directory, body=body, uid=uid, gid=gid, mode=mode, mtime_ns=1, ctime_ns=1)
+
+    def info(self, node):
+        return SimpleNamespace(st_dev=1, st_ino=node["ino"], st_mode=(stat.S_IFDIR if node["directory"] else stat.S_IFREG) | node["mode"],
+            st_uid=node["uid"], st_gid=node["gid"], st_nlink=2 if node["directory"] else 1,
+            st_size=len(node["body"]), st_mtime_ns=node["mtime_ns"], st_ctime_ns=node["ctime_ns"])
+
+    def stat(self, parent, name):
+        node = self.entries.get((parent, name))
+        return None if node is None else self.info(node)
+
+    def open(self, parent, name, *, create=False, directory=False):
+        if create:
+            if (parent, name) in self.entries:
+                raise FileExistsError()
+            self.entries[parent, name] = self.node(directory=directory, uid=0, gid=0, mode=0o700 if directory else 0o600)
+        node = self.entries[parent, name]
+        if node["directory"] != directory:
+            raise OSError()
+        fd = len(self.fds) + 100
+        self.fds[fd] = node
+        self.hook("opened_stage" if parent == 2 else "opened_target")
+        return fd
+
+    def mkdir(self, parent, name):
+        if (parent, name) in self.entries:
+            raise FileExistsError()
+        self.entries[parent, name] = self.node(directory=True, uid=0, gid=0, mode=0o700)
+        self.hook("made_stage_directory")
+
+    def fstat(self, fd):
+        return self.info(self.fds[fd])
+
+    def read(self, fd):
+        return self.fds[fd]["body"]
+
+    def write(self, fd, body):
+        self.fds[fd]["body"] = body
+        self.hook("wrote_stage")
+
+    def metadata(self, fd, uid, gid, mode):
+        node = self.fds[fd]
+        self.metadata_changes.append(node["ino"])
+        node.update(uid=uid, gid=gid, mode=mode)
+        self.hook("metadata_stage")
+
+    def sync(self, fd):
+        pass
+
+    def close(self, fd):
+        pass
+
+    def rename(self, src_parent, src, dst_parent, dst, *, exchange=False):
+        self.hook("before_exchange" if exchange else "before_noreplace")
+        self.renames.append(exchange)
+        if exchange:
+            self.entries[src_parent, src], self.entries[dst_parent, dst] = self.entries[dst_parent, dst], self.entries[src_parent, src]
+        else:
+            if (dst_parent, dst) in self.entries:
+                raise SetupError("vendor_drift")
+            self.entries[dst_parent, dst] = self.entries.pop((src_parent, src))
+        self.hook("after_exchange" if exchange else "after_noreplace")
+
+    def preserve(self, name, fd):
+        self.snapshots[name] = self.read(fd)
+
+
+class PublicationTests(unittest.TestCase):
+    def setUp(self):
+        self.h = importlib.import_module("deploy.wazuh.https_setup.host")
+        self.assertTrue(hasattr(self.h, "VendorPublisher"), "Root-staged publication is not implemented")
+        self.ops = PublicationKernel()
+        self.publisher = self.h.VendorPublisher(self.ops, stage_fd=2)
+
+    def write(self):
+        self.publisher.file(1, "config", b"patched", uid=123, gid=123, mode=0o660,
+                            owner=123, group=123, expected={hashlib.sha256(b"original").hexdigest()})
+
+    def test_directory_substitution_before_publication_never_changes_replacement_metadata(self):
+        replacement = self.ops.node(directory=True, uid=123, gid=123, mode=0o500)
+        self.ops.hook = lambda event: self.ops.entries.update({(1, "directory"): replacement}) if event == "made_stage_directory" else None
+        with self.assertRaisesRegex(SetupError, "vendor_drift"):
+            self.publisher.directory(1, "directory", gid=123)
+        self.assertNotIn(replacement["ino"], self.ops.metadata_changes)
+        self.assertEqual((replacement["uid"], replacement["gid"], replacement["mode"]), (123, 123, 0o500))
+
+    def test_directory_substitution_after_publication_is_detected_without_metadata_repair(self):
+        replacement = self.ops.node(directory=True, uid=123, gid=123, mode=0o500)
+        self.ops.hook = lambda event: self.ops.entries.update({(1, "directory"): replacement}) if event == "after_noreplace" else None
+        with self.assertRaisesRegex(SetupError, "vendor_drift"):
+            self.publisher.directory(1, "directory", gid=123)
+        self.assertNotIn(replacement["ino"], self.ops.metadata_changes)
+        self.assertEqual(replacement["mode"], 0o500)
+
+    def test_target_edit_or_replacement_during_construction_stays_at_target(self):
+        for replacement in (False, True):
+            with self.subTest(replacement=replacement):
+                self.ops = PublicationKernel()
+                self.publisher = self.h.VendorPublisher(self.ops, stage_fd=2)
+                self.ops.entries[1, "config"] = self.ops.node(body=b"original")
+                def race(event):
+                    if event == "wrote_stage":
+                        if replacement:
+                            self.ops.entries[1, "config"] = self.ops.node(body=b"intervening")
+                        else:
+                            self.ops.entries[1, "config"]["body"] = b"intervening"
+                self.ops.hook = race
+                with self.assertRaisesRegex(SetupError, "vendor_drift"):
+                    self.write()
+                self.assertEqual(self.ops.entries[1, "config"]["body"], b"intervening")
+                self.assertEqual(self.ops.renames, [])
+
+    def test_stage_name_substitution_is_refused_before_publication(self):
+        self.ops.entries[1, "config"] = self.ops.node(body=b"original")
+        self.ops.hook = lambda event: self.ops.entries.update({(2, "new"): self.ops.node(body=b"substituted")}) if event == "wrote_stage" else None
+        with self.assertRaisesRegex(SetupError, "vendor_drift"):
+            self.write()
+        self.assertEqual(self.ops.entries[1, "config"]["body"], b"original")
+        self.assertEqual(self.ops.renames, [])
+
+    def test_exchange_window_edit_is_preserved_as_displaced_evidence(self):
+        self.ops.entries[1, "config"] = self.ops.node(body=b"original")
+        self.ops.hook = lambda event: self.ops.entries[1, "config"].update(body=b"intervening") if event == "before_exchange" else None
+        with self.assertRaisesRegex(SetupError, "vendor_drift"):
+            self.write()
+        self.assertEqual(self.ops.entries[2, "new"]["body"], b"intervening")
+        self.assertEqual(self.ops.snapshots["displaced"], b"intervening")
+
+    def test_final_leaf_replacement_is_preserved_and_refused(self):
+        self.ops.entries[1, "config"] = self.ops.node(body=b"original")
+        replacement = self.ops.node(body=b"intervening final")
+        self.ops.hook = lambda event: self.ops.entries.update({(1, "config"): replacement}) if event == "after_exchange" else None
+        with self.assertRaisesRegex(SetupError, "vendor_drift"):
+            self.write()
+        self.assertIs(self.ops.entries[1, "config"], replacement)
+        self.assertEqual(self.ops.snapshots["displaced"], b"original")
+
+    def test_success_publishes_exact_content_and_metadata_and_preserves_old_inode(self):
+        original = self.ops.node(body=b"original")
+        self.ops.entries[1, "config"] = original
+        self.write()
+        final = self.ops.entries[1, "config"]
+        self.assertEqual((final["body"], final["uid"], final["gid"], final["mode"]), (b"patched", 123, 123, 0o660))
+        self.assertIs(self.ops.entries[2, "new"], original)
+
+    def test_securefs_forward_and_rollback_use_same_publication_algorithm(self):
+        self.ops.entries[1, "config"] = self.ops.node(body=b"original")
+        self.ops.fds[2] = self.ops.node(directory=True, uid=0, gid=0, mode=0o700)
+        fs = self.h.SecureFS()
+        @contextmanager
+        def parent(path, uid, gid):
+            yield 1, "config"
+        @contextmanager
+        def publication(path, kind):
+            yield self.publisher
+        fs.vendor_parent, fs.publication = parent, publication
+        with patch.object(self.h.os, "fstat", return_value=SimpleNamespace(st_dev=1)):
+            fs.vendor_write("/etc/wazuh-indexer/opensearch.yml", b"patched", 123, 123, owner=123,
+                mode=0o660, expected={hashlib.sha256(b"original").hexdigest()})
+        old = self.ops.entries.pop((2, "new"))
+        with patch.object(self.h.os, "fstat", return_value=SimpleNamespace(st_dev=1)):
+            fs.vendor_write("/etc/wazuh-indexer/opensearch.yml", b"original", 123, 123, owner=123,
+                mode=0o660, expected={hashlib.sha256(b"patched").hexdigest()})
+        self.assertEqual(self.ops.entries[1, "config"]["body"], old["body"])
+        self.assertEqual(self.ops.renames, [True, True])
+
+    def test_unsupported_rename_primitive_has_no_fallback(self):
+        calls = []
+        class Rename:
+            def __call__(_, *args):
+                calls.append(args)
+                self.h.ctypes.set_errno(errno.ENOSYS)
+                return -1
+        with patch.object(self.h.ctypes, "CDLL", return_value=SimpleNamespace(renameat2=Rename())):
+            ops = self.h.PublicationOps(2)
+            with self.assertRaisesRegex(SetupError, "filesystem_unsupported"):
+                ops.rename(2, "new", 1, "config", exchange=True)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][-1], 2)
+        with patch.object(self.h.ctypes, "CDLL", return_value=object()):
+            with self.assertRaisesRegex(SetupError, "filesystem_unsupported"):
+                self.h.PublicationOps(2)
+
+    def test_cross_filesystem_refuses_before_publication(self):
+        self.ops.fds[2] = self.ops.node(directory=True, uid=0, gid=0, mode=0o700)
+        fs = self.h.SecureFS()
+        @contextmanager
+        def parent(path, uid, gid):
+            yield 1, "directory"
+        @contextmanager
+        def publication(path, kind):
+            yield self.publisher
+        fs.vendor_parent, fs.publication = parent, publication
+        with patch.object(self.h.os, "fstat", return_value=SimpleNamespace(st_dev=99)):
+            with self.assertRaisesRegex(SetupError, "filesystem_unsupported"):
+                fs.vendor_mkdir("/etc/wazuh-indexer/aegis-http", 123, 123)
+        self.assertEqual(self.ops.entries, {})
+        self.assertEqual(self.ops.metadata_changes, [])
+
+    def test_pending_publication_requires_reconciliation_before_restore(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fs = self.h.SecureFS()
+            fs.trusted = lambda _: None
+            fs.read = lambda path, **kwargs: path.read_bytes()
+            with patch.object(self.h, "PROFILE_ROOT", root):
+                fs.check_publications()
+                publication = root / "publication-synthetic"
+                publication.mkdir()
+                for status in ("prepared", "failed"):
+                    (publication / "publication.json").write_text(json.dumps({"status": status}))
+                    with self.assertRaisesRegex(SetupError, "vendor_drift"):
+                        fs.check_publications()
+                (publication / "publication.json").write_text(json.dumps({"status": "complete"}))
+                fs.check_publications()
+            host = self.h.LinuxHost(fs=fs, commands=object())
+            fs.check_publications = lambda: (_ for _ in ()).throw(SetupError("vendor_drift"))
+            host.vread = lambda _: self.fail("restore must not access vendor content after pending exchange")
+            with self.assertRaisesRegex(SetupError, "vendor_drift"):
+                host.restore(None, {}, root)
+
+    def test_restore_does_not_repair_intervening_metadata_on_original_content(self):
+        original = b"original"
+        metadata = {"uid": 123, "gid": 123, "mode": stat.S_IFREG | 0o660}
+        snapshot = {"uid": 123, "gid": 123, "metadata": metadata, "original_sha256": hashlib.sha256(original).hexdigest(),
+                    "patched_sha256": hashlib.sha256(b"patched").hexdigest(), "guard_unit_absent": True,
+                    "dropin_absent": True, "table_absent": True}
+        fs = SimpleNamespace(check_publications=lambda: None, read=lambda *args, **kwargs: original)
+        host = self.h.LinuxHost(fs=fs, commands=object())
+        host.vread = lambda _: original
+        host.vstat = lambda _: SimpleNamespace(st_uid=123, st_gid=123, st_mode=stat.S_IFREG | 0o640)
+        host.run = lambda *args, **kwargs: self.fail("metadata drift must stop before daemon reload/restart")
+        with self.assertRaisesRegex(SetupError, "vendor_drift"):
+            host.restore(SimpleNamespace(config_path="synthetic"), snapshot, Path("synthetic"))
 
 
 if __name__ == "__main__":

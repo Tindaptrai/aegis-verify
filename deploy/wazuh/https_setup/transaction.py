@@ -200,7 +200,14 @@ class Coordinator:
                 intent["status"] = "pending_external_validation"
                 self._phase(intent, "complete")
                 return self.status()
-            except Exception:
+            except Exception as exc:
+                if isinstance(exc, SetupError) and exc.code in {"vendor_drift", "filesystem_unsupported"}:
+                    # Do not turn a refused publication into an overwrite via
+                    # generic restore. Manual evidence reconciliation is needed.
+                    intent["preserve_vendor_edits"] = True
+                    intent["status"] = "recovery_required"
+                    self.store.save(intent)
+                    raise SetupError("filesystem_unsupported" if exc.code == "filesystem_unsupported" else "recovery_required") from None
                 self._recover(intent)
                 raise SetupError("verification_failed") from None
             except BaseException:
@@ -221,6 +228,8 @@ class Coordinator:
             return self.status()
 
     def _recover(self, intent):
+        if intent.get("preserve_vendor_edits"):
+            raise SetupError("recovery_required")
         p = Profile(**intent["profile"])
         work = self.store.work(intent)
         try:
