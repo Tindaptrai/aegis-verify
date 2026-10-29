@@ -27,7 +27,8 @@ và tác vụ hiện có cho tới khi chuyển đổi được xác nhận.
 Đây là ba lát triển khai, mỗi lát có issue, nhánh, kiểm thử và review riêng:
 
 1. **Kết nối Wazuh qua web**: nhập/test/lưu cấu hình riêng tư có phiên bản;
-   worker quản lý cấu hình mới; trang trạng thái và gói nâng cấp Ubuntu.
+   hướng dẫn tích hợp theo phiên bản, worker quản lý cấu hình mới; trang trạng
+   thái và gói nâng cấp Ubuntu.
 2. **Agent chịu được gián đoạn tạm thời**: tái hiện lỗi transport execution,
    sửa phân loại lỗi nếu được chứng minh, kiểm tra tự kết nối lại cùng UUID.
 3. **Thiết lập thực thi có hướng dẫn**: chọn source/release/máy, tự lấy các
@@ -97,6 +98,100 @@ Các tài khoản `run_jobs` chỉ thấy tên nguồn, trạng thái cần thi�
 phép chạy; không nhận username, password, config path hoặc server exception.
 API kiểm session generation, quyền hiện tại, CSRF và optimistic concurrency.
 Ẩn nút trên UI không thay thế kiểm tra quyền phía server.
+
+## Hướng dẫn tích hợp và đường mở rộng SIEM
+
+Bổ sung từ phản hồi chủ sản phẩm ngày 2026-10-29: cần trang hướng dẫn riêng,
+có ảnh theo phiên bản SIEM, cách tạo tài khoản/quyền và lấy public CA. Phần
+này còn chờ duyệt cùng thiết kế tổng thể; không có connector live mới được
+triển khai chỉ do bổ sung tài liệu.
+
+Chọn cách kết hợp: một mục **Hướng dẫn tích hợp** dùng ngay trong Manager,
+kèm link mở đúng bước bên cạnh trường tài khoản/CA của wizard. Một trang
+ngoài ứng dụng đơn thuần dễ lệch phiên bản; một wizard chứa toàn bộ bài dài
+làm luồng nhập khó dùng. Nội dung hướng dẫn được đóng gói cùng release,
+đọc được trong lab không có Internet; nguồn hãng dùng để đối chiếu. Link
+giữ vendor/version/deployment/step, không mang credentials hoặc endpoint lab.
+
+Màn đầu chọn SIEM → phiên bản → Self-managed / Cloud (nếu đã có hướng dẫn
+được review). Không tự suy sản phẩm từ một URL hoặc dùng phiên bản mới nhất
+thay cho phiên bản người dùng chọn. Một connector live cần adapter riêng cho
+auth, bounded query/pagination/cleanup, scope, time basis, telemetry và alert
+mapping; mọi kết quả vẫn qua canonical schema/evidence IDs và engine chung.
+Không đổi tên Wazuh reader thành generic SIEM reader hoặc mặc định các API
+giống nhau. Registry đầu tiên chỉ mô tả capability đã có, chưa xây plugin
+marketplace hoặc hỗ trợ nhiều nguồn live đồng thời.
+
+Hiện tại trong source: Wazuh có reader live và luồng thực thi đã giới hạn;
+Elastic có bốn parser export offline (`elastic-sysmon1-v1`,
+`elastic-sysmon3-v1`, `elastic-powershell4104-v1`,
+`elastic-security-alert-v1`), chưa phải live connection qua Manager; chưa
+có adapter Splunk trong registry hiện tại. Giao diện phải phân biệt:
+
+- Kết nối live đã hỗ trợ và đã kiểm chứng theo ma trận cụ thể.
+- Nhập evidence offline theo export profile đã hỗ trợ.
+- Hướng dẫn đang chuẩn bị / connector trong lộ trình; không có nút test/save
+  live khả dụng khi chưa có implementation và acceptance tương ứng.
+
+Tài liệu bản đầu ưu tiên **Wazuh 4.14.4 self-managed** theo lab hiện có. Dữ
+liệu online của hãng tại thời điểm nghiên cứu không thay thế lab acceptance.
+Không ghi cả dòng 4.x hoặc mọi phiên bản 4.14.x là đã kiểm thử chỉ từ một
+phiên bản. Elastic live và Splunk thuộc issue sau; không làm đồng thời ba
+connector và không đổi PRD/ground truth trong phần onboarding này.
+
+Mỗi bài có cấu trúc cố định:
+
+1. Kết nối tới thành phần nào: API/Indexer/Search endpoint, khác Dashboard;
+   prerequisites, cổng, DNS/SAN, firewall egress từ Manager và kiểu triển khai.
+2. Tạo tài khoản kỹ thuật riêng cho AEGIS, tách khỏi tài khoản người dùng.
+   Nêu ai có quyền tạo, thao tác UI hoặc lệnh theo đúng phiên bản, không yêu
+   cầu đưa tài khoản admin/khóa quản trị vào AEGIS.
+3. Bảng quyền: API operation, privilege tương ứng, index/data stream được
+   phép, lý do cần và cách đối chiếu effective permissions. Tài khoản xem
+   Dashboard không mặc nhiên là tài khoản API phù hợp. Nếu nguồn cho phép,
+   ưu tiên API key/token có scope và expiry; không ép mọi SIEM dùng password.
+4. Lấy đúng public CA cho HTTP endpoint, phân biệt với node/server cert và
+   private key. Đối chiếu fingerprint qua kênh quản trị đáng tin cậy, SAN và
+   hạn dùng. `.pem` chỉ là định dạng: tên file không chứng minh nội dung là
+   CA. Hướng dẫn không tự tải cert từ kết nối chưa được xác minh rồi tin luôn.
+5. Kiểm tra từ Manager theo thứ tự network → TLS → auth → scoped query →
+   schema/time/mapping nếu adapter hỗ trợ. Có kết quả mong đợi và lỗi thường
+   gặp. Không có raw SIEM query editor hoặc nút chạy lệnh từ bài hướng dẫn.
+6. Quay lại wizard, lưu cấu hình; hướng dẫn rotation/expiry/revoke và sửa
+   trust khi đổi CA. Backup trước thay đổi phía SIEM; lệnh thay đổi quyền
+   hoặc firewall có nhãn rõ, không trộn với lệnh chỉ đọc.
+
+Với Wazuh bản đầu, account dùng cho Indexer evidence API chỉ có quyền đọc
+đúng index đã chọn (ví dụ pattern alert đã được owner khai báo), các thao
+tác search/scroll/clear-scroll cần được kiểm tra trên phiên bản hỗ trợ.
+Không sao chép nguyên guide Dashboard read-only dùng index `*`, tenant và
+Server API role nếu adapter không cần chúng. Không tự yêu cầu quyền sửa rule,
+write/delete document hoặc cluster admin. `DELETE /_search/scroll` chỉ đóng
+search context, khác xóa evidence; quyền chỉ đọc xét theo tác dụng thao tác,
+không chỉ HTTP verb. Không thử ghi/xóa dữ liệu thật để chứng minh không có
+quyền ghi. Probe thành công chỉ chứng minh thao tác đã test được phép; badge
+"đã xác minh least privilege" cần proof riêng, không suy từ read success.
+
+Với HTTPS dùng CA công khai được trust store tin cậy, hướng mở rộng cần lựa
+chọn **CA hệ thống**; với CA nội bộ dùng **Upload public CA**. Cả hai luôn
+verify chain và hostname. Lát Wazuh hiện tại vẫn giữ explicit private CA theo
+reader đã review; chế độ system trust cho connector tương lai phải có schema,
+transport và tests riêng trước khi bật. Không có nút skip verification.
+
+Ảnh minh họa phải là screenshot thật từ lab được phép hoặc nguồn hãng có
+ghi nguồn/quyền sử dụng; có alt text, chú thích phiên bản và bước tương ứng.
+Che mật khẩu/token, danh tính lab và dữ liệu nhạy cảm trước khi lưu. Không dùng
+ảnh AI dựng thành giao diện SIEM thật. Khi chưa có ảnh/version đã xác minh,
+hiển thị "chưa có ảnh kiểm chứng" thay vì minh họa giả. Nội dung có các trường
+`vendor`, `product`, `version_range`, `deployment`, `connector_release`,
+`guide_revision`, `reviewed_at`, `validation_status`, official references và
+provenance ảnh. Docs-reviewed và lab-verified là hai trạng thái khác nhau.
+
+Kiểm thử bổ sung: guide links đúng sản phẩm/phiên bản/step, không có path secret
+trong snippet/ảnh/URL, nội dung đọc offline, ảnh có alt text, dữ liệu chỉ dẫn
+không được render HTML/script tùy ý. Test connector capability không hỗ trợ thì
+không kích hoạt form live; unknown version hiển thị giới hạn thay vì tự nhận
+tương thích. Với quyền/source mismatch, trả mã lỗi và link đúng bài xử lý.
 
 ## Cấu hình riêng tư và phiên bản
 
@@ -303,6 +398,13 @@ Source: `execution_connections.py`, `manager_worker.py`, `worker_health.py`,
 
 - [Wazuh Indexer API configuration](https://documentation.wazuh.com/current/user-manual/indexer-api/configuration.html)
 - [Securing the Indexer API](https://documentation.wazuh.com/current/user-manual/indexer-api/securing-indexer-api.html)
+- [Wazuh internal users và RBAC](https://documentation.wazuh.com/current/user-manual/user-administration/rbac.html)
+- [Wazuh certificate deployment](https://documentation.wazuh.com/current/user-manual/wazuh-indexer-cluster/certificate-deployment.html)
+- [Elastic API keys](https://www.elastic.co/docs/deploy-manage/api-keys/elasticsearch-api-keys)
+- [Elastic index privileges](https://www.elastic.co/docs/reference/elasticsearch/security-privileges)
+- [Splunk REST authentication và authorization](https://help.splunk.com/en/splunk-enterprise/leverage-rest-apis/rest-api-user-manual/9.2/rest-api-user-manual/basic-concepts-about-the-splunk-platform-rest-api)
+
+References hãng hỗ trợ nghiên cứu hướng dẫn; chưa là ma trận tương thích lab.
 
 Các quyết định nhỏ còn lại giao người triển khai: tên model/route theo conventions
 của repo, chia test file và bố trí CSS. Các ranh giới authority, versioning,
