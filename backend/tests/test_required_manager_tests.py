@@ -1,5 +1,6 @@
 """CI certification counts real test outcomes and refuses missing required roles."""
 import importlib.util
+import ast
 import io
 import json
 import os
@@ -9,6 +10,100 @@ import sys
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# Explicit independent acceptance inventory: removing a single native test must
+# fail certification even when every other test in its class passed.
+CONNECTIONS_REQUIRED = {
+    'native_connections_policy': (
+        'test_policy.NativePolicyTests.test_untrusted_parent_fails_closed',
+        'test_policy.NativeRootPolicyTests.test_trusted_root_owned_json_policy_loads',
+        'test_policy.NativeRootPolicyTests.test_final_file_symlink_is_rejected_after_trusted_load',
+        'test_policy.NativeRootPolicyTests.test_parent_symlink_is_rejected_after_trusted_load',
+    ),
+    'native_connections_storage': (
+        'test_storage.NativeStorageTests.test_exclusive_write_and_tamper',
+        'test_storage.NativeStorageTests.test_link_parent_or_file_is_never_followed',
+        'test_storage.NativeStorageTests.test_cleanup_removes_only_expired_unreferenced_directory',
+        'test_storage.NativeStorageTests.test_cleanup_recovers_partial_orphan',
+    ),
+    'native_connections_tls': (
+        'test_probe.SyntheticTlsTests.test_trusted_san_and_sni',
+        'test_probe.SyntheticTlsTests.test_cn_only_leaf_is_refused_before_any_auth_request',
+        'test_probe.SyntheticTlsTests.test_wrong_san_chain_and_expired_leaf_are_refused',
+        'test_probe.SyntheticTlsTests.test_drip_feed_cannot_extend_absolute_response_deadline',
+        'test_probe.ProbeTests.test_transport_pins_sockaddr_and_original_tls_hostname',
+    ),
+    'postgres_connections': (
+        'test_postgres.PostgresTests.test_same_draft_same_key_publishes_exactly_one_registration',
+        'test_postgres.PostgresTests.test_candidate_compare_swap_has_one_winner',
+        'test_postgres.PostgresTests.test_competing_source_versions_have_one_winner',
+        'test_postgres.PostgresTests.test_generation_rotation_during_io_blocks_test_and_save',
+        'test_postgres.PostgresTests.test_session_rotation_during_io_blocks_test_and_save',
+        'test_postgres.PostgresTests.test_permission_revocation_during_io_blocks_test_and_save',
+    ),
+}
+
+
+def test_connections_gate_requires_every_concrete_native_test_and_rejects_skips():
+    gate = gate_module()
+    for category, suffixes in CONNECTIONS_REQUIRED.items():
+        assert category in gate.CATEGORIES
+        identities = ['connections.tests.' + suffix for suffix in suffixes]
+        result = gate.GateResult(io.StringIO(), True, 0)
+        result.started.update(identities)
+        result.outcomes.update(dict.fromkeys(identities, 'passed'))
+        assert report(result, (category,))['result'] == 'passed'
+        for identity in identities:
+            assert gate.category_for(identity) == category
+            for state in ('missing', 'skipped', 'failed'):
+                if state == 'missing':
+                    del result.outcomes[identity]
+                else:
+                    result.outcomes[identity] = state
+                assert report(result, (category,))['result'] == 'failed'
+                result.outcomes[identity] = 'passed'
+
+
+def test_connections_native_prerequisites_refuse_wrong_platform_and_nonroot(monkeypatch):
+    gate = gate_module()
+    monkeypatch.setattr(gate.sys, 'platform', 'win32')
+    assert 'linux_required' in gate.prerequisites(CONNECTIONS_REQUIRED, vendor='postgresql', environ={})
+    monkeypatch.setattr(gate.sys, 'platform', 'linux')
+    monkeypatch.setattr(gate.os, 'geteuid', lambda: 1000, raising=False)
+    assert 'root_policy_fixture_required' in gate.prerequisites(CONNECTIONS_REQUIRED, vendor='postgresql', environ={})
+    monkeypatch.setattr(gate.os, 'geteuid', lambda: 0)
+    assert gate.prerequisites(CONNECTIONS_REQUIRED, vendor='postgresql', environ={}) == []
+    assert 'postgresql_required' in gate.prerequisites(CONNECTIONS_REQUIRED, vendor='sqlite', environ={})
+
+
+def test_connections_diagnostic_ids_and_class_setup_are_safe():
+    gate = gate_module()
+    class Identity:
+        def __init__(self, identity): self.identity = identity
+        def id(self): return self.identity
+    identity = 'connections.tests.test_policy.NativeRootPolicyTests'
+    assert gate.diagnostic_id(Identity(identity + '.test_trusted_root_owned_json_policy_loads')) == identity + '.test_trusted_root_owned_json_policy_loads'
+    assert gate.diagnostic_id(Identity('setUpClass (' + identity + ')')) == identity + '.setUpClass'
+    assert gate.diagnostic_id(Identity(identity + '.private-value/secret')) == 'test_id_withheld'
+
+
+def test_connections_required_inventory_matches_concrete_native_classes():
+    gate = gate_module()
+    classes = {
+        'test_policy': {'NativePolicyTests', 'NativeRootPolicyTests'},
+        'test_storage': {'NativeStorageTests'},
+        'test_probe': {'SyntheticTlsTests'},
+        'test_postgres': {'PostgresTests'},
+    }
+    actual = {'connections.tests.test_probe.ProbeTests.test_transport_pins_sockaddr_and_original_tls_hostname'}
+    for module, selected in classes.items():
+        tree = ast.parse((ROOT / 'manager/connections/tests' / (module + '.py')).read_text())
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name in selected:
+                actual.update('connections.tests.' + module + '.' + node.name + '.' + method.name
+                    for method in node.body if isinstance(method, ast.FunctionDef) and method.name.startswith('test_'))
+    required = set().union(*(gate.REQUIRED_TESTS[name] for name in CONNECTIONS_REQUIRED))
+    assert required == actual
 
 
 def gate_module():

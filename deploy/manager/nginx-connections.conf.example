@@ -1,0 +1,20 @@
+# Merge inside the existing Manager browser TLS server{} only, after replacing
+# REPLACE_MANAGER_UPSTREAM with the reviewed local Manager upstream name/address.
+# Keep the existing server-wide 64k limit and all agent routes unchanged.
+# Do not log request bodies or Authorization headers; this body contains secrets.
+location = /api/v1/connections/wazuh/test {
+    client_max_body_size 96k;
+    client_body_buffer_size 96k;
+    client_body_timeout 15s;
+    proxy_request_buffering off;
+    proxy_http_version 1.1;
+    proxy_pass http://REPLACE_MANAGER_UPSTREAM;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-For "";
+    proxy_set_header Forwarded "";
+    proxy_set_header X-Aegis-Client-Verify "";
+    proxy_set_header X-Aegis-Client-Cert "";
+    proxy_set_header X-Aegis-Peer-IP "";
+    proxy_redirect off;
+}

@@ -1,0 +1,28 @@
+# Operator template: verify every installed path and service identity before use.
+# This separate waiter never replaces aegis-manager-worker.service.
+[Unit]
+Description=AEGIS managed connections waiting registry
+After=network.target postgresql.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=aegis-manager
+Group=aegis-manager
+WorkingDirectory=/opt/aegis/current/manager
+EnvironmentFile=/etc/aegis-manager/manager.env
+ExecStart=/opt/aegis/venv/bin/python -u /opt/aegis/current/manager/manage.py managed_connection_worker
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/aegis-manager
+
+[Install]
+WantedBy=multi-user.target

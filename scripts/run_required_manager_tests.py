@@ -25,7 +25,35 @@ EXACT = {
     "published_service": PUBLISHED + "test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall",
     "linux_presence_only": PUBLISHED + "test_linux_published_client_remains_presence_only_and_rejects_execution_options",
 }
-CATEGORIES = (*PREFIXES, *EXACT, "published_presence")
+# Each concrete native gate is mandatory: a class prefix with one remaining
+# passing test must not certify an accidentally deleted ownership/race check.
+REQUIRED_TESTS = {
+    'native_connections_policy': frozenset('connections.tests.' + suffix for suffix in (
+        'test_policy.NativePolicyTests.test_untrusted_parent_fails_closed',
+        'test_policy.NativeRootPolicyTests.test_trusted_root_owned_json_policy_loads',
+        'test_policy.NativeRootPolicyTests.test_final_file_symlink_is_rejected_after_trusted_load',
+        'test_policy.NativeRootPolicyTests.test_parent_symlink_is_rejected_after_trusted_load',
+    )),
+    'native_connections_storage': frozenset('connections.tests.test_storage.NativeStorageTests.' + name for name in (
+        'test_exclusive_write_and_tamper', 'test_link_parent_or_file_is_never_followed',
+        'test_cleanup_removes_only_expired_unreferenced_directory', 'test_cleanup_recovers_partial_orphan',
+    )),
+    'native_connections_tls': frozenset('connections.tests.test_probe.' + suffix for suffix in (
+        'SyntheticTlsTests.test_trusted_san_and_sni',
+        'SyntheticTlsTests.test_cn_only_leaf_is_refused_before_any_auth_request',
+        'SyntheticTlsTests.test_wrong_san_chain_and_expired_leaf_are_refused',
+        'SyntheticTlsTests.test_drip_feed_cannot_extend_absolute_response_deadline',
+        'ProbeTests.test_transport_pins_sockaddr_and_original_tls_hostname',
+    )),
+    'postgres_connections': frozenset('connections.tests.test_postgres.PostgresTests.' + name for name in (
+        'test_same_draft_same_key_publishes_exactly_one_registration',
+        'test_candidate_compare_swap_has_one_winner', 'test_competing_source_versions_have_one_winner',
+        'test_generation_rotation_during_io_blocks_test_and_save',
+        'test_session_rotation_during_io_blocks_test_and_save',
+        'test_permission_revocation_during_io_blocks_test_and_save',
+    )),
+}
+CATEGORIES = (*PREFIXES, *EXACT, *REQUIRED_TESTS, "published_presence")
 ROOT = Path(__file__).resolve().parents[1]
 DIAGNOSTIC_STAGES = frozenset((
     "fixture_setup", "source_staging", "source_tls", "authority_setup", "environment_setup",
@@ -54,8 +82,8 @@ def diagnostic_id(test):
     if test is None: return "gate_setup"
     identity = test.id()
     if type(identity) is str and len(identity) <= 256:
-        if re.fullmatch(r"(?:accounts|control|devices|catalog)\.tests\.[A-Za-z0-9_.]+", identity): return identity
-        holder = re.fullmatch(r"(setUpClass|tearDownClass|setUpModule|tearDownModule) \(((?:accounts|control|devices|catalog)\.tests\.[A-Za-z0-9_.]+)\)", identity)
+        if re.fullmatch(r"(?:accounts|control|devices|catalog|connections)\.tests\.[A-Za-z0-9_.]+", identity): return identity
+        holder = re.fullmatch(r"(setUpClass|tearDownClass|setUpModule|tearDownModule) \(((?:accounts|control|devices|catalog|connections)\.tests\.[A-Za-z0-9_.]+)\)", identity)
         if holder: return holder[2] + "." + holder[1]
     return "test_id_withheld"
 
@@ -110,6 +138,8 @@ def safe_diagnostic(test, err):
 
 
 def category_for(identity):
+    for name, identities in REQUIRED_TESTS.items():
+        if identity in identities: return name
     for name, exact in EXACT.items():
         if identity == exact: return name
     for name, prefix in PREFIXES.items():
@@ -185,8 +215,10 @@ def build_report(result, required, source_commit, run_url, errors=()):
         if name not in CATEGORIES: raise ValueError("invalid_gate_category")
         actual = counts(state for identity, state in outcomes.items()
                         if category_for(identity) == name)
-        passed = actual["executed"] > 0 and actual["passed"] == actual["executed"] and actual["failed"] == actual["skipped"] == 0
+        missing = REQUIRED_TESTS.get(name, frozenset()) - outcomes.keys()
+        passed = not missing and actual["executed"] > 0 and actual["passed"] == actual["executed"] and actual["failed"] == actual["skipped"] == 0
         categories.append(dict(name=name, **actual, result="passed" if passed else "failed"))
+        if name in REQUIRED_TESTS: categories[-1]['missing'] = len(missing)
     totals = counts(outcomes.values())
     # Setup/teardown failures may have no started test, but must still fail the gate.
     suite_failures = len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses) + len(result.expectedFailures)
@@ -200,6 +232,10 @@ def build_report(result, required, source_commit, run_url, errors=()):
 
 def prerequisites(required, *, vendor, environ, which=shutil.which):
     errors = set()
+    if any(name.startswith('native_connections_') for name in required):
+        if not sys.platform.startswith('linux'): errors.add('linux_required')
+    if 'native_connections_policy' in required and getattr(os, 'geteuid', lambda: None)() != 0:
+        errors.add('root_policy_fixture_required')
     if any(name.startswith("postgres_") or name == "manager_worker_service" for name in required) and vendor != "postgresql": errors.add("postgresql_required")
     if "nginx_execution" in required and which("nginx") is None: errors.add("nginx_required")
     for roles, variable, code, directory in (

@@ -1,10 +1,10 @@
 """Actual PostgreSQL publication races; SQLite is not concurrency evidence."""
 from concurrent.futures import ThreadPoolExecutor
-from threading import Barrier
+from threading import Barrier, Event
 from unittest import skipUnless
 import uuid
 from django.contrib.auth.models import Group, Permission
-from django.db import connection, connections
+from django.db import connection, connections, transaction
 from django.test import TransactionTestCase, Client
 from accounts.models import AccountMutationLock
 from accounts.permissions import PRESETS, PRESET_GROUP_NAMES
@@ -82,3 +82,89 @@ class PostgresTests(ConnectionsFixture, TransactionTestCase):
             idempotency_key=str(uuid.uuid4())),client) for draft in drafts]
         self.assertCountEqual(self.race(operations),[201,409])
         self.assertEqual(ManagedSource.objects.count(),2)
+
+    def authority_changed_during_io(self, change):
+        """Distinct PostgreSQL sessions, committed revocation while probe waits.
+
+        The network boundary is paused deterministically; PostgreSQL authority
+        locking and session reads are real. This is not native TLS/lab evidence.
+        """
+        from connections.models import ConnectionDraft, ManagedSource, ConnectionAudit
+        from control.execution_models import RegisteredExecutionConnection
+        from control.execution_ownership import lock_human_authority
+        self.client = self.login_human(self.admin)
+        prior = self.make_draft()
+        entered, release = Event(), Event()
+        probe_pid = []
+
+        def blocked_probe(**kwargs):
+            self.assertFalse(connection.in_atomic_block)
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT pg_backend_pid()')
+                probe_pid.append(cursor.fetchone()[0])
+            entered.set()
+            if not release.wait(timeout=10):
+                raise AssertionError('authority mutation did not release probe')
+
+        self.probe.side_effect = blocked_probe
+        client = Client(enforce_csrf_checks=True)
+        client.cookies = self.client.cookies.copy()
+        token = client.get('/api/v1/auth/session').json()['csrf_token']
+        def request():
+            connections.close_all()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute('SET statement_timeout = 15000')
+                return client.post('/api/v1/connections/wazuh/test', self.data,
+                    content_type='application/json', HTTP_X_CSRFTOKEN=token)
+            finally:
+                connections.close_all()
+
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(request)
+            try:
+                self.assertTrue(entered.wait(timeout=10))
+                with connection.cursor() as cursor:
+                    cursor.execute('SET statement_timeout = 5000')
+                    cursor.execute('SELECT pg_backend_pid()')
+                    mutation_pid = cursor.fetchone()[0]
+                with transaction.atomic():
+                    lock_human_authority()
+                    change()
+            finally:
+                release.set()
+                with connection.cursor() as cursor:
+                    cursor.execute('SET statement_timeout = 0')
+            response = pending.result(timeout=20)
+        self.assertEqual(len(probe_pid), 1)
+        self.assertNotEqual(probe_pid[0], mutation_pid)
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json(), {'error': {'code': 'permission_denied'}})
+        self.assertEqual(ConnectionDraft.objects.filter(state='failed').count(), 1)
+        self.assertEqual(set(self.files), {prior['draft_id']})
+        # Neither the previously tested draft nor the interrupted one can be
+        # saved by the now-stale session. Use the original cookie and CSRF token.
+        for draft in ConnectionDraft.objects.all():
+            response = self.client.post('/api/v1/connections/wazuh/save',
+                dict(draft_id=str(draft.pk), idempotency_key=str(uuid.uuid4())),
+                content_type='application/json', HTTP_X_CSRFTOKEN=token)
+            self.assertIn(response.status_code, (401, 403))
+        self.assertFalse(ManagedSource.objects.exists())
+        self.assertFalse(RegisteredExecutionConnection.objects.exists())
+        self.assertFalse(ConnectionAudit.objects.filter(action='saved').exists())
+
+    def test_generation_rotation_during_io_blocks_test_and_save(self):
+        from accounts.models import AccountSecurity
+        from django.db.models import F
+        self.authority_changed_during_io(lambda: AccountSecurity.objects.filter(user=self.admin)
+                                        .update(generation=F('generation')+1))
+
+    def test_session_rotation_during_io_blocks_test_and_save(self):
+        from django.contrib.sessions.backends.db import SessionStore
+        def rotate():
+            session = SessionStore(session_key=self.client.session.session_key)
+            session.cycle_key()
+        self.authority_changed_during_io(rotate)
+
+    def test_permission_revocation_during_io_blocks_test_and_save(self):
+        self.authority_changed_during_io(lambda: self.admin.groups.clear())

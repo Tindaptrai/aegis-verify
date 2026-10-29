@@ -36,6 +36,11 @@ pinned private/global IPv4 and globally routable IPv6 after prohibited-address
 checks. CGNAT and IPv6 ULA are unsupported. DNS, TLS chain and SAN remain checked;
 the form cannot edit the policy or bypass verification.
 
+For release backup/migration, one-time policy provisioning, the exact nginx
+upload route, separate waiting service, cleanup and rollback, follow the
+[managed connections deployment handoff](managed-connections-deployment.md).
+Installing a waiting service does not activate a source or prove source health.
+
 Elastic remains **offline only**. Splunk remains **planned**. This guide does not
 enable live Elastic or Splunk forms or establish their compatibility.
 
