@@ -9,10 +9,14 @@ import { UsersPage } from './UsersPage';
 import { DevicesPage } from './DevicesPage';
 import { CatalogPage } from './CatalogPage';
 import { ExecutionPage } from './ExecutionPage';
+import { ConnectionsPage } from './ConnectionsPage';
+import { createConnectionsApi, type ConnectionsApi } from './connectionsApi';
+import { IntegrationGuides, guideHash, parseGuideHash, type GuideStep } from './IntegrationGuides';
 import logo from '../../../packaging/windows/demo-launcher/assets/aegis-demo-logo.png';
 
 const anonymous: SessionDTO = { authenticated: false, csrf_token: '', user: null, expires_at: null };
-export function ManagerApp({ api }: { api: ManagerApi }) {
+export function ManagerApp({ api, connectionsApi: suppliedConnectionsApi }: { api: ManagerApi; connectionsApi?: ConnectionsApi }) {
+  const connectionsApi = useMemo(() => suppliedConnectionsApi ?? createConnectionsApi(), [suppliedConnectionsApi]);
   const [session, setSession] = useState<SessionDTO | null>(null);
   const [overview, setOverview] = useState<OverviewDTO | null>(null);
   const [overviewError, setOverviewError] = useState('');
@@ -20,7 +24,9 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const [sessionError, setSessionError] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [page, setPage] = useState<'overview' | 'users' | 'devices' | 'catalog' | 'execution'>('overview');
+  const [page, setPage] = useState<'overview' | 'users' | 'devices' | 'catalog' | 'execution' | 'connections' | 'guides'>('overview');
+  const [guideStep, setGuideStep] = useState<GuideStep>('overview');
+  const [guideUnsupported, setGuideUnsupported] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const generation = useRef(0);
   const active = useRef<AbortController | null>(null);
@@ -36,7 +42,9 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const clear = useCallback(() => {
     generation.current += 1; active.current?.abort();
     const controller = new AbortController(); active.current = controller;
-    setOverview(null); setOverviewError(''); setAccountOpen(false); setPage('overview');
+    setOverview(null); setOverviewError(''); setAccountOpen(false);
+    const route = parseGuideHash(window.location.hash);
+    setPage(route ? 'guides' : 'overview'); setGuideStep(route?.step ?? 'overview'); setGuideUnsupported(route ? !route.supported : false);
     return { controller, generation: generation.current };
   }, []);
   const isCurrent = (request: { controller: AbortController; generation: number }) => request.generation === generation.current && !request.controller.signal.aborted;
@@ -70,6 +78,15 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
     window.addEventListener('pageshow', restored); window.addEventListener('pagehide', hidden);
     return () => { mounted.current = false; generation.current += 1; active.current?.abort(); api.invalidate(); window.removeEventListener('pageshow', restored); window.removeEventListener('pagehide', hidden); };
   }, [api, clear, revalidate]);
+  useEffect(() => {
+    function navigateGuideHash() {
+      const route = parseGuideHash(window.location.hash);
+      if (route) { setGuideStep(route.step); setGuideUnsupported(!route.supported); setPage('guides'); }
+      else setPage((current) => current === 'guides' ? 'connections' : current);
+    }
+    window.addEventListener('hashchange', navigateGuideHash); window.addEventListener('popstate', navigateGuideHash);
+    return () => { window.removeEventListener('hashchange', navigateGuideHash); window.removeEventListener('popstate', navigateGuideHash); };
+  }, []);
 
   const unauthorized = useCallback(() => { void revalidate(true); }, [revalidate]);
   // Refresh grants without remounting an allowed account page. Coalesce the
@@ -234,6 +251,15 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   const canManageUsers = !!user?.capabilities.includes('view') && !!user?.capabilities.includes('manage_users');
   const canView = !!user?.capabilities.includes('view');
   const canManageDevices = canView && !!user?.capabilities.includes('manage_devices');
+  const canManageConnections = canView && !!user?.capabilities.includes('manage_connections');
+  const showingConnections = page === 'connections' && canView;
+  const showingGuides = page === 'guides' && canView;
+  function openGuide(step: GuideStep) { setGuideStep(step); setGuideUnsupported(false); setPage('guides'); window.location.hash = guideHash(step); }
+  function navigatePage(next: typeof page) {
+    if (window.location.hash) window.history.pushState(null, '', window.location.pathname + window.location.search);
+    setPage(next);
+  }
+  function connectionAuthorityError(status: number) { if (status === 401) unauthorized(); else void refreshAuthority(); }
   const showingDevices = page === 'devices' && canView;
   const showingCatalog = page === 'catalog' && canView;
   const showingExecution = page === 'execution' && canView;
@@ -245,13 +271,13 @@ export function ManagerApp({ api }: { api: ManagerApi }) {
   return <div className="manager-app" data-theme={theme}>
     {!session ? <main className="session-pending" aria-busy={!sessionError}>{sessionError ? <><p role="alert">{sessionError}</p><button onClick={() => { if (logoutFailed.current) void logout(); else void revalidate(); }}>Thử lại</button></> : <p>Đang xác minh phiên…</p>}</main> : !user ? <LoginPage onLogin={(input) => void login(input)} busy={authBusy} error={loginError} /> : <>
       <aside className="manager-sidebar"><div className="manager-brand"><img src={logo} alt="" /><div><strong>AEGIS</strong><small>VERIFY · MANAGER</small></div></div>
-        <p className="eyebrow nav-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng Manager"><button className={!showingUsers && !showingDevices && !showingCatalog && !showingExecution ? 'selected' : ''} aria-current={!showingUsers && !showingDevices && !showingCatalog && !showingExecution ? 'page' : undefined} onClick={() => setPage('overview')}>Tổng quan</button>
-          <button disabled={!canView} className={showingDevices ? 'selected' : ''} aria-current={showingDevices ? 'page' : undefined} onClick={() => setPage('devices')}>Máy</button><button disabled={!canView} className={showingCatalog ? 'selected' : ''} aria-current={showingCatalog ? 'page' : undefined} onClick={() => setPage('catalog')}>Kịch bản</button><button disabled={!canView} className={showingExecution ? 'selected' : ''} aria-current={showingExecution ? 'page' : undefined} onClick={() => setPage('execution')}>Tác vụ</button><button disabled title="Chưa khả dụng">Kết nối <small>Chưa khả dụng</small></button>
-          {canManageUsers && <button className={showingUsers ? 'selected' : ''} aria-current={showingUsers ? 'page' : undefined} onClick={() => setPage('users')}>Tài khoản &amp; quyền</button>}
+        <p className="eyebrow nav-label">KHÔNG GIAN LÀM VIỆC</p><nav aria-label="Điều hướng Manager"><button className={!showingUsers && !showingDevices && !showingCatalog && !showingExecution && !showingConnections && !showingGuides ? 'selected' : ''} aria-current={!showingUsers && !showingDevices && !showingCatalog && !showingExecution && !showingConnections && !showingGuides ? 'page' : undefined} onClick={() => navigatePage('overview')}>Tổng quan</button>
+          <button disabled={!canView} className={showingDevices ? 'selected' : ''} aria-current={showingDevices ? 'page' : undefined} onClick={() => navigatePage('devices')}>Máy</button><button disabled={!canView} className={showingCatalog ? 'selected' : ''} aria-current={showingCatalog ? 'page' : undefined} onClick={() => navigatePage('catalog')}>Kịch bản</button><button disabled={!canView} className={showingExecution ? 'selected' : ''} aria-current={showingExecution ? 'page' : undefined} onClick={() => navigatePage('execution')}>Tác vụ</button><button disabled={!canView} className={showingConnections || showingGuides ? 'selected' : ''} aria-current={showingConnections || showingGuides ? 'page' : undefined} onClick={() => navigatePage('connections')}>Kết nối</button>
+          {canManageUsers && <button className={showingUsers ? 'selected' : ''} aria-current={showingUsers ? 'page' : undefined} onClick={() => navigatePage('users')}>Tài khoản &amp; quyền</button>}
         </nav></aside>
-      <div className="manager-workspace"><header className="manager-header"><div className="header-identity"><div className="manager-brand"><img src={logo} alt="AEGIS" /><div><strong>AEGIS</strong><small>MANAGER</small></div></div><span className="breadcrumb">Không gian làm việc / {showingUsers ? 'Tài khoản & quyền' : showingDevices ? 'Máy' : showingCatalog ? 'Kịch bản' : showingExecution ? 'Tác vụ' : 'Tổng quan'}</span></div>
+      <div className="manager-workspace"><header className="manager-header"><div className="header-identity"><div className="manager-brand"><img src={logo} alt="AEGIS" /><div><strong>AEGIS</strong><small>MANAGER</small></div></div><span className="breadcrumb">Không gian làm việc / {showingConnections ? 'Kết nối' : showingGuides ? 'Hướng dẫn tích hợp' : showingUsers ? 'Tài khoản & quyền' : showingDevices ? 'Máy' : showingCatalog ? 'Kịch bản' : showingExecution ? 'Tác vụ' : 'Tổng quan'}</span></div>
         <div className="header-actions"><button className="theme-toggle" aria-label={`Chuyển giao diện ${theme === 'dark' ? 'sáng' : 'tối'}`} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀' : '☾'}</button><AccountMenu user={user} onAccount={() => setAccountOpen(true)} onLogout={() => void logout()} /></div>
-      </header><main className="manager-content">{showingUsers ? <UsersPage key={user.id} api={accountsApi} onAuthorityChanged={refreshAuthority} /> : showingDevices ? <DevicesPage key={deviceAuthority} api={accountsApi} canManage={canManageDevices} onExecution={() => setPage('execution')} /> : showingExecution ? <ExecutionPage key={deviceAuthority} api={accountsApi} canRun={canRun} canManage={canManageDevices} /> : showingCatalog ? <CatalogPage key={deviceAuthority} api={accountsApi} canImport={canImport} canPublish={canPublish} onExecution={() => setPage('execution')} /> : <><div className="page-heading"><p className="eyebrow">MANAGER</p><h1>Tổng quan</h1><p>Dữ liệu đã ghi nhận trong hệ thống quản lý.</p></div>
+      </header><main className="manager-content">{showingGuides ? <IntegrationGuides step={guideStep} unsupported={guideUnsupported} onStep={openGuide} onBack={() => navigatePage('connections')} /> : showingConnections ? <ConnectionsPage key={`${deviceAuthority}:${session.csrf_token}`} api={connectionsApi} canManage={canManageConnections} csrfToken={session.csrf_token} onAuthorityError={connectionAuthorityError} onGuide={openGuide} /> : showingUsers ? <UsersPage key={user.id} api={accountsApi} onAuthorityChanged={refreshAuthority} /> : showingDevices ? <DevicesPage key={deviceAuthority} api={accountsApi} canManage={canManageDevices} onExecution={() => navigatePage('execution')} /> : showingExecution ? <ExecutionPage key={deviceAuthority} api={accountsApi} canRun={canRun} canManage={canManageDevices} /> : showingCatalog ? <CatalogPage key={deviceAuthority} api={accountsApi} canImport={canImport} canPublish={canPublish} onExecution={() => navigatePage('execution')} /> : <><div className="page-heading"><p className="eyebrow">MANAGER</p><h1>Tổng quan</h1><p>Dữ liệu đã ghi nhận trong hệ thống quản lý.</p></div>
         {!user.capabilities.includes('view') ? <p className="manager-alert" role="alert">Bạn không có quyền xem dữ liệu. Liên hệ quản trị viên để được cấp quyền.</p> : overviewError ? <section className="panel panel-body"><p className="manager-alert" role="alert">{overviewError}</p><button onClick={() => void revalidate()}>Xác minh lại phiên</button></section> : !overview ? <p>Đang tải tổng quan…</p> : <section className="overview-counts" aria-label="Số liệu đã ghi nhận">
           <article className="panel"><p>Thiết bị đã đăng ký</p><strong>{overview.registered_devices}</strong><small>Số đăng ký trong cơ sở dữ liệu</small></article><article className="panel"><p>Tác vụ đã ghi nhận</p><strong>{overview.recorded_jobs}</strong><small>Số tác vụ trong cơ sở dữ liệu</small></article><article className="panel"><p>Phiên bản đã ghi nhận</p><strong>{overview.recorded_releases}</strong><small>Số phiên bản trong cơ sở dữ liệu</small></article>
         </section>}</>}
