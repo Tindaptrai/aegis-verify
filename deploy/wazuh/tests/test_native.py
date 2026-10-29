@@ -606,9 +606,13 @@ class DependencyRoleMap:
     def logical(self, actual):
         if actual in self.names:
             return self.names[actual]
-        if (len(self.names) >= 512 or len(actual) > 255 or
-                not re.fullmatch(r"[A-Za-z0-9_.@\\:-]+\.[a-z]+", actual)):
-            raise AssertionError("dependency_mapping_bound")
+        count_limit = len(self.names) >= 512
+        too_long = len(actual) > 255
+        grammar_matches = re.fullmatch(r"[A-Za-z0-9_.@\\:-]+\.[a-z]+", actual) is not None
+        if count_limit or too_long or not grammar_matches:
+            raise AssertionError(tx.encoded(dict(stage="dependency_mapping_bound", mapped_count=len(self.names),
+                                 name_length=len(actual), count_limit_reached=count_limit,
+                                 name_too_long=too_long, grammar_matches=grammar_matches)).decode("ascii"))
         stem, kind = actual.rsplit(".", 1)
         base = "aegis-fixture-external-" + hashlib.sha256(actual.encode("ascii")).hexdigest()
         alias, suffix = base + "." + kind, 0

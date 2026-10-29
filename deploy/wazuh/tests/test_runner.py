@@ -691,6 +691,50 @@ class NativeFixtureSafety(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "unobserved_dependency_query"):
             mapper.actual("unknown.service")
 
+    def test_dependency_mapper_bound_reports_only_measured_predicates(self):
+        from deploy.wazuh.tests import test_native as native
+        for count in (0, 512):
+            for name, too_long, grammar in (("new.service", False, True),
+                                           ("a" * 248 + ".service", True, True),
+                                           ("private/path\nsecret.service", False, False),
+                                           ("private/" + "a" * 256 + ".service", True, False)):
+                with self.subTest(count=count, too_long=too_long, grammar=grammar):
+                    mapper = native.DependencyRoleMap({})
+                    for index in range(count):
+                        mapper.logical(f"unit-{index}.service")
+                    before = (dict(mapper.names), dict(mapper.queries))
+                    if not count and not too_long and grammar:
+                        self.assertEqual(mapper.actual(mapper.logical(name)), name)
+                        continue
+                    with self.assertRaises(AssertionError) as caught:
+                        mapper.logical(name)
+                    message = str(caught.exception)
+                    self.assertTrue(message.startswith("{"), "fixed JSON mapping diagnostic missing")
+                    self.assertEqual(json.loads(message), dict(stage="dependency_mapping_bound",
+                                     mapped_count=count, name_length=len(name), count_limit_reached=count == 512,
+                                     name_too_long=too_long, grammar_matches=grammar))
+                    self.assertNotIn(name, message)
+                    self.assertEqual((mapper.names, mapper.queries), before)
+                    if count:
+                        self.assertEqual(mapper.actual(mapper.logical("unit-0.service")), "unit-0.service")
+        mapper = native.DependencyRoleMap({})
+        longest = "a" * 247 + ".service"
+        self.assertEqual(mapper.actual(mapper.logical(longest)), longest)
+
+    def test_dependency_mapper_collision_bound_remains_separate(self):
+        from deploy.wazuh.tests import test_native as native
+        mapper = native.DependencyRoleMap({})
+        base = "aegis-fixture-external-" + "a" * 64
+        # Force the defensive collision branch independently of the name-count guard.
+        mapper.queries = {base + ("" if index == 0 else "-" + str(index)) + ".service": "reserved"
+                          for index in range(513)}
+        before = dict(mapper.queries)
+        with patch.object(native.hashlib, "sha256", return_value=SimpleNamespace(hexdigest=lambda: "a" * 64)):
+            with self.assertRaisesRegex(AssertionError, "^dependency_mapping_bound$"):
+                mapper.logical("new.service")
+        self.assertEqual(mapper.queries, before)
+        self.assertEqual(mapper.names, {})
+
     def test_dependency_mapper_preserves_mixed_edges_and_queries_real_names(self):
         from deploy.wazuh.tests import test_native as native
         roles = {"ufw.service": "owned-ufw.service", native.uh.GUARD: "owned-guard.service",
