@@ -36,6 +36,8 @@ versions, custom wrapper behavior and active policy remain unsupported.
   the original inactive/disabled path remains separate.
 - Require actual selected IPv4/IPv6 nf_tables backend identities and a complete
   current nft baseline. An inactive CLI message is not an empty-ruleset proof.
+  After executable provenance, require fresh bounded C-locale `ufw status`
+  to report inactive. Never substitute `ufw-init status` or execute a hook.
   Strictly reject other conflicting active/enabled loaders. A finite inventory
   does not prove the absence of arbitrary root automation.
 
@@ -88,6 +90,14 @@ Manager/denied-source/Dashboard/readiness acceptance remains separate; reboot
 still requires separate permission. Rebuild a new pinned private check ZIP from
 qualified Git bytes; keep previous owner stages/evidence and never patch them
 in place. No CA/key/archive/credential, account/binding, scenario or merge change.
+
+Native fixtures with different roots, fragments or argv must not be disguised
+as an admitted stock unit. Separate real vendor lifecycle/packet/ordering proof,
+real adapter/D-Bus reads, and explicitly synthetic positive-admission logic.
+Such fixtures correctly refuse full production classification. Declare any
+namespace-scoped loader identity mappings and preserve returned facts. Full
+positive vendor admission remains a mandatory owner read-only check before
+apply; passing a synthetic CI gate does not establish that result.
 
 ## Primary sources
 

@@ -73,7 +73,8 @@ field details are builder calls to record before Task 2 handoff.
 
 **Files:** modify `https_setup/host.py`, `transaction.py`, `firewall.py`,
 `contracts.py` only for new fixed error codes if necessary; test_transaction.py,
-test_components.py. Update KIT_FILES for ufw.py.
+test_components.py. A focused `https_setup/ufw_host.py` adapter may be created
+instead of an unrelated host refactor. Update KIT_FILES for every new module.
 
 **Interfaces:** consume Task1 protocol and functions via a Linux read-only adapter.
 Record `/etc/aegis-wazuh-https/ufw-compat.json` has exact keys
@@ -88,6 +89,10 @@ wrapper always requires a valid installed record at startup.
   restart drift, rollback ordering and unchanged UFW/foreign state.
 - [ ] Implement held no-follow root reads, fixed trusted backend alias resolution
   and the adapter. Classify only this exception; other loader refusal remains.
+- [ ] Require fresh bounded C-locale CLI inactive status after actual executable
+  provenance, full current nft baseline, and effective dependency/graph checks;
+  preserve these host gates beyond the pure Task1 qualifier. Bind probe trust to
+  frozen evidence and document the exact representation before native handoff.
 - [ ] Include fingerprint in frozen facts/digests, durably install private record
   before guard use and capture its original state for recovery. Revalidate all
   startup conditions without calling full Indexer-active preflight from prestart.
@@ -113,6 +118,10 @@ seven required IDs remain mandatory. No portable skip qualifies this gate.
 - [ ] Create RED native fixture with pinned exact official vendor bytes; no APT
   install/start of host UFW. Isolate filesystem and network operations, assert
   namespace before privileged firewall commands and track exact owned units.
+- [ ] Separate real vendor behavior, adapter/D-Bus observations and synthetic
+  positive admission. Do not mask unsupported fixture unit/root/argv differences;
+  preserve actual facts when mapping owned namespace-scoped loader identities.
+  Document that real full-class positive admission still needs the owner check.
 - [ ] Exercise cold/active guard, normal wrapper stop/restart/direct reload,
   absent ExecReload, concurrent start/stop ordering, enabled-policy/static-record
   drift refusal, Manager allowed and another source denied across transitions.
