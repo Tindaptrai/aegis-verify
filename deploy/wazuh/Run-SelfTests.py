@@ -17,13 +17,13 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 PORTABLE = ("deploy.wazuh.tests.test_components", "deploy.wazuh.tests.test_transaction",
-            "deploy.wazuh.tests.test_runner")
+            "deploy.wazuh.tests.test_runner", "deploy.wazuh.tests.test_ufw")
 NATIVE_MODULE = "deploy.wazuh.tests.test_native"
 REQUIRED_NATIVE = tuple(NATIVE_MODULE + ".NativeTests." + name for name in (
     "test_openssl_signing_and_tls", "test_securefs_permissions_nofollow_and_inode",
     "test_journal_fsync_and_process_lock", "test_renameat2_publication_and_refusal",
     "test_publication_races_preserve_evidence", "test_nft_allowed_denied_sources",
-    "test_systemd_every_start_guard"))
+    "test_systemd_every_start_guard", "test_ufw_disabled_wrapper_preserved"))
 
 
 class ProofResult(unittest.TextTestResult):
@@ -75,7 +75,7 @@ def platform_errors(*, native, system=None):
         errors.append("root_required")
     if not Path("/run/systemd/system").is_dir():
         errors.append("systemd_required")
-    for tool in ("openssl", "nft", "ip", "systemctl", "systemd-analyze", "busctl"):
+    for tool in ("openssl", "nft", "ip", "systemctl", "systemd-analyze", "busctl", "ldd", "iptables", "ip6tables"):
         if not shutil.which(tool):
             errors.append(tool.replace("-", "_") + "_required")
     return errors
@@ -84,7 +84,7 @@ def platform_errors(*, native, system=None):
 def proof_scope(*, native):
     return {"intended_scope": "synthetic_linux" if native else "portable",
             "vendor_lab_acceptance": False,
-            "systemd_fixture_relocations": ["host.INSTALL_ROOT", "host.PROFILE"] if native else []}
+            "systemd_fixture_relocations": UFW_RELOCATIONS if native else []}
 
 
 def source_snapshot(commit):
@@ -95,7 +95,7 @@ def source_snapshot(commit):
     prefix = "deploy/wazuh/"
     names = [prefix + name for name in KIT_FILES]
     names += [prefix + "Run-SelfTests.py", *(prefix + "tests/" + name + ".py" for name in
-              ("test_components", "test_transaction", "test_runner", "test_native")),
+              ("test_components", "test_transaction", "test_runner", "test_native", "test_ufw")),
               ".github/workflows/wazuh-http-operator.yml", "docs/manager/wazuh-http-preparation.md"]
     def git(*args):
         return subprocess.run(["git", "-c", "safe.directory=" + str(ROOT), *args], cwd=ROOT,
@@ -111,6 +111,169 @@ def source_snapshot(commit):
             raise ValueError("source_bytes_mismatch")
         hashes[name] = hashlib.sha256(blob).hexdigest()
     return {"source_commit": commit, "files": hashes}
+
+
+UFW_RELOCATIONS = ["owned_root:vendor_paths", "owned_units:wrapper_guard_indexer",
+                   "wrapper:RootDirectory,NetworkNamespacePath", "host.INSTALL_ROOT", "host.PROFILE",
+                   "host.RECORD_PATH", "ufw_host.RECORD_PATH", "loader_query:owned_inactive_inventory",
+                   "dependency_roles:bijective_all_observed_units_readonly_external", "positive_reader:synthetic_package_unit_backend_dependencies"]
+UFW_CHECKS = ("vendor_bytes_preserved", "vendor_state_preserved", "real_ufw_baseline_preserved",
+              "namespace_assertion_before_mutations", "no_unintended_wrapper_start", "cold_guard_verified",
+              "active_guard_verified", "concurrent_start_order_verified", "concurrent_stop_order_verified",
+              "guard_stop_retained_table", "foreign_rules_preserved", "native_file_reads_verified",
+              "native_typed_bus_verified", "native_modified_unit_refused", "native_backends_verified",
+              "fresh_nft_observation_preserved", "ufw_lock_absent_preserved", "ufw_lock_present_preserved",
+              "partial_ufw_chains_refused", "synthetic_positive_admission_verified",
+              "enabled_policy_refused", "static_record_drift_refused", "deleted_table_refused", "modified_table_refused")
+UFW_OPERATIONS = ("cold_guard", "concurrent_start", "normal_stop", "normal_restart",
+                  "systemd_reload_refused", "direct_restart", "direct_force_reload", "active_guard_restart",
+                  "concurrent_stop_start")
+
+
+def validate_native_observations(observations):
+    """Shared runner/CI/private-assembler boundary; missing proof never qualifies."""
+    def require(condition):
+        if not condition:
+            raise ValueError("native_observation_invalid")
+    def sha(value):
+        return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    require(type(observations) is dict)
+    prefix = NATIVE_MODULE + ".NativeTests."
+    for method in ("test_nft_allowed_denied_sources", "test_systemd_every_start_guard", "test_ufw_disabled_wrapper_preserved"):
+        item = observations.get(prefix + method, {})
+        require(type(item) is dict)
+        require(sha(item.get("host_firewall_before_sha256")))
+        require(item.get("host_firewall_before_sha256") == item.get("host_firewall_after_sha256"))
+        require(item.get("fixture_cleanup_verified") is True)
+    strict = observations[prefix + "test_systemd_every_start_guard"]
+    require(strict.get("loader_scope") == "owned_namespace_inventory_not_host_eligibility" and strict.get("strict_path_exception_not_used") is True)
+    from deploy.wazuh.https_setup.ufw_host import LOADERS
+    mapping = strict.get("loader_query_mapping", {})
+    require(type(mapping) is dict and set(mapping) == set(LOADERS) and len(set(mapping.values())) == 3)
+    for role, unit in mapping.items():
+        require(re.fullmatch(r"aegis-native-[0-9a-f]{12}-loader-" + role.split(".")[0] + r"\.service", unit) is not None)
+    require(strict.get("loader_facts") == {role: {"LoadState": "loaded", "ActiveState": "inactive", "UnitFileState": "disabled"} for role in LOADERS})
+    from deploy.wazuh.tests.test_ufw import VENDOR
+    item = observations[prefix + "test_ufw_disabled_wrapper_preserved"]
+    require(set(item) == {"host_firewall_before_sha256", "host_firewall_after_sha256", "fixture_cleanup_verified",
+                         "vendor_deb_sha256", "vendor_inputs", "relocations", "checks", "operations",
+                         "scope", "unit_mapping", "dependency_cases", "preservation_hashes", "native_adapter", "nft_observations"})
+    require(item["vendor_deb_sha256"] == "096eb403ecaf6740d160bb306970f025222ef71324319cc1cb78d06dfa462ef1")
+    require(item["vendor_inputs"] == {path: hashlib.sha256(body).hexdigest() for path, body in VENDOR.items()})
+    require(item["relocations"] == UFW_RELOCATIONS)
+    require(item["scope"] == {"native": "vendor_lifecycle_packets_order_and_adapter_refusal",
+                              "positive_admission": "synthetic_reader", "probe": "nft-no-ufw-chains-v1",
+                              "owner_full_class_check": "pending", "vendor_lab_acceptance": False})
+    require(item["scope"]["vendor_lab_acceptance"] is False)
+    require(type(item["checks"]) is dict and set(item["checks"]) == set(UFW_CHECKS))
+    require(all(value is True for value in item["checks"].values()))
+    require(type(item["operations"]) is dict and set(item["operations"]) == set(UFW_OPERATIONS))
+    require(all(value == {"allowed": True, "denied": True, "table": True, "foreign": True} and
+                all(type(v) is bool for v in value.values()) for value in item["operations"].values()))
+    require(set(item["preservation_hashes"]) == {"vendor", "foreign", "real_ufw", "fresh_nft"})
+    for pair in item["preservation_hashes"].values():
+        require(type(pair) is dict and set(pair) == {"before", "after"} and sha(pair["before"]) and pair["before"] == pair["after"])
+    mapping = item["unit_mapping"]
+    require(type(mapping) is dict and set(mapping) == {"ufw.service", "wazuh-indexer.service", "aegis-wazuh-http-guard.service"})
+    require(len(set(mapping.values())) == 3 and all(re.fullmatch(r"aegis-native-[0-9a-f]{12}-(wrapper|ufw-indexer|ufw-guard)\.service", v) for v in mapping.values()))
+    adapter = item["native_adapter"]
+    from deploy.wazuh.https_setup import ufw
+    require(type(adapter) is dict and set(adapter) == {"unit_properties", "typed_bus", "backend_sha256"})
+    require(sha(adapter["backend_sha256"]))
+    properties = adapter["unit_properties"]
+    expected = {**ufw.STATIC_PROPERTIES, **ufw.RUNTIME_PROPERTIES,
+                "FragmentPath": "/run/systemd/system/" + mapping["ufw.service"],
+                "RootDirectory": "<owned_vendor_root>", "UnitFileState": "disabled"}
+    require(properties == expected)
+    bus = adapter["typed_bus"]
+    require(set(bus) == set(ufw.EMPTY_ARRAYS) | {"ExecStartEx", "ExecStopEx", "Job"})
+    require(bus["Job"] == {"type": "(uo)", "data": [0, "/"]} and type(bus["Job"]["data"][0]) is int)
+    for key, signature in ufw.EMPTY_ARRAYS.items():
+        require(bus[key] == {"type": signature, "data": []})
+    for key, args in (("ExecStartEx", ["start", "quiet"]), ("ExecStopEx", ["stop"])):
+        value = bus[key]
+        require(set(value) == {"type", "data"} and value["type"] == "a(sasasttttuii)")
+        require(type(value["data"]) is list and len(value["data"]) == 1)
+        row = value["data"][0]
+        require(type(row) is list and len(row) == 10 and row[:3] == [ufw.INIT_PATH, [ufw.INIT_PATH, *args], []])
+        require(all(type(n) is int for n in row[3:]))
+        require(all(0 <= n < 2**64 for n in row[3:7]) and 0 <= row[7] < 2**32 and
+                all(-(2**31) <= n < 2**31 for n in row[8:]))
+    from deploy.wazuh.https_setup.ufw_host import validate_nft_observation
+    from deploy.wazuh.https_setup.contracts import SetupError
+    from deploy.wazuh.https_setup.transaction import digest
+    nft = item["nft_observations"]
+    require(type(nft) is dict and set(nft) == {"empty", "foreign", "ufw-partial", "ufw6-partial"})
+    for name, observed in nft.items():
+        require(type(observed) is dict and set(observed) == {"document", "before_sha256", "after_sha256", "refused", "absent_lock_preserved", "present_lock_preserved"})
+        require(observed["absent_lock_preserved"] is True and observed["present_lock_preserved"] is True)
+        require(sha(observed["before_sha256"]) and observed["before_sha256"] == observed["after_sha256"] == digest(observed["document"]))
+        require(observed["refused"] is name.endswith("partial"))
+        try:
+            validate_nft_observation(observed["document"])
+        except SetupError:
+            require(name.endswith("partial"))
+        else:
+            require(not name.endswith("partial"))
+        require(type(observed["document"]) is dict and set(observed["document"]) == {"nftables"})
+        objects = observed["document"]["nftables"]
+        require(type(objects) is list and all(type(obj) is dict and len(obj) == 1 and type(next(iter(obj.values()))) is dict for obj in objects))
+        if name.endswith("partial"):
+            removed = [obj for obj in objects if obj.get("chain", {}).get("name") == name]
+            require(len(removed) == 1)
+            try:
+                validate_nft_observation({"nftables": [obj for obj in objects if obj not in removed]})
+            except SetupError:
+                require(False)
+        require(len(objects) == (1 if name == "empty" else 4 if name == "foreign" else 5))
+        # The only exported kernel objects are this closed synthetic fixture.
+        for obj in objects[1:]:
+            kind, body = next(iter(obj.items()))
+            require(kind in {"table", "chain", "rule"} and body["family"] == "inet")
+            require((body["name"] if kind == "table" else body["table"]) == "aegis_fixture_foreign")
+            if kind == "chain":
+                require(body["name"] in {"input", name} and type(body["handle"]) is int)
+            if kind == "rule":
+                require(body["chain"] == "input")
+    require(item["preservation_hashes"]["fresh_nft"] == {"before": nft["foreign"]["before_sha256"], "after": nft["foreign"]["after_sha256"]})
+    cases = item["dependency_cases"]
+    require(type(cases) is dict and set(cases) == {"direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering"})
+    from deploy.wazuh.https_setup.ufw_host import DEPENDENCIES
+    for name, case in cases.items():
+        require(set(case) == {"mapping", "facts", "refused", "propagation_verified", "baseline", "identity_mapping", "raw_facts_sha256"} and case["refused"] is True)
+        require(case["propagation_verified"] is (name not in {"activation", "ordering"}))
+        roles = case["mapping"]
+        require(set(roles) == {"ufw.service", "wazuh-indexer.service", "aegis-wazuh-http-guard.service", "bridge.service"})
+        require(len(set(roles.values())) == 4 and set(case["facts"]) == set(roles.values()))
+        baseline = case["baseline"]
+        require(type(baseline) is dict and set(baseline) == {"identity_mapping", "raw_facts_sha256", "admitted"} and baseline["admitted"] is True)
+        require(sha(baseline["raw_facts_sha256"]) and sha(case["raw_facts_sha256"]))
+        for identities in (baseline["identity_mapping"], case["identity_mapping"]):
+            require(type(identities) is dict and 4 <= len(identities) <= 512 and len(set(identities.values())) == len(identities))
+            require(all(identities.get(role) == actual for role, actual in roles.items()))
+            for logical, actual in identities.items():
+                require(type(actual) is str and len(actual) <= 255 and re.fullmatch(r"[A-Za-z0-9_.@\\:-]+\.[a-z]+", actual) is not None)
+                if logical not in roles:
+                    stem = "aegis-fixture-external-" + hashlib.sha256(actual.encode("ascii")).hexdigest()
+                    kind = actual.rsplit(".", 1)[1]
+                    require(re.fullmatch(stem + r"(?:-[1-9][0-9]{0,2})?\." + kind, logical) is not None)
+        for unit, facts in case["facts"].items():
+            require(re.fullmatch(r"aegis-native-[0-9a-f]{12}-dep-[a-z_]+-[a-z]+\.service", unit) is not None)
+            require(set(facts) == set(DEPENDENCIES))
+            require(all(type(v) is list and len(v) <= 512 and all(type(n) is str for n in v) and v == sorted(set(v)) for v in facts.values()))
+            for values in facts.values():
+                require(all(n in case["identity_mapping"].values() for n in values))
+        facts = {role: case["facts"][unit] for role, unit in roles.items()}
+        ufw, indexer, guard, bridge = (roles[k] for k in ("ufw.service", "wazuh-indexer.service", "aegis-wazuh-http-guard.service", "bridge.service"))
+        if name.startswith("direct_"):
+            require((indexer if name == "direct_indexer" else guard) in facts["ufw.service"]["Requires"])
+        elif name in {"transitive", "mixed"}:
+            require(guard in facts["bridge.service"]["Requires"])
+            require(bridge in facts["ufw.service"]["Requires"] if name == "transitive" else ufw in facts["bridge.service"]["PropagatesStopTo"])
+        elif name == "activation":
+            require(ufw in facts["aegis-wazuh-http-guard.service"]["Wants"])
+        else:
+            require(ufw in facts["aegis-wazuh-http-guard.service"]["Before"])
 
 
 def write_proof(path, proof):
@@ -163,6 +326,12 @@ def main(argv=None):
         if args.native:
             proof["native_observations"] = getattr(sys.modules.get(NATIVE_MODULE), "OBSERVATIONS", {})
         proof["status"] = "passed" if qualified(result, REQUIRED_NATIVE if args.native else ()) else "failed"
+        if args.native:
+            try:
+                validate_native_observations(proof["native_observations"])
+            except (ValueError, KeyError, TypeError):
+                proof["status"] = "failed"
+                errors.append("native_observation_invalid")
         # Catch accidental source mutation by tests as well as pre-run drift.
         if source is not None:
             try:

@@ -10,8 +10,10 @@ connector, tài khoản, binding, scenario hoặc agent.
 Chỉ bàn giao bản đã review, có source commit đầy đủ, checksum ZIP, manifest và
 native CI thành công **đúng commit đó**. Thay đổi dù một module phải được qualify
 lại. `native-results.json` phải có `mode=native`, `status=passed`, không lỗi hoặc
-skip; tất cả ID trong `REQUIRED_NATIVE` phải `passed`. `native-source.json` phải
-khớp source SHA và SHA-256 từng file thực tế. Metadata này giúp đối chiếu; nó
+skip; đủ tám ID trong `REQUIRED_NATIVE` phải `passed`, gồm gate mới
+`test_ufw_disabled_wrapper_preserved` và bảy gate cũ. `native-source.json` phải
+khớp source SHA và SHA-256 đủ 18 file canonical (10 code, runner, 5 test module,
+workflow và tài liệu này). Metadata này giúp đối chiếu; nó
 không phải chữ ký hay giấy cấp quyền thực thi.
 
 Native CI dùng VM Ubuntu 24.04/Python 3.12 và hệ thống thật: OpenSSL ký CA giả;
@@ -21,15 +23,40 @@ chứng minh kết nối TLS được trước guard; sau guard chỉ nguồn ch
 được. systemd kiểm tra lại guard ở mỗi lần start/restart, kể cả khi oneshot guard
 đang active nhưng table bị xóa hoặc bị sửa.
 
-Harness systemd sao chép nguyên byte module vào cây fixture root-owned và chỉ
-đổi `host.INSTALL_ROOT` và `host.PROFILE` sang vị trí fixture. CLI, kiểm tra
-manifest/quyền file, guard và lệnh nft thực tế vẫn chạy. Unit được lấy từ renderer
-rồi đổi tên/vị trí fixture, thêm `NetworkNamespacePath` cùng kiểm tra inode netns
-trước cả guard và root `+` prestart. Sai netns dừng trước mọi thay đổi nft. CI đối
-chiếu fingerprint semantic firewall của host trước/sau; không sửa firewall mặc
-định. Filesystem fixture chỉ chroot trong tiến trình con riêng; thử khác mount
-dùng mount namespace private của tiến trình con và tmpfs fixture. Cây fixture, CA,
-private key và journal không được upload; artifact chỉ gồm hai JSON đã lọc.
+Harness sao chép nguyên byte module vào cây root-owned. Proof khai báo các
+relocation: code/profile/compatibility record, tên unit, root vendor và netns.
+Gate strict ánh xạ truy vấn ba loader sang ba unit fixture thực sự
+inactive/disabled, giữ nguyên facts và không dùng exception UFW. Đây là inventory
+fixture, không qualify loader của CI host. CLI, manifest, guard và nft verifier
+thực vẫn chạy. Mỗi thay đổi firewall phải kiểm tra inode netns. Cleanup phải xác
+nhận unit dừng, netns không còn process và host firewall không đổi; không chắc
+chắn thì gate thất bại và giữ cây fixture.
+
+Gate mới dùng nguyên byte pin từ Ubuntu `ufw_0.36.2-6_all.deb`; không cài package
+hay gọi UFW của host. Script/unit/default/hook giữ SHA-256 riêng, config tổng hợp
+`ENABLED=no`, hook không executable. Wrapper chạy trong root tối thiểu/netns riêng.
+Gate thử stop/restart, direct `restart`/`force-reload`, từ chối `systemctl reload`
+vì không có ExecReload; start/stop đồng thời trong một transaction systemd. Qua
+các bước đó phải giữ Manager TLS allowed, nguồn khác denied, owned table và
+foreign rules. Unit dùng một lần cung cấp 17 thuộc tính dependency thực và stop
+propagation trực tiếp/bắc cầu/kết hợp, với ánh xạ vai trò song ánh được ghi lại.
+
+Dependency fixture chuẩn hóa song ánh toàn bộ danh tính unit đã quan sát, kể cả
+unit ngoài fixture trùng tên vai trò. Mọi query đảo ánh xạ về unit thực, giữ
+nguyên 17 thuộc tính và mọi edge; proof giữ mapping và hash canonical raw facts.
+Cùng mapper phải admit baseline an toàn trước khi thêm dependency để thử refusal.
+Unit ngoài fixture chỉ được đọc; start/stop/restart/reload chỉ chấp nhận danh sách
+unit fixture đã sở hữu, không dùng alias để gửi action tới UFW thật.
+
+Proof tách hành vi vendor/packet/order thực; file/backend/typed D-Bus thực; và
+admission dương qua reader tổng hợp. RootDirectory/FragmentPath khác stock phải
+bị classifier production từ chối, không sửa facts để giả stock. Reader tổng hợp
+chỉ thay package/unit/backend/dependency facts; record IO, `LinuxHost.guard`, fresh
+nft read và verifier thực vẫn chạy. Child root riêng chứng minh JSON empty/foreign
+với handles, partial UFW chain refusal, baseline và lock vắng mặt/sentinel có sẵn
+không đổi. Không gọi UFW CLI, compatibility-list/save hay init-status. Runner và
+workflow cùng validate schema, hashes, packet/order/preservation/cleanup; chỉ
+upload proof không đủ qualify. Không upload fixture tree, CA/key hay journal.
 
 Đây là **qualification Linux tổng hợp**, chưa phải kiểm chứng Wazuh/OpenSearch,
 Dashboard, Manager thật, cấu hình vendor thật hay sự bền vững sau reboot. Chạy
@@ -37,6 +64,43 @@ portable trên Windows chỉ cho bằng chứng logic portable; thiếu Linux/sy
 hoặc một native gate bị skip phải làm native qualification thất bại. Không chạy
 native suite trên máy lab đang cài Wazuh: fence từ chối footprint/unit/package
 Wazuh. Chỉ dùng VM dùng một lần, không có dữ liệu thật.
+
+## Ngoại lệ duy nhất: wrapper UFW với policy disabled
+
+Ngoài đường strict inactive/disabled, chỉ nhận Ubuntu UFW 0.36.2-6 đã qualify:
+root oneshot/RemainAfterExit, active/exited và enabled, nhưng `ENABLED=no`.
+Policy active, package/hook/unit tùy biến, drop-in, command/environment bổ sung,
+backend khác nf_tables, pending work hoặc loader xung đột đều không được hỗ trợ.
+Config được parse như dữ liệu, không source. Package references/hash local là
+kiểm tra nhất quán trong trusted-root boundary, không phải chứng minh nguồn
+package độc lập hay chống root đã bị chiếm quyền.
+
+Quan sát là `probe={"method":"nft-no-ufw-chains-v1"}`: production tự đọc fresh
+complete nft JSON, chỉ nhận subset table/chain/rule thông thường đã review, từ
+chối mọi chain prefix `ufw-`/`ufw6-`. Đây là absence predicate trên backend đã chọn,
+không phải `ufw status`, ruleset rỗng, view legacy hay phát hiện root đổi tên
+chain. Normal CLI tạo/truncate lock nên không được gọi trong check. Unknown hoặc
+partial JSON/policy ngoài hợp đồng đều từ chối, không đoán trạng thái inactive.
+
+Record `/etc/aegis-wazuh-https/ufw-compat.json`, root 0600 dưới parent 0700, bind
+profile và fingerprint static; ghi bền vững trước guard. Mỗi ensure và Indexer
+verify qualify lại kể cả guard active. Thiếu record, method cũ hoặc drift không
+tự refresh/migrate. Guard và Indexer chỉ `After=ufw.service`, không Wants/Requires
+để tự start UFW; effective graph phải không truyền stop/restart ngược tới UFW.
+
+Kit không stop/restart/reload/enable/disable, sửa file/hook hay flush UFW. Rollback
+khôi phục HTTP/drop-in và verify localhost cũ trước khi bỏ owned table; không
+khôi phục UFW. Trước thay policy/package/hook/backend hoặc dùng force-stop/
+flush-all, đưa Indexer về trạng thái bảo trì an toàn đã duyệt rồi qualify lại.
+Ordering/next-start checks không bảo vệ liên tục trước root sửa hệ thống; refusal
+về sau không đóng khoảng hở đã xảy ra khi đang phục vụ.
+
+**Owner full-class read-only check vẫn pending trước apply**, kể cả native CI
+pass. Ghi evidence ID riêng như `HTTP-UFW-CHECK-01` để reviewer đối chiếu facts
+thực; không suy ra từ reader tổng hợp. `vendor_lab_acceptance` luôn false trong
+CI. Manager/denied-source/Dashboard/readiness và reboot vẫn là acceptance riêng.
+Amendment cần ZIP mới, pin mới từ Git blobs đã qualify; giữ kit/check/bằng chứng
+owner cũ, không vá chúng để mô tả là đã chứng minh hành vi mới.
 
 ## Chuẩn bị biến triển khai riêng
 
@@ -72,7 +136,7 @@ Code/profile/manifest/work giữ root-only: thư mục 0700, file 0600. Không c
 staged dưới home của user có thể ghi. Chỉ chép whitelist đã review, không dùng
 `chown -R` hoặc `chmod -R` lên cây vendor.
 
-Staging chứa `Setup-Wazuh-HTTPS.py`, tám mục module/entrypoint trong
+Staging chứa `Setup-Wazuh-HTTPS.py`, tổng cộng mười mục module/entrypoint trong
 `KIT-MANIFEST.json`, tests/runner để đối chiếu, và profile owner riêng. Manifest
 có đúng `schema_version`, `source_commit`, `native_proof`, `files`; `files` đúng
 whitelist của `host.KIT_FILES`. Không sửa code đã qualify, kể cả đổi newline.

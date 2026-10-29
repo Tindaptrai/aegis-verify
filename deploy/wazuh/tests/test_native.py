@@ -28,6 +28,9 @@ import unittest
 
 from deploy.wazuh.https_setup import host as h
 from deploy.wazuh.https_setup import transaction as tx
+from deploy.wazuh.https_setup import ufw as u
+from deploy.wazuh.https_setup import ufw_host as uh
+from deploy.wazuh.tests.test_ufw import VENDOR
 from deploy.wazuh.https_setup.certificates import create_http_certificate
 from deploy.wazuh.https_setup.contracts import SetupError, load_profile
 from deploy.wazuh.https_setup.firewall import TABLE, firewall_create_text, verify_table, guard_unit, indexer_dropin
@@ -139,6 +142,18 @@ def private_file(path, body, mode=0o600, gid=0):
         stream.write(body)
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def replace_fixture_file(root, path, body, mode=0o600):
+    path = Path(path)
+    if not path.is_relative_to(root) or path.is_symlink() or not path.is_file():
+        raise AssertionError("owned_existing_fixture_file_required")
+    fd = os.open(path, os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW)
+    with os.fdopen(fd, "wb") as stream:
+        os.fchmod(fd, mode)
+        stream.write(body)
+        stream.flush()
+        os.fsync(fd)
 
 
 def make_tls(root, *, indexer=None, manager=None):
@@ -323,7 +338,10 @@ class NetworkFixture:
         return command("ip", "netns", "exec", namespace, *args, **kwargs)
 
     def nft(self, *args, **kwargs):
-        return self.net(self.server, "nft", *args, **kwargs)
+        # The same process verifies its namespace immediately before exec(nft).
+        return self.net(self.server, "/usr/bin/python3", "-I", "-B", "-c",
+                        "import os,sys; assert os.geteuid()==0 and os.stat('/proc/self/ns/net').st_ino==int(sys.argv[1]); os.execvp('nft',['nft',*sys.argv[2:]])",
+                        str(self.inode), *args, **kwargs)
 
     def table(self):
         return json.loads(self.nft("--json", "list", "table", "inet", TABLE).stdout)
@@ -366,6 +384,13 @@ class NetworkFixture:
         return full_name
 
     def systemctl(self, *args, check=True):
+        actions = {"start", "stop", "restart", "reload", "reset-failed"}
+        if not args or args[0] not in actions | {"show", "is-active", "daemon-reload"}:
+            raise AssertionError("owned_unit_action_required")
+        if args[0] in actions:
+            owned = {name for name, _ in self.units}
+            if len(args) < 2 or any(name not in owned for name in args[1:]):
+                raise AssertionError("owned_unit_action_required")
         result = command("systemctl", *args, check=False, timeout=25)
         if check and result.returncode:
             self.capture_service_failure()
@@ -398,9 +423,11 @@ class NetworkFixture:
             try:
                 if self.systemctl("stop", name, check=False).returncode:
                     problems.append("unit_stop_failed")
+                    continue
                 state = self.systemctl("show", name, "--property=ActiveState", "--value").stdout.strip()
                 if state not in (b"inactive", b"failed"):
                     problems.append("unit_still_active")
+                    continue
                 self.systemctl("reset-failed", name, check=False)
                 path.unlink()
             except (OSError, AssertionError, subprocess.SubprocessError):
@@ -431,7 +458,7 @@ class NetworkFixture:
             except (OSError, AssertionError, subprocess.SubprocessError):
                 problems.append("namespace_cleanup_failed")
         try:
-            if self.owns_root:
+            if self.owns_root and not problems:
                 shutil.rmtree(self.root)
                 if self.root.exists():
                     problems.append("fixture_tree_left")
@@ -456,6 +483,387 @@ def network_fixture(test):
         yield fixture.setup()
     finally:
         fixture.cleanup()
+
+
+
+def inactive_loader_inventory(fixture):
+    """Only query-identity relocation; returned inactive/disabled facts are real."""
+    body = '''[Unit]
+DefaultDependencies=no
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+[Install]
+WantedBy=multi-user.target
+'''
+    mapping = {role: fixture.unit("loader-" + role.split(".")[0], body) for role in uh.LOADERS}
+    fixture.systemctl("daemon-reload")
+    facts = {role: h.LinuxHost().properties(unit, uh.LOADER_KEYS) for role, unit in mapping.items()}
+    fixture.test.assertTrue(uh.strict_loaders(facts))
+    fixture.test.assertTrue(all(v == {"LoadState": "loaded", "ActiveState": "inactive", "UnitFileState": "disabled"}
+                                for v in facts.values()))
+    return mapping
+
+
+def copy_tool_closure(root, selected_tools=("/bin/sh", "/bin/echo", "/bin/grep")):
+    """Copy trusted runner ELF dependencies as data; never install a package."""
+    for selected in selected_tools:
+        original = Path(selected).resolve(strict=True)
+        dependencies = command("ldd", original).stdout.decode("ascii")
+        if "not found" in dependencies:
+            raise AssertionError("fixture_tool_dependency_missing")
+        paths = {selected: original}
+        for line in dependencies.splitlines():
+            match = re.search(r"(?:=>\s+)?(/[^\s]+)\s+\(", line)
+            if match:
+                paths[match[1]] = Path(match[1]).resolve(strict=True)
+        for destination, source in paths.items():
+            info = source.stat()
+            if info.st_uid or info.st_gid or info.st_mode & 0o022 or not stat.S_ISREG(info.st_mode):
+                raise AssertionError("fixture_tool_untrusted")
+            target = root / destination.lstrip("/")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                private_file(target, source.read_bytes(), stat.S_IMODE(info.st_mode))
+
+
+def vendor_tree(fixture):
+    root = fixture.root / "vendor-root"
+    root.mkdir(mode=0o755)
+    (root / "usr/lib").mkdir(parents=True)
+    (root / "lib").symlink_to("usr/lib", target_is_directory=True)
+    for path, body in VENDOR.items():
+        private_file(root / path.lstrip("/"), body, 0o755 if path == u.INIT_PATH else 0o644)
+    private_file(root / "etc/ufw/ufw.conf", b"ENABLED=no\nLOGLEVEL=low\n", 0o644)
+    for name in ("before.init", "after.init"):
+        private_file(root / "etc/ufw" / name, VENDOR["/usr/share/ufw/" + name], 0o640)
+    # Package-database data is explicitly synthetic; no dpkg installation occurred.
+    sums = b"".join(hashlib.md5(VENDOR[path]).hexdigest().encode() + b"  " + path[1:].encode() + b"\n"
+                    for path in (u.INIT_PATH, u.FUNCTIONS_PATH, u.UNIT_PATH))
+    private_file(root / u.SUMS_PATH.lstrip("/"), sums, 0o644)
+    copy_tool_closure(root)
+    return root
+
+
+def vendor_digest(root):
+    paths = {*VENDOR, u.CONF_PATH, u.SUMS_PATH, "/etc/ufw/before.init", "/etc/ufw/after.init"}
+    return tx.digest({path: u.file_identity(uh.UfwHostReader(h.LinuxHost()).root_file(str(root / path.lstrip("/")), u.LIMIT),
+                                          path=str(root / path.lstrip("/"))) for path in sorted(paths)})
+
+
+def real_ufw_baseline():
+    """Read only the real unit/config footprint; never invoke its CLI or wrapper."""
+    paths = ("/etc/ufw", "/etc/default/ufw", "/usr/lib/ufw", "/usr/lib/systemd/system/ufw.service",
+             "/etc/systemd/system/ufw.service", "/etc/systemd/system/ufw.service.d",
+             "/etc/systemd/system/multi-user.target.wants/ufw.service", "/var/lib/ufw", "/run/ufw.lock")
+    files = {}
+    for path in paths:
+        base = Path(path)
+        items = [base, *sorted(base.rglob("*"))] if base.is_dir() and not base.is_symlink() else [base]
+        for item in items:
+            if not os.path.lexists(item):
+                files[str(item)] = None
+                continue
+            info = item.lstat()
+            files[str(item)] = dict(mode=info.st_mode, uid=info.st_uid, gid=info.st_gid, nlink=info.st_nlink,
+                                    mtime_ns=info.st_mtime_ns, ctime_ns=info.st_ctime_ns,
+                                    body=hashlib.sha256(item.read_bytes()).hexdigest() if stat.S_ISREG(info.st_mode) else
+                                    os.readlink(item) if stat.S_ISLNK(info.st_mode) else None)
+    props = h.LinuxHost().properties("ufw.service", ("LoadState", "ActiveState", "SubState", "UnitFileState", "FragmentPath"))
+    return tx.digest({"files": files, "unit": props})
+
+
+def wrapper_direct(fixture, root, operation):
+    if operation not in {"start", "stop", "restart", "force-reload"}:
+        raise AssertionError("disabled_operation_required")
+    u._disabled_config((root / u.CONF_PATH.lstrip("/")).read_bytes())
+    # Child asserts the namespace, then chroots and closes inherited descriptors.
+    code = '''import os,sys
+assert os.geteuid()==0 and os.stat('/proc/self/ns/net').st_ino==int(sys.argv[1])
+os.chroot(sys.argv[2]); os.chdir('/')
+os.closerange(3, 65536)
+args=['/usr/lib/ufw/ufw-init', sys.argv[3]]
+if sys.argv[3]=='start': args.append('quiet')
+os.execv(args[0],args)
+'''
+    result = fixture.net(fixture.server, "/usr/bin/python3", "-I", "-B", "-c", code,
+                         str(fixture.inode), root, operation, timeout=10)
+    expected = {"start": b"", "stop": b"Skip stopping firewall: ufw (not enabled)\n",
+                "restart": b"Skipping  (not enabled)\n", "force-reload": b"Skipping  (not enabled)\n"}
+    fixture.test.assertEqual(result.stdout, expected[operation])
+    fixture.test.assertEqual(result.stderr, b"")
+
+
+class DependencyRoleMap:
+    """Bijective unit identity translation only; no property or graph filtering."""
+    def __init__(self, roles):
+        if len(set(roles.values())) != len(roles):
+            raise AssertionError("dependency_mapping_not_bijective")
+        self.queries = dict(roles)  # logical -> actual
+        self.names = {actual: logical for logical, actual in roles.items()}
+
+    def logical(self, actual):
+        if actual in self.names:
+            return self.names[actual]
+        if (len(self.names) >= 512 or len(actual) > 255 or
+                not re.fullmatch(r"[A-Za-z0-9_.@\\:-]+\.[a-z]+", actual)):
+            raise AssertionError("dependency_mapping_bound")
+        stem, kind = actual.rsplit(".", 1)
+        base = "aegis-fixture-external-" + hashlib.sha256(actual.encode("ascii")).hexdigest()
+        alias, suffix = base + "." + kind, 0
+        while alias in self.queries:
+            suffix += 1
+            if suffix > 512:
+                raise AssertionError("dependency_mapping_bound")
+            alias = base + "-" + str(suffix) + "." + kind
+        self.names[actual] = alias
+        self.queries[alias] = actual
+        return alias
+
+    def actual(self, logical):
+        if logical not in self.queries:
+            raise AssertionError("unobserved_dependency_query")
+        return self.queries[logical]
+
+
+class MappedDependencyHost:
+    def __init__(self, actual_host, roles):
+        self.host = actual_host
+        self.mapping = DependencyRoleMap(roles)
+        self.raw = {}
+
+    def guard_unit_present(self):
+        observed = self.host.properties(self.mapping.actual(uh.GUARD), ("LoadState",))
+        if observed != {"LoadState": "loaded"}:
+            raise AssertionError("actual_owned_guard_required")
+        return True
+
+    def dependency_properties(self, logical):
+        actual = self.mapping.actual(logical)
+        values = self.host.dependency_properties(actual)
+        self.raw[actual] = {key: sorted(value.split()) for key, value in values.items()}
+        return {key: " ".join(self.mapping.logical(name) for name in value.split()) for key, value in values.items()}
+
+
+def dependency_observations(fixture):
+    """Actual D-Bus/systemctl graph and propagation; only disposable true units."""
+    observations = {}
+    base = '''[Unit]
+DefaultDependencies=no
+{relations}
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+TimeoutStartSec=10
+TimeoutStopSec=5
+'''
+    for case in ("direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering"):
+        mapping = {role: f"aegis-native-{fixture.token}-dep-{case}-{name}.service"
+                   for role, name in (("ufw.service", "ufw"), (uh.INDEXER, "indexer"), (uh.GUARD, "guard"), ("bridge.service", "bridge"))}
+        ufw, indexer, guard, bridge = (mapping[k] for k in ("ufw.service", uh.INDEXER, uh.GUARD, "bridge.service"))
+        relations = {name: "" for name in mapping.values()}
+        if case.startswith("direct_"):
+            relations[ufw] = "Requires=" + (indexer if case == "direct_indexer" else guard)
+        elif case in {"transitive", "mixed"}:
+            relations[bridge] = "Requires=" + guard
+            if case == "transitive":
+                relations[ufw] = "Requires=" + bridge
+            else:
+                relations[bridge] += "\nPropagatesStopTo=" + ufw
+        elif case == "activation":
+            relations[guard] = "Wants=" + ufw
+        else:
+            relations[guard] = "Before=" + ufw
+        paths = {}
+        for name in relations:
+            role = name.removeprefix("aegis-native-" + fixture.token + "-").removesuffix(".service")
+            fixture.test.assertEqual(fixture.unit(role, base.format(relations="")), name)
+            paths[name] = fixture.units[-1][1]
+        fixture.systemctl("daemon-reload")
+        actual = h.LinuxHost()
+        baseline = MappedDependencyHost(actual, mapping)
+        uh.UfwHostReader(baseline).dependency_facts()  # same complete mapper must admit the safe control
+        baseline_proof = {"identity_mapping": baseline.mapping.queries,
+                          "raw_facts_sha256": tx.digest(baseline.raw), "admitted": True}
+        for name, relation in relations.items():
+            replace_fixture_file(Path("/run/systemd/system"), paths[name], base.format(relations=relation).encode(), 0o644)
+        fixture.systemctl("daemon-reload")
+        raw = {name: actual.dependency_properties(name) for name in mapping.values()}
+        hostile = MappedDependencyHost(actual, mapping)
+        with fixture.test.assertRaisesRegex(SetupError, "ufw_unsupported"):
+            uh.UfwHostReader(hostile).dependency_facts()
+        propagated = case not in {"activation", "ordering"}
+        if propagated:
+            # One transaction establishes actual running units before stopping the source.
+            fixture.systemctl("start", *mapping.values())
+            fixture.test.assertEqual(fixture.systemctl("is-active", ufw).stdout.strip(), b"active")
+            source = indexer if case == "direct_indexer" else guard
+            fixture.systemctl("stop", source)
+            fixture.test.assertEqual(fixture.systemctl("show", ufw, "--property=ActiveState", "--value").stdout.strip(), b"inactive")
+            # Restart propagation gets separate evidence with both units active.
+            fixture.systemctl("start", *mapping.values())
+            before = int(fixture.systemctl("show", ufw, "--property=ActiveEnterTimestampMonotonic", "--value").stdout)
+            fixture.systemctl("restart", source)
+            if case == "mixed":
+                # PropagatesStopTo propagates stop, not automatic reactivation.
+                fixture.test.assertEqual(fixture.systemctl("show", ufw, "--property=ActiveState", "--value").stdout.strip(), b"inactive")
+            else:
+                after = int(fixture.systemctl("show", ufw, "--property=ActiveEnterTimestampMonotonic", "--value").stdout)
+                fixture.test.assertGreater(after, before)
+        observations[case] = {"mapping": mapping, "facts": {name: {key: sorted(value.split()) for key, value in facts.items()} for name, facts in raw.items()},
+                              "refused": True, "propagation_verified": propagated,
+                              "baseline": baseline_proof,
+                              "identity_mapping": hostile.mapping.queries,
+                              "raw_facts_sha256": tx.digest(hostile.raw)}
+        fixture.systemctl("stop", *mapping.values())
+        # Remove hostile edges before the next safe control, retaining owned units for teardown.
+        for path in paths.values():
+            replace_fixture_file(Path("/run/systemd/system"), path, base.format(relations="").encode(), 0o644)
+        fixture.systemctl("daemon-reload")
+    return observations
+
+
+
+def native_nft_read(test, fixture, root, *, refusal=False):
+    """Real production nft reader in an owned netns and fork-only child root.
+
+    The fixture supplies only nft and its shared libraries. There is no UFW CLI,
+    compatibility binary, vendor config, interpreter executable or live bus here.
+    """
+    reader, writer = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(reader)
+        try:
+            os.setsid()
+            namespace = os.open("/run/netns/" + fixture.server, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                os.setns(namespace, 0)
+            finally:
+                os.close(namespace)
+            assert os.geteuid() == 0 and os.stat("/proc/self/ns/net").st_ino == fixture.inode
+            os.chroot(root)
+            os.chdir("/")
+            with child_assertions(test):
+                host = h.LinuxHost()
+                baseline = host.firewall()
+                frozen = tx.digest(baseline)
+                entries = sorted(path.name for path in Path("/run").iterdir())
+                lock = Path("/run/ufw.lock")
+                test.assertFalse(lock.exists())
+                def observe():
+                    actual = host.firewall()
+                    test.assertEqual(actual, baseline)
+                    if refusal:
+                        with test.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                            uh.validate_nft_observation(actual)
+                    else:
+                        uh.validate_nft_observation(actual)
+                    test.assertEqual(host.firewall(), baseline)
+                observe()
+                test.assertFalse(lock.exists())
+                test.assertEqual(sorted(path.name for path in Path("/run").iterdir()), entries)
+                private_file(lock, b"synthetic-ufw-lock-sentinel\n")
+                def sentinel():
+                    body = lock.read_bytes()
+                    info = lock.stat()
+                    return (body, *(getattr(info, "st_" + key) for key in
+                                   ("dev", "ino", "mode", "uid", "gid", "nlink", "size", "mtime_ns", "ctime_ns")))
+                before = sentinel()
+                observe()
+                test.assertEqual(sentinel(), before)
+                test.assertEqual(sorted(path.name for path in Path("/run").iterdir()), [*entries, "ufw.lock"])
+                lock.unlink()
+                test.assertEqual(sorted(path.name for path in Path("/run").iterdir()), entries)
+                after = tx.digest(host.firewall())
+                test.assertEqual(frozen, after)
+                result = dict(document=baseline, before_sha256=frozen, after_sha256=after,
+                              refused=refusal, absent_lock_preserved=True, present_lock_preserved=True)
+                payload = tx.encoded(result)
+                test.assertLessEqual(len(payload), 4096)
+                os.write(writer, payload)
+                os._exit(0)
+        except BaseException as exc:
+            os.write(writer, (type(exc).__name__ + ": " + str(exc))[:3000].encode("utf-8", "replace"))
+            os._exit(1)
+    os.close(writer)
+    try:
+        ready, _, _ = select.select([reader], [], [], 55)
+        if not ready:
+            os.killpg(pid, signal.SIGKILL)
+        payload = os.read(reader, 4096) if ready else b""
+        _, status = os.waitpid(pid, 0)
+        test.assertTrue(ready, "native nft reader child timed out")
+        test.assertEqual(status, 0, payload.decode("utf-8", "replace"))
+        return json.loads(payload)
+    finally:
+        os.close(reader)
+
+
+def synthetic_guard_driver(fixture, root, mapping):
+    """Return a real guard CLI with an expressly synthetic admission reader.
+
+    All file reads, private record IO, firewall IO and guard decisions are real.
+    Package database, stock-unit fields, backend identities and dependency
+    fingerprint are model inputs. Native observations are tested independently.
+    """
+    source = fixture.root / "ufw-source"
+    source.mkdir(mode=0o755)
+    for name in h.KIT_FILES:
+        private_file(source / name, (KIT / name).read_bytes(), 0o644)
+    for directory in source.rglob("*"):
+        if directory.is_dir():
+            os.chmod(directory, 0o755)
+    manifest = dict(schema_version=1, source_commit=os.environ["AEGIS_NATIVE_SOURCE_COMMIT"], native_proof=None,
+                    files={name: h.sha((source / name).read_bytes()) for name in h.KIT_FILES})
+    private_file(source / h.MANIFEST, tx.encoded(manifest))
+    policy = fixture.root / "policy"
+    policy.mkdir(mode=0o700)
+    profile = policy / "profile.json"
+    record = policy / "ufw-compat.json"
+    private_file(profile, tx.encoded(fixture.profile.as_dict()))
+    driver = f'''import os,sys
+from pathlib import Path
+sys.path.insert(0, {str(KIT.parents[1])!r})
+sys.path.insert(0, {str(source)!r})
+from https_setup import host, ufw, ufw_host
+from deploy.wazuh.tests.test_ufw import FakeReader, loaders
+host.INSTALL_ROOT=Path({str(source)!r})
+host.PROFILE={str(profile)!r}
+host.RECORD_PATH=ufw_host.RECORD_PATH={str(record)!r}
+assert os.geteuid()==0 and os.stat('/proc/self/ns/net').st_ino=={fixture.inode}
+RealHost=host.LinuxHost
+class SyntheticReader(FakeReader):
+    def __init__(self, owner):
+        super().__init__(ufw)
+        self.actual=ufw_host.UfwHostReader(RealHost())
+    def root_file(self, path, limit):
+        if path==ufw_host.RECORD_PATH:
+            return self.actual.root_file(path,limit)
+        read=self.actual.root_file(str(Path({str(root)!r}) / path.lstrip('/')),limit)
+        return ufw.RootFile(path,read.body,read.info)
+    def validate_library_alias(self, wrapper):
+        assert os.readlink({str(root / 'lib')!r})=='usr/lib'
+    def dependency_facts(self):
+        return {{name:{{key:[] for key in ufw_host.DEPENDENCIES}} for name in ('ufw.service',ufw_host.INDEXER)}}
+class FixtureHost(RealHost):
+    def ufw_reader(self): return SyntheticReader(self)
+    def firewall_loaders(self): return loaders()
+host.LinuxHost=FixtureHost
+from https_setup.cli import main
+if sys.argv[1]=='prepare-record':
+    instance=FixtureHost(bundle=host.INSTALL_ROOT)
+    p=host.load_profile(instance.fs.read(host.PROFILE,private=True))
+    instance.install_firewall_compatibility(p,instance.admit_firewall_loaders())
+    raise SystemExit(0)
+raise SystemExit(main())
+'''
+    path = source / "fixture-driver.py"
+    private_file(path, driver.encode(), 0o644)
+    fixture.net(fixture.server, "/usr/bin/python3", "-I", "-B", path, "prepare-record")
+    return path, profile, record
 
 
 class NativeTests(unittest.TestCase):
@@ -866,6 +1274,12 @@ ExecStart=/usr/bin/true
             fixture.processes[0].terminate()
             fixture.processes[0].wait(timeout=5)
             fixture.processes.clear()
+            loader_mapping = inactive_loader_inventory(fixture)
+            OBSERVATIONS.setdefault(self.id(), {}).update(
+                loader_query_mapping=loader_mapping,
+                loader_facts={role: h.LinuxHost().properties(unit, uh.LOADER_KEYS) for role, unit in loader_mapping.items()},
+                loader_scope="owned_namespace_inventory_not_host_eligibility",
+                strict_path_exception_not_used=True)
             source = fixture.root / "source"
             source.mkdir(mode=0o755)
             for name in h.KIT_FILES:
@@ -879,13 +1293,21 @@ ExecStart=/usr/bin/true
             profile_path = fixture.root / "profile.json"
             private_file(profile_path, tx.encoded(fixture.profile.as_dict()))
             audit = fixture.root / "audit"
-            # Only fixed path constants relocate. Actual CLI, manifest/ownership checks,
+            # Declared paths and owned loader query identities relocate. CLI/manifest checks,
             # LinuxHost.guard, Commands and nft verifier run unchanged in copied modules.
             driver = f'''import os, sys
 from pathlib import Path
 sys.path.insert(0, {str(source)!r})
-from https_setup import host
+from https_setup import host, ufw_host
+loader_mapping = {loader_mapping!r}
+class FixtureHost(host.LinuxHost):
+    def firewall_loaders(self):
+        return {{role: self.properties(unit, host.LOADER_KEYS) for role, unit in loader_mapping.items()}}
+    def ufw_reader(self):
+        raise AssertionError("strict fixture must never use UFW exception")
+host.LinuxHost = FixtureHost
 from https_setup.cli import main
+host.RECORD_PATH = ufw_host.RECORD_PATH = {str(fixture.root / 'absent-policy' / 'ufw-compat.json')!r}
 host.INSTALL_ROOT = Path({str(source)!r})
 host.PROFILE = {str(profile_path)!r}
 if os.stat("/proc/self/ns/net").st_ino != {fixture.inode} or os.geteuid() != 0:
@@ -904,11 +1326,11 @@ raise SystemExit(code)
             # Derive ordering and root '+' semantics from production renderers.
             guard_name = "aegis-native-" + fixture.token + "-guard.service"
             indexer_name = "aegis-native-" + fixture.token + "-indexer.service"
-            guard = guard_unit().replace("wazuh-indexer.service", indexer_name)
+            guard = guard_unit().replace("wazuh-indexer.service", indexer_name).replace("ufw.service", loader_mapping["ufw.service"])
             guard = guard.replace(h.ENTRYPOINT, entry).replace(h.PROFILE, str(profile_path))
             guard = guard.replace("[Service]\n", f"[Service]\nTimeoutStartSec=15\nTimeoutStopSec=5\nNetworkNamespacePath=/run/netns/{fixture.server}\nExecStartPre={assert_command} ensure-assert\n")
             self.assertEqual(fixture.unit("guard", guard), guard_name)
-            dropin = indexer_dropin().replace("aegis-wazuh-http-guard.service", guard_name)
+            dropin = indexer_dropin().replace("aegis-wazuh-http-guard.service", guard_name).replace("ufw.service", loader_mapping["ufw.service"])
             dropin = dropin.replace(h.ENTRYPOINT, entry).replace(h.PROFILE, str(profile_path))
             dropin = dropin.replace("[Service]\n", f"[Service]\nExecStartPre=+{assert_command} verify-assert\n")
             service = f'''[Unit]
@@ -980,3 +1402,243 @@ ExecStart=+/usr/bin/python3 -I -B {entry} guard-ensure --profile {profile_path}
                 root_plus_verifier=True, active_guard_restart_verified=True,
                 deleted_table_refused=True, drifted_table_refused=True,
                 guard_stop_retained_table=True)
+    def test_ufw_disabled_wrapper_preserved(self):
+        """Exact packaged vendor behavior, with honest separate admission scopes."""
+        spec = importlib.util.spec_from_file_location("native_gate_schema", KIT / "Run-SelfTests.py")
+        gate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gate)
+        real_before = real_ufw_baseline()
+        with network_fixture(self) as fixture:
+            checks, operations = {}, {}
+            root = vendor_tree(fixture)
+            vendor_before = vendor_digest(root)
+            # Separate child root: nft tool closure cannot become vendor executables.
+            probe_root = fixture.root / "probe-root"
+            probe_root.mkdir(mode=0o755)
+            copy_tool_closure(probe_root, ("/usr/sbin/nft",))
+            (probe_root / "dev").mkdir()
+            os.mknod(probe_root / "dev/null", stat.S_IFCHR | 0o666, os.makedev(1, 3))
+            (probe_root / "run").mkdir()
+            nft_observations = {"empty": native_nft_read(self, fixture, probe_root)}
+            foreign_name = "aegis_fixture_foreign"
+            fixture.nft("--file", "-", data=(f"add table inet {foreign_name}\n"
+                        f"add chain inet {foreign_name} input {{ type filter hook input priority 10; policy accept; }}\n"
+                        f"add rule inet {foreign_name} input tcp dport 9200 counter\n").encode())
+            def foreign_digest():
+                document = json.loads(fixture.nft("--json", "list", "table", "inet", foreign_name).stdout)
+                return tx.digest(h.stable_firewall(document))
+            foreign_before = foreign_digest()
+            nft_observations["foreign"] = native_nft_read(self, fixture, probe_root)
+            for prefix in ("ufw-", "ufw6-"):
+                fixture.nft("add", "chain", "inet", foreign_name, prefix + "partial")
+                try:
+                    nft_observations[prefix + "partial"] = native_nft_read(self, fixture, probe_root, refusal=True)
+                finally:
+                    fixture.nft("delete", "chain", "inet", foreign_name, prefix + "partial")
+            checks.update(fresh_nft_observation_preserved=True, ufw_lock_absent_preserved=True,
+                          ufw_lock_present_preserved=True, partial_ufw_chains_refused=True)
+            fixture.start_listener()  # establishes both source routes with CA-verified TLS
+            fixture.processes[0].terminate()
+            fixture.processes[0].wait(timeout=5)
+            fixture.processes.clear()
+            wrapper = fixture.unit("wrapper", f'''[Unit]
+Description=Owned exact disabled UFW wrapper fixture
+DefaultDependencies=no
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RootDirectory={root}
+WorkingDirectory=/
+NetworkNamespacePath=/run/netns/{fixture.server}
+ExecStart=/usr/lib/ufw/ufw-init start quiet
+ExecStop=/usr/lib/ufw/ufw-init stop
+TimeoutStartSec=15
+TimeoutStopSec=5
+[Install]
+WantedBy=multi-user.target
+''')
+            mapping = {"ufw.service": wrapper, uh.GUARD: f"aegis-native-{fixture.token}-ufw-guard.service",
+                       uh.INDEXER: f"aegis-native-{fixture.token}-ufw-indexer.service"}
+            driver, profile, record = synthetic_guard_driver(fixture, root, mapping)
+            checks["synthetic_positive_admission_verified"] = record.is_file()
+            def render(body):
+                for original, renamed in mapping.items():
+                    body = body.replace(original, renamed)
+                return body.replace(h.ENTRYPOINT, str(driver)).replace(h.PROFILE, str(profile))
+            guard = render(guard_unit()).replace("[Service]\n", f"[Service]\nNetworkNamespacePath=/run/netns/{fixture.server}\nTimeoutStartSec=15\nTimeoutStopSec=5\n")
+            self.assertEqual(fixture.unit("ufw-guard", guard), mapping[uh.GUARD])
+            listener = f'''[Service]
+Type=simple
+User=nobody
+Group=nogroup
+NetworkNamespacePath=/run/netns/{fixture.server}
+TimeoutStartSec=15
+TimeoutStopSec=5
+ExecStart=/usr/bin/python3 -I -B {fixture.root}/listener.py {fixture.credentials}/cert.pem {fixture.credentials}/key.pem {fixture.indexer}
+'''
+            self.assertEqual(fixture.unit("ufw-indexer", listener + "\n" + render(indexer_dropin())), mapping[uh.INDEXER])
+            fixture.systemctl("daemon-reload")
+            def props(unit, keys):
+                return h.LinuxHost().properties(unit, keys)
+            def packets(name):
+                fixture.wait_reachable(fixture.allowed)
+                self.assertFalse(fixture.reachable(fixture.denied))
+                fixture.verify_table()
+                self.assertEqual(foreign_digest(), foreign_before)
+                operations[name] = dict(allowed=True, denied=True, table=True, foreign=True)
+            def direct_guard(ensure=False):
+                return fixture.net(fixture.server, "/usr/bin/python3", "-I", "-B", driver,
+                                   "guard-ensure" if ensure else "guard-verify", "--profile", profile, check=False)
+            def refused_guard(expected, ensure=False):
+                result = direct_guard(ensure)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(json.loads(result.stdout), {"status": "error", "error": expected})
+            # A cold kit start cannot activate UFW: only After, never activation edges.
+            fixture.systemctl("start", mapping[uh.INDEXER])
+            self.assertEqual(props(wrapper, ("ActiveState", "UnitFileState")), {"ActiveState": "inactive", "UnitFileState": "disabled"})
+            checks["no_unintended_wrapper_start"] = True
+            packets("cold_guard")
+            checks["cold_guard_verified"] = True
+            fixture.systemctl("stop", mapping[uh.INDEXER], mapping[uh.GUARD])
+            fixture.verify_table()
+            # One transaction, all participants queued together; real timestamps prove order.
+            fixture.systemctl("start", wrapper, mapping[uh.GUARD], mapping[uh.INDEXER])
+            def timestamp(unit, key):
+                value = int(fixture.systemctl("show", unit, "--property=" + key, "--value").stdout)
+                self.assertGreater(value, 0)
+                return value
+            self.assertLessEqual(timestamp(wrapper, "ActiveEnterTimestampMonotonic"), timestamp(mapping[uh.GUARD], "ExecMainStartTimestampMonotonic"))
+            self.assertLessEqual(timestamp(mapping[uh.GUARD], "ActiveEnterTimestampMonotonic"), timestamp(mapping[uh.INDEXER], "ExecMainStartTimestampMonotonic"))
+            checks["concurrent_start_order_verified"] = True
+            packets("concurrent_start")
+            state_before = props(wrapper, ("ActiveState", "SubState", "UnitFileState"))
+            self.assertEqual(state_before, {"ActiveState": "active", "SubState": "exited", "UnitFileState": "disabled"})
+            # All native file reads use the production held no-follow reader.
+            actual_reader = uh.UfwHostReader(h.LinuxHost())
+            for path, expected in VENDOR.items():
+                self.assertEqual(actual_reader.root_file(str(root / path.lstrip("/")), u.LIMIT).body, expected)
+            checks["native_file_reads_verified"] = True
+            label = "".join(c if c.isalpha() or i > 0 and c.isdigit() else "_%02x" % ord(c) for i, c in enumerate(wrapper))
+            class OwnedUnitHost(h.LinuxHost):
+                def properties(self, unit, keys):
+                    return super().properties(wrapper if unit == "ufw.service" else unit, keys)
+                def run(self, name, *args, **kwargs):
+                    if name == "busctl":
+                        args = tuple("/org/freedesktop/systemd1/unit/" + label if a == "/org/freedesktop/systemd1/unit/ufw_2eservice" else a for a in args)
+                    return super().run(name, *args, **kwargs)
+            unit_reader = uh.UfwHostReader(OwnedUnitHost())
+            observed_props = unit_reader.properties("ufw.service", u.PROPERTIES)
+            self.assertEqual(observed_props["RootDirectory"], str(root))
+            self.assertEqual(observed_props["FragmentPath"], "/run/systemd/system/" + wrapper)
+            with self.assertRaises(ValueError):
+                u._unit(unit_reader)  # production classifier must refuse these real facts
+            job = u._bus(unit_reader, "Job", "(uo)")
+            self.assertEqual(job, [0, "/"])
+            native_bus = {"Job": {"type": "(uo)", "data": job}}
+            for key, signature in u.EMPTY_ARRAYS.items():
+                data = u._bus(unit_reader, key, signature)
+                self.assertEqual(data, [])
+                native_bus[key] = {"type": signature, "data": data}
+            for key, args in (("ExecStartEx", ["start", "quiet"]), ("ExecStopEx", ["stop"])):
+                data = u._bus(unit_reader, key, "a(sasasttttuii)")
+                self.assertEqual(data[0][:3], [u.INIT_PATH, [u.INIT_PATH, *args], []])
+                native_bus[key] = {"type": "a(sasasttttuii)", "data": data}
+            checks.update(native_typed_bus_verified=True, native_modified_unit_refused=True)
+            # Only selected --version calls; no CLI or compatibility list probes.
+            identities = [actual_reader.backend_identity(name) for name in ("iptables", "ip6tables")]
+            self.assertEqual(identities[0]["file"].body, identities[1]["file"].body)
+            self.assertTrue(all(b"(nf_tables)" in item["version"] for item in identities))
+            checks["native_backends_verified"] = True
+            fixture.systemctl("stop", wrapper)
+            packets("normal_stop")
+            fixture.systemctl("start", wrapper)
+            fixture.systemctl("restart", wrapper)
+            packets("normal_restart")
+            self.assertNotEqual(fixture.systemctl("reload", wrapper, check=False).returncode, 0)
+            packets("systemd_reload_refused")
+            for operation, name in (("restart", "direct_restart"), ("force-reload", "direct_force_reload")):
+                wrapper_direct(fixture, root, operation)
+                packets(name)
+            guard_started = timestamp(mapping[uh.GUARD], "ActiveEnterTimestampMonotonic")
+            fixture.systemctl("restart", mapping[uh.INDEXER])
+            self.assertEqual(timestamp(mapping[uh.GUARD], "ActiveEnterTimestampMonotonic"), guard_started)
+            packets("active_guard_restart")
+            checks["active_guard_verified"] = True
+            fixture.systemctl("stop", wrapper, mapping[uh.GUARD], mapping[uh.INDEXER])
+            self.assertLessEqual(timestamp(mapping[uh.INDEXER], "InactiveEnterTimestampMonotonic"), timestamp(mapping[uh.GUARD], "InactiveEnterTimestampMonotonic"))
+            self.assertLessEqual(timestamp(mapping[uh.GUARD], "InactiveEnterTimestampMonotonic"), timestamp(wrapper, "InactiveEnterTimestampMonotonic"))
+            fixture.verify_table()
+            checks.update(concurrent_stop_order_verified=True, guard_stop_retained_table=True)
+            fixture.systemctl("start", wrapper, mapping[uh.GUARD], mapping[uh.INDEXER])
+            packets("concurrent_stop_start")
+            # Refusals alter fixture data only; do not execute enabled vendor branches.
+            fixture.systemctl("stop", mapping[uh.INDEXER])
+            conf = root / u.CONF_PATH.lstrip("/")
+            disabled = conf.read_bytes()
+            frozen_record = record.read_bytes()
+            try:
+                replace_fixture_file(fixture.root, conf, b"ENABLED=yes\nLOGLEVEL=low\n", 0o644)
+                refused_guard("ufw_unsupported")
+                self.assertNotEqual(fixture.systemctl("start", mapping[uh.INDEXER], check=False).returncode, 0)
+                checks["enabled_policy_refused"] = True
+            finally:
+                replace_fixture_file(fixture.root, conf, disabled, 0o644)
+            # Valid disabled config can still drift from the installed static record.
+            replace_fixture_file(fixture.root, conf, b"ENABLED=no\nLOGLEVEL=medium\n", 0o644)
+            try:
+                refused_guard("ufw_drift", ensure=True)
+                refused_guard("ufw_drift")
+            finally:
+                replace_fixture_file(fixture.root, conf, disabled, 0o644)
+            # The installed guard must freshly see a partial chain despite earlier clean reads.
+            fixture.nft("add", "chain", "inet", foreign_name, "ufw-partial")
+            try:
+                refused_guard("ufw_unsupported", ensure=True)
+                refused_guard("ufw_unsupported")
+            finally:
+                fixture.nft("delete", "chain", "inet", foreign_name, "ufw-partial")
+            changed = json.loads(frozen_record)
+            changed["profile_sha256"] = "0" * 64
+            replace_fixture_file(fixture.root, record, tx.encoded(changed))
+            try:
+                refused_guard("ufw_drift", ensure=True)
+                refused_guard("ufw_drift")
+                checks["static_record_drift_refused"] = True
+            finally:
+                replace_fixture_file(fixture.root, record, frozen_record)
+            fixture.nft("delete", "table", "inet", TABLE)
+            refused_guard("firewall_mismatch")
+            checks["deleted_table_refused"] = True
+            self.assertEqual(direct_guard(ensure=True).returncode, 0)
+            fixture.nft("add", "rule", "inet", TABLE, "input", "counter", "accept")
+            refused_guard("firewall_mismatch")
+            refused_guard("firewall_mismatch", ensure=True)
+            checks["modified_table_refused"] = True
+            fixture.nft("delete", "table", "inet", TABLE)
+            self.assertEqual(direct_guard(ensure=True).returncode, 0)
+            self.assertEqual(record.read_bytes(), frozen_record)
+            cases = dependency_observations(fixture)
+            self.assertEqual(props(wrapper, ("ActiveState", "SubState", "UnitFileState")), state_before)
+            vendor_after, foreign_after = vendor_digest(root), foreign_digest()
+            self.assertEqual(vendor_before, vendor_after)
+            self.assertEqual(foreign_before, foreign_after)
+            checks.update(vendor_bytes_preserved=True, vendor_state_preserved=True, foreign_rules_preserved=True,
+                          namespace_assertion_before_mutations=True)
+            OBSERVATIONS[self.id()] = dict(
+                vendor_deb_sha256="096eb403ecaf6740d160bb306970f025222ef71324319cc1cb78d06dfa462ef1",
+                vendor_inputs={path: hashlib.sha256(body).hexdigest() for path, body in VENDOR.items()},
+                relocations=gate.UFW_RELOCATIONS, checks=checks, operations=operations, unit_mapping=mapping,
+                dependency_cases=cases,
+                nft_observations=nft_observations,
+                native_adapter={"unit_properties": {**observed_props, "RootDirectory": "<owned_vendor_root>"},
+                                "typed_bus": native_bus,
+                                "backend_sha256": hashlib.sha256(identities[0]["file"].body).hexdigest()},
+                preservation_hashes={"vendor": {"before": vendor_before, "after": vendor_after},
+                                     "foreign": {"before": foreign_before, "after": foreign_after},
+                                     "fresh_nft": {"before": tx.digest(nft_observations["foreign"]["document"]), "after": nft_observations["foreign"]["after_sha256"]}},
+                scope={"native": "vendor_lifecycle_packets_order_and_adapter_refusal", "positive_admission": "synthetic_reader",
+                       "probe": "nft-no-ufw-chains-v1", "owner_full_class_check": "pending", "vendor_lab_acceptance": False})
+        real_after = real_ufw_baseline()
+        self.assertEqual(real_before, real_after)
+        OBSERVATIONS[self.id()]["preservation_hashes"]["real_ufw"] = {"before": real_before, "after": real_after}
+        OBSERVATIONS[self.id()]["checks"]["real_ufw_baseline_preserved"] = True

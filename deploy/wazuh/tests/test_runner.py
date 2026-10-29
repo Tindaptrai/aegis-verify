@@ -1,4 +1,8 @@
 """Portable gate tests: missing, skipped or mismatched proof cannot qualify."""
+import ast
+import builtins
+import copy
+import hashlib
 import importlib.util
 from contextlib import nullcontext, redirect_stderr, redirect_stdout
 import io
@@ -121,7 +125,7 @@ class RunnerTests(unittest.TestCase):
         from deploy.wazuh.https_setup.host import KIT_FILES
         names = ["deploy/wazuh/" + name for name in KIT_FILES]
         names += ["deploy/wazuh/Run-SelfTests.py", *("deploy/wazuh/tests/" + name + ".py" for name in
-                  ("test_components", "test_transaction", "test_runner", "test_native")),
+                  ("test_components", "test_transaction", "test_runner", "test_native", "test_ufw")),
                   ".github/workflows/wazuh-http-operator.yml", "docs/manager/wazuh-http-preparation.md"]
         sha = "f" * 40
         def git(argv, **kwargs):
@@ -143,6 +147,150 @@ class RunnerTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "source_head_mismatch"):
                     module.source_snapshot(sha)
 
+    def test_disabled_ufw_gate_and_vendor_sources_are_mandatory(self):
+        gate = self.runner()
+        self.assertEqual(len(gate.REQUIRED_NATIVE), 8)
+        self.assertIn(gate.NATIVE_MODULE + ".NativeTests.test_ufw_disabled_wrapper_preserved", gate.REQUIRED_NATIVE)
+        self.assertIn("deploy.wazuh.tests.test_ufw", gate.PORTABLE)
+
+    def test_native_observation_gate_rejects_missing_preservation_evidence(self):
+        gate = self.runner()
+        self.assertTrue(hasattr(gate, "validate_native_observations"), "native observation validation missing")
+        with self.assertRaisesRegex(ValueError, "native_observation"):
+            gate.validate_native_observations({})
+
+    def observation_fixture(self, gate):
+        """Explicit synthetic proof for validator tests; never native evidence."""
+        from deploy.wazuh.tests.test_ufw import VENDOR
+        from deploy.wazuh.https_setup import ufw, ufw_host
+        prefix = gate.NATIVE_MODULE + ".NativeTests."
+        common = dict(host_firewall_before_sha256="a" * 64, host_firewall_after_sha256="a" * 64,
+                      fixture_cleanup_verified=True)
+        mapping = {"ufw.service": "aegis-native-0123456789ab-wrapper.service",
+                   ufw_host.GUARD: "aegis-native-0123456789ab-ufw-guard.service",
+                   ufw_host.INDEXER: "aegis-native-0123456789ab-ufw-indexer.service"}
+        cases = {}
+        for name in ("direct_indexer", "direct_guard", "transitive", "mixed", "activation", "ordering"):
+            roles = {role: "aegis-native-0123456789ab-dep-" + name + "-" + suffix + ".service"
+                     for role, suffix in (("ufw.service", "ufw"), (ufw_host.INDEXER, "indexer"), (ufw_host.GUARD, "guard"), ("bridge.service", "bridge"))}
+            facts = {unit: {key: [] for key in ufw_host.DEPENDENCIES} for unit in roles.values()}
+            def edge(role, key, target):
+                facts[roles[role]][key] = [roles[target]]
+            if name.startswith("direct_"):
+                edge("ufw.service", "Requires", ufw_host.INDEXER if name == "direct_indexer" else ufw_host.GUARD)
+            elif name in {"transitive", "mixed"}:
+                edge("bridge.service", "Requires", ufw_host.GUARD)
+                if name == "transitive": edge("ufw.service", "Requires", "bridge.service")
+                else: edge("bridge.service", "PropagatesStopTo", "ufw.service")
+            elif name == "activation": edge(ufw_host.GUARD, "Wants", "ufw.service")
+            else: edge(ufw_host.GUARD, "Before", "ufw.service")
+            cases[name] = dict(mapping=roles, facts=facts, refused=True, propagation_verified=name not in {"activation", "ordering"},
+                               baseline={"identity_mapping": dict(roles), "raw_facts_sha256": "e" * 64, "admitted": True},
+                               identity_mapping=dict(roles), raw_facts_sha256="f" * 64)
+        bus = {key: {"type": signature, "data": []} for key, signature in ufw.EMPTY_ARRAYS.items()}
+        bus["Job"] = {"type": "(uo)", "data": [0, "/"]}
+        for key, args in (("ExecStartEx", ["start", "quiet"]), ("ExecStopEx", ["stop"])):
+            bus[key] = {"type": "a(sasasttttuii)", "data": [[ufw.INIT_PATH, [ufw.INIT_PATH, *args], [], 0, 0, 0, 0, 0, 0, 0]]}
+        from deploy.wazuh.https_setup.transaction import digest
+        metadata = {"metainfo": {"version": "synthetic", "release_name": "synthetic", "json_schema_version": 1}}
+        foreign = {"nftables": [metadata, {"table": {"family": "inet", "name": "aegis_fixture_foreign", "handle": 1}},
+                              {"chain": {"family": "inet", "table": "aegis_fixture_foreign", "name": "input", "handle": 2}},
+                              {"rule": {"family": "inet", "table": "aegis_fixture_foreign", "chain": "input", "handle": 3, "expr": [{"counter": {"packets": 0, "bytes": 0}}]}}]}
+        nft = {}
+        for name in ("empty", "foreign", "ufw-partial", "ufw6-partial"):
+            document = {"nftables": [metadata]} if name == "empty" else copy.deepcopy(foreign)
+            if name.endswith("partial"):
+                document["nftables"].append({"chain": {"family": "inet", "table": "aegis_fixture_foreign", "name": name, "handle": 4}})
+            nft[name] = dict(document=document, before_sha256=digest(document), after_sha256=digest(document),
+                             refused=name.endswith("partial"), absent_lock_preserved=True, present_lock_preserved=True)
+        item = dict(common,
+                    vendor_deb_sha256="096eb403ecaf6740d160bb306970f025222ef71324319cc1cb78d06dfa462ef1",
+                    vendor_inputs={path: hashlib.sha256(body).hexdigest() for path, body in VENDOR.items()},
+                    relocations=gate.UFW_RELOCATIONS,
+                    checks={key: True for key in gate.UFW_CHECKS},
+                    operations={name: dict(allowed=True, denied=True, table=True, foreign=True) for name in gate.UFW_OPERATIONS},
+                    preservation_hashes={name: dict(before="b" * 64, after="b" * 64) for name in ("vendor", "foreign", "real_ufw", "fresh_nft")},
+                    unit_mapping=mapping, dependency_cases=cases, nft_observations=nft,
+                    native_adapter={"unit_properties": {**ufw.STATIC_PROPERTIES, **ufw.RUNTIME_PROPERTIES,
+                                    "RootDirectory": "<owned_vendor_root>", "FragmentPath": "/run/systemd/system/" + mapping["ufw.service"], "UnitFileState": "disabled"},
+                                    "typed_bus": bus, "backend_sha256": "c" * 64},
+                    scope={"native": "vendor_lifecycle_packets_order_and_adapter_refusal", "positive_admission": "synthetic_reader",
+                           "probe": "nft-no-ufw-chains-v1", "owner_full_class_check": "pending", "vendor_lab_acceptance": False})
+        item["preservation_hashes"]["fresh_nft"] = {"before": nft["foreign"]["before_sha256"], "after": nft["foreign"]["after_sha256"]}
+        strict = dict(common, loader_scope="owned_namespace_inventory_not_host_eligibility", strict_path_exception_not_used=True,
+                      loader_query_mapping={role: "aegis-native-0123456789ab-loader-" + role.split(".")[0] + ".service" for role in ufw_host.LOADERS},
+                      loader_facts={role: {"LoadState": "loaded", "ActiveState": "inactive", "UnitFileState": "disabled"} for role in ufw_host.LOADERS})
+        return {prefix + "test_nft_allowed_denied_sources": dict(common), prefix + "test_systemd_every_start_guard": strict,
+                prefix + "test_ufw_disabled_wrapper_preserved": item}
+
+    def test_closed_ufw_observations_require_every_preservation_and_transition(self):
+        gate = self.runner()
+        observations = self.observation_fixture(gate)
+        gate.validate_native_observations(observations)
+        identity = gate.NATIVE_MODULE + ".NativeTests.test_ufw_disabled_wrapper_preserved"
+        changes = []
+        for name in gate.UFW_CHECKS:
+            changes.append(lambda item, key=name: item["checks"].__setitem__(key, False))
+        for operation in gate.UFW_OPERATIONS:
+            for result in ("allowed", "denied", "table", "foreign"):
+                changes.append(lambda item, op=operation, key=result: item["operations"][op].__setitem__(key, False))
+        for name in observations[identity]["preservation_hashes"]:
+            changes.append(lambda item, key=name: item["preservation_hashes"][key].__setitem__("after", "c" * 64))
+        for name in observations[identity]["vendor_inputs"]:
+            changes.append(lambda item, key=name: item["vendor_inputs"].__setitem__(key, "0" * 64))
+        changes += [lambda item: item.__setitem__("unexpected", "private-data"),
+                    lambda item: item["scope"].__setitem__("owner_full_class_check", "passed"),
+                    lambda item: item["scope"].__setitem__("vendor_lab_acceptance", True),
+                    lambda item: item["relocations"].pop(),
+                    lambda item: item["native_adapter"]["unit_properties"].__setitem__("RootDirectory", ""),
+                    lambda item: item["native_adapter"]["typed_bus"]["ExecReload"].__setitem__("data", [["injected"]]),
+                    lambda item: item["dependency_cases"]["mixed"].__setitem__("propagation_verified", False),
+                    lambda item: item["dependency_cases"]["mixed"]["baseline"].__setitem__("admitted", False),
+                    lambda item: item["dependency_cases"]["direct_guard"]["identity_mapping"].__setitem__("ufw.service", "ufw.service"),
+                    lambda item: item["nft_observations"]["empty"].__setitem__("absent_lock_preserved", False),
+                    lambda item: item["nft_observations"]["foreign"].__setitem__("present_lock_preserved", False),
+                    lambda item: item["nft_observations"]["ufw-partial"].__setitem__("refused", False),
+                    lambda item: item["nft_observations"]["foreign"].__setitem__("after_sha256", "0" * 64),
+                    lambda item: item["scope"].__setitem__("probe", "selected_backend_status_queries_not_ufw_cli"),
+                    lambda item: item["native_adapter"]["typed_bus"].__setitem__("Job", {"type": "(uo)", "data": [1, "/pending"]})]
+        for index, change in enumerate(changes):
+            with self.subTest(mutation=index):
+                broken = copy.deepcopy(observations)
+                change(broken[identity])
+                with self.assertRaises((ValueError, KeyError, TypeError)):
+                    gate.validate_native_observations(broken)
+        for key in observations[identity]:
+            broken = copy.deepcopy(observations)
+            del broken[identity][key]
+            with self.subTest(missing=key), self.assertRaises((ValueError, KeyError, TypeError)):
+                gate.validate_native_observations(broken)
+
+    def test_missing_ufw_observation_fails_otherwise_successful_native_runner(self):
+        module = self.runner()
+        identity = module.REQUIRED_NATIVE[-1]
+        class Sample(unittest.TestCase):
+            def id(self): return identity
+            def runTest(self): pass
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "proof.json"
+            with patch.dict(os.environ), patch.object(module, "platform_errors", return_value=[]), \
+                    patch.object(module, "source_snapshot", return_value={"source_commit": "f" * 40, "files": {}}), \
+                    patch.object(module, "REQUIRED_NATIVE", (identity,)), \
+                    patch.object(module.unittest.defaultTestLoader, "loadTestsFromNames", return_value=unittest.TestSuite([Sample()])), \
+                    redirect_stderr(io.StringIO()), redirect_stdout(io.StringIO()):
+                code = module.main(["--native", "--source-commit", "f" * 40, "--output", str(path)])
+            proof = json.loads(path.read_text())
+            self.assertEqual(code, 1)
+            self.assertEqual(proof["required"], {identity: "passed"})
+            self.assertEqual(proof["errors"], ["native_observation_invalid"])
+
+    def test_nft_only_observation_schema_replaces_compatibility_list_probe(self):
+        gate = self.runner()
+        self.assertIn("fresh_nft_observation_preserved", gate.UFW_CHECKS)
+        self.assertNotIn("backend_status_queries_preserved", gate.UFW_CHECKS)
+        self.assertIn("ufw_lock_absent_preserved", gate.UFW_CHECKS)
+        self.assertIn("ufw_lock_present_preserved", gate.UFW_CHECKS)
+
     def test_source_gate_requires_full_lowercase_commit(self):
         module = self.runner()
         for commit in (None, "HEAD", "a" * 39, "A" * 40, "a" * 41):
@@ -154,7 +302,7 @@ class RunnerTests(unittest.TestCase):
         self.assertTrue(hasattr(module, "proof_scope"), "proof lacks explicit synthetic harness scope")
         native = module.proof_scope(native=True)
         self.assertFalse(native["vendor_lab_acceptance"])
-        self.assertEqual(native["systemd_fixture_relocations"], ["host.INSTALL_ROOT", "host.PROFILE"])
+        self.assertEqual(native["systemd_fixture_relocations"], module.UFW_RELOCATIONS)
         self.assertEqual(module.proof_scope(native=False)["systemd_fixture_relocations"], [])
 
 
@@ -199,6 +347,7 @@ class NativeFixtureSafety(unittest.TestCase):
         fixture = object.__new__(native.NetworkFixture)
         fixture.test = self
         fixture.server = "synthetic-server"
+        fixture.inode = 123
         fixture.namespaces = [fixture.server]
         fixture.units = [("synthetic-guard.service", Path("/run/synthetic-guard.service"))]
         fixture.unit_roles = {"synthetic-guard.service": "guard"}
@@ -220,6 +369,133 @@ class NativeFixtureSafety(unittest.TestCase):
             observed = native.OBSERVATIONS.get(self.id(), {})
             self.assertIn("fixture_nft_document", observed)
             self.assertEqual(observed["fixture_services"]["guard"]["cli_errors"], ["firewall_mismatch"])
+
+    def test_fixture_actions_refuse_external_and_logical_role_units_before_command(self):
+        from deploy.wazuh.tests import test_native as native
+        fixture = object.__new__(native.NetworkFixture)
+        fixture.units = [("aegis-native-0123456789ab-wrapper.service", Path("/run/systemd/system/owned.service"))]
+        for unit in ("ufw.service", "wazuh-indexer.service", "aegis-wazuh-http-guard.service", "aegis-fixture-external-" + "a" * 64 + ".service"):
+            with self.subTest(unit=unit), patch.object(native, "command", return_value=SimpleNamespace(returncode=0)) as command:
+                with self.assertRaisesRegex(AssertionError, "owned_unit_action_required"):
+                    fixture.systemctl("restart", unit)
+                command.assert_not_called()
+
+    def test_dependency_mapper_is_bijective_across_reserved_external_collisions(self):
+        from deploy.wazuh.tests import test_native as native
+        roles = {"ufw.service": "owned-ufw.service", native.uh.GUARD: "owned-guard.service",
+                 native.uh.INDEXER: "owned-indexer.service", "bridge.service": "owned-bridge.service"}
+        mapper = native.DependencyRoleMap(roles)
+        for actual in ("ufw.service", native.uh.GUARD, native.uh.INDEXER, "system.slice"):
+            logical = mapper.logical(actual)
+            self.assertNotIn(logical, roles)
+            self.assertEqual(mapper.actual(logical), actual)
+            self.assertEqual(logical.rsplit(".", 1)[1], actual.rsplit(".", 1)[1])
+        self.assertEqual(len(mapper.queries), len(set(mapper.queries.values())))
+        with patch.object(native.hashlib, "sha256", return_value=SimpleNamespace(hexdigest=lambda: "a" * 64)):
+            first, second = mapper.logical("external-one.service"), mapper.logical("external-two.service")
+        self.assertNotEqual(first, second)
+        self.assertEqual(mapper.actual(first), "external-one.service")
+        self.assertEqual(mapper.actual(second), "external-two.service")
+        with self.assertRaisesRegex(AssertionError, "unobserved_dependency_query"):
+            mapper.actual("unknown.service")
+
+    def test_dependency_mapper_preserves_mixed_edges_and_queries_real_names(self):
+        from deploy.wazuh.tests import test_native as native
+        roles = {"ufw.service": "owned-ufw.service", native.uh.GUARD: "owned-guard.service",
+                 native.uh.INDEXER: "owned-indexer.service", "bridge.service": "owned-bridge.service"}
+        actual = {unit: {key: "" for key in native.uh.DEPENDENCIES} for unit in [*roles.values(), "ufw.service", "system.slice"]}
+        actual["owned-guard.service"]["RequiredBy"] = "owned-bridge.service"
+        actual["owned-bridge.service"]["Requires"] = "owned-guard.service system.slice"
+        actual["owned-bridge.service"]["PropagatesStopTo"] = "owned-ufw.service"
+        actual["owned-ufw.service"]["StopPropagatedFrom"] = "owned-bridge.service"
+        actual["system.slice"]["Before"] = "ufw.service"
+        queries = []
+        class Reader:
+            def properties(self, name, keys): return {"LoadState": "loaded"}
+            def dependency_properties(self, name):
+                queries.append(name)
+                return actual[name]
+        host = native.MappedDependencyHost(Reader(), roles)
+        bridge = host.dependency_properties("bridge.service")
+        names = bridge["Requires"].split()
+        self.assertIn(native.uh.GUARD, names)
+        external = next(name for name in names if name != native.uh.GUARD)
+        related = host.dependency_properties(external)["Before"]
+        self.assertNotEqual(related, "ufw.service")
+        self.assertEqual(host.mapping.actual(related), "ufw.service")
+        self.assertEqual(queries, ["owned-bridge.service", "system.slice"])
+        self.assertEqual(host.raw["owned-bridge.service"]["Requires"], ["owned-guard.service", "system.slice"])
+        with self.assertRaisesRegex(native.SetupError, "ufw_unsupported"):
+            native.uh.UfwHostReader(host).dependency_facts()
+
+    def test_generated_native_programs_compile_without_linux_execution(self):
+        from deploy.wazuh.tests import test_native as native
+        module = ast.parse(Path(native.__file__).read_text(encoding="utf-8"))
+        context = dict(vars(native), source=Path("/run/owned/source"), root=Path("/run/owned/root"),
+                       profile=Path("/run/owned/profile"), record=Path("/run/owned/record"),
+                       profile_path=Path("/run/owned/profile"), audit=Path("/run/owned/audit"),
+                       fixture=SimpleNamespace(root=Path("/run/owned"), inode=123),
+                       loader_mapping={"ufw.service": "owned-ufw.service"})
+        checked = []
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Assign) or len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+                continue
+            name = node.targets[0].id
+            if name not in {"driver", "code", "LISTENER", "CLIENT", "ASSERT_NAMESPACE"} or not isinstance(node.value, (ast.Constant, ast.JoinedStr)):
+                continue
+            value = eval(compile(ast.Expression(node.value), "fixture-expression", "eval"), context)
+            if isinstance(value, str):
+                compile(value, "fixture-program-" + name, "exec")
+                checked.append(name)
+        self.assertEqual(sorted(checked), sorted(["driver", "driver", "code", "LISTENER", "CLIENT", "ASSERT_NAMESPACE"]))
+        # This inline executor verifies the namespace in the same process as nft.
+        fixture = object.__new__(native.NetworkFixture)
+        fixture.server, fixture.inode = "owned-server", 123
+        calls = []
+        fixture.net = lambda *args, **kwargs: calls.append(args)
+        fixture.nft("list", "ruleset")
+        program = calls[0][5]
+        compile(program, "fixture-nft-executor", "exec")
+        executed = []
+        fake_os = SimpleNamespace(geteuid=lambda: 0, stat=lambda path: SimpleNamespace(st_ino=999),
+                                  execvp=lambda *args: executed.append(args))
+        fake_sys = SimpleNamespace(argv=["-c", "123", "list", "ruleset"])
+        def importing(name, *args, **kwargs):
+            return {"os": fake_os, "sys": fake_sys}[name]
+        with self.assertRaises(AssertionError):
+            exec(program, {"__builtins__": {**vars(builtins), "__import__": importing}})
+        self.assertEqual(executed, [])
+
+    def test_generated_synthetic_driver_binds_the_explicit_fixture_host(self):
+        from deploy.wazuh.tests import test_native as native
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixture = SimpleNamespace(root=root, inode=123, server="synthetic-server",
+                                      profile=SimpleNamespace(as_dict=lambda: {}), net=lambda *a, **k: None)
+            def write(path, body, *args):
+                path = Path(path)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(body)
+            with patch.dict(os.environ, {"AEGIS_NATIVE_SOURCE_COMMIT": "f" * 40}), patch.object(native, "private_file", side_effect=write):
+                path, _, _ = native.synthetic_guard_driver(fixture, root / "vendor-root", {})
+            source = path.read_text()
+            host = SimpleNamespace(LinuxHost=type("OriginalHost", (), {}))
+            fake_os = SimpleNamespace(geteuid=lambda: 0, stat=lambda path: SimpleNamespace(st_ino=123))
+            fake_sys = SimpleNamespace(path=[], argv=["fixture-driver.py", "guard-verify"])
+            def importing(name, *args, **kwargs):
+                if name == "os": return fake_os
+                if name == "sys": return fake_sys
+                if name == "https_setup": return SimpleNamespace(host=host, ufw=SimpleNamespace(), ufw_host=SimpleNamespace())
+                if name == "https_setup.cli":
+                    captured = host.LinuxHost
+                    return SimpleNamespace(main=lambda: captured.__name__)
+                if name == "deploy.wazuh.tests.test_ufw":
+                    return SimpleNamespace(FakeReader=type("FakeReader", (), {}), loaders=lambda: {})
+                return builtins.__import__(name, *args, **kwargs)
+            with self.assertRaises(SystemExit) as result:
+                exec(compile(source, "generated-fixture-driver", "exec"),
+                     {"__builtins__": {**vars(builtins), "__import__": importing}})
+            self.assertEqual(result.exception.code, "FixtureHost")
 
     def test_unknown_systemd_state_refuses_before_namespace_mutation(self):
         from deploy.wazuh.tests import test_native as native
