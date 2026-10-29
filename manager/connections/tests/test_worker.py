@@ -5,12 +5,17 @@ from unittest.mock import patch
 
 from django.core.management import call_command, get_commands
 from django.core.management.base import CommandError
+from django.db import connection
 from django.test import SimpleTestCase
-from .test_api import ConnectionsCase
+from .test_api import ConnectionsTransactionCase
 
 
-class WaitingWorkerTests(ConnectionsCase):
+class WaitingWorkerTests(ConnectionsTransactionCase):
     def run_once(self):
+        # A standalone worker owns connection lifetime. Django TestCase's outer
+        # atomic would make close_old_connections() close a PostgreSQL connection.
+        self.assertFalse(connection.in_atomic_block, 'worker command requires a standalone transaction context')
+        self.assertTrue(connection.get_autocommit(), 'worker command requires autocommit')
         self.assertIn('managed_connection_worker', get_commands())
         output = io.StringIO()
         call_command('managed_connection_worker', once=True, stdout=output)
@@ -39,7 +44,6 @@ class WaitingWorkerTests(ConnectionsCase):
     def test_registration_revision_drift_is_refused(self):
         from connections.models import ManagedSource
         from control.execution_models import RegisteredExecutionConnection
-        from django.db import connection
         source = self.save(self.make_draft()).json()
         self.post(source['id']+'/prepare', {'expected_candidate_id': None})
         saved = ManagedSource.objects.get(pk=source['id'])

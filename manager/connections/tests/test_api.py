@@ -4,9 +4,11 @@ from pathlib import Path
 import tempfile
 from unittest.mock import patch
 import uuid
-from django.test import override_settings
+from django.contrib.auth.models import Group, Permission
+from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
-from accounts.models import AccountSecurity
+from accounts.models import AccountMutationLock, AccountSecurity
+from accounts.permissions import PRESETS, PRESET_GROUP_NAMES
 from accounts.tests.helpers import AccountsCase
 from .test_probe import certificate
 
@@ -51,6 +53,20 @@ class ConnectionsFixture:
 
 class ConnectionsCase(ConnectionsFixture, AccountsCase):
     pass
+
+
+class ConnectionsTransactionCase(ConnectionsFixture, TransactionTestCase):
+    """Committed fixtures for standalone commands and separate-connection races."""
+    login_human = AccountsCase.login_human
+    human_post = AccountsCase.human_post
+
+    def setUp(self):
+        AccountMutationLock.objects.get_or_create(pk=1)
+        for role, name in PRESET_GROUP_NAMES.items():
+            group, _ = Group.objects.get_or_create(name=name)
+            group.permissions.set(Permission.objects.filter(content_type__app_label='accounts', codename__in=PRESETS[role]))
+        AccountsCase.setUpTestData.__func__(type(self))
+        super().setUp()
 
 
 class ApiTests(ConnectionsCase):

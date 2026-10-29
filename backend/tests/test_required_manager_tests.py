@@ -329,7 +329,7 @@ def test_release_workflow_installs_git_before_checkout_and_checks_pure_mode():
     assert '--workspace "$GITHUB_WORKSPACE"' in source
     assert '--requested-commit "$REQUESTED_SOURCE_COMMIT"' in source
     assert '--github-env "$GITHUB_ENV"' in source
-    assert '--output "$RUNNER_TEMP/manager-postgres-source.json"' in source
+    assert '--output "$AEGIS_MANAGER_GATE_DIR/manager-postgres-source.json"' in source
     artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@"))
     assert artifact["if"] == "always()" and "manager-postgres-source.json" in artifact["with"]["path"]
     agent = yaml.safe_load((ROOT / ".github/workflows/agent-connection.yml").read_text())
@@ -338,6 +338,52 @@ def test_release_workflow_installs_git_before_checkout_and_checks_pure_mode():
     assert "Test-InstallerContracts.ps1 -Pure" in script
     assert script.count("Test-InstallerContracts.ps1") == 2
     assert "Test-InstallerContracts.ps1 -Pure\n  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in script
+
+
+def test_container_gate_artifact_handoff_uses_runtime_directory_and_requires_both_files(tmp_path):
+    import yaml
+    steps = yaml.safe_load((ROOT / '.github/workflows/manager-first-flow.yml').read_text())['jobs']['manager-postgres']['steps']
+    prepare = next((step for step in steps if step.get('id') == 'gate_artifacts'), None)
+    assert prepare is not None, 'container gate must export its actual runtime artifact directory'
+    verify = next(step for step in steps if step.get('id') == 'verify_gate_artifacts')
+    assert prepare['shell'] == verify['shell'] == 'python'
+    runtime = tmp_path / 'container-runtime-temp'
+    runtime.mkdir()
+    outputs = tmp_path / 'github-output'
+    environment = {**os.environ, 'RUNNER_TEMP': str(runtime), 'GITHUB_OUTPUT': str(outputs)}
+    prepared = subprocess.run([sys.executable, '-c', prepare['run']], env=environment,
+                              capture_output=True, text=True, timeout=10)
+    assert prepared.returncode == 0
+    name, directory = outputs.read_text().strip().split('=', 1)
+    assert name == 'directory'
+    directory = Path(directory)
+    assert directory.is_dir() and directory.parent == runtime
+    reference = '${{ steps.gate_artifacts.outputs.directory }}'
+    writers = [step for step in steps if '--output "$AEGIS_MANAGER_GATE_DIR/' in step.get('run', '')]
+    assert len(writers) == 2
+    assert all(step['env']['AEGIS_MANAGER_GATE_DIR'] == reference for step in writers)
+    assert verify['env']['AEGIS_MANAGER_GATE_DIR'] == reference
+    # The qualifier must run on success; upload still preserves diagnostics after
+    # failure, when only one artifact may legitimately have been written.
+    assert verify.get('if', 'success()') == 'success()'
+    upload = next(step for step in steps if step.get('uses', '').startswith('actions/upload-artifact@'))
+    assert upload['if'] == 'always()'
+    uploaded = {Path(line.replace(reference, str(directory))) for line in upload['with']['path'].splitlines()}
+    source, results = directory / 'manager-postgres-source.json', directory / 'manager-postgres-results.json'
+    assert uploaded == {source, results}
+    environment['AEGIS_MANAGER_GATE_DIR'] = str(directory)
+    def qualify():
+        return subprocess.run([sys.executable, '-c', verify['run']], env=environment,
+                              capture_output=True, text=True, timeout=10).returncode
+    assert qualify() != 0
+    gate_module().write_report(source, {'result': 'passed'})
+    assert qualify() != 0
+    gate_module().write_report(results, {'result': 'passed'})
+    assert qualify() == 0
+    source.unlink()
+    assert qualify() != 0
+    source.write_text('')
+    assert qualify() != 0
 
 
 def test_source_verifier_uses_only_command_scoped_exact_resolved_workspace_trust():

@@ -3,28 +3,13 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier, Event
 from unittest import skipUnless
 import uuid
-from django.contrib.auth.models import Group, Permission
 from django.db import connection, connections, transaction
-from django.test import TransactionTestCase, Client
-from accounts.models import AccountMutationLock
-from accounts.permissions import PRESETS, PRESET_GROUP_NAMES
-from accounts.tests.helpers import AccountsCase
-from .test_api import ConnectionsFixture
+from django.test import Client
+from .test_api import ConnectionsTransactionCase
 
 
 @skipUnless(connection.vendor == 'postgresql', 'Requires actual PostgreSQL row locks; SQLite is not race evidence')
-class PostgresTests(ConnectionsFixture, TransactionTestCase):
-    login_human = AccountsCase.login_human
-    human_post = AccountsCase.human_post
-
-    def setUp(self):
-        AccountMutationLock.objects.get_or_create(pk=1)
-        for role, name in PRESET_GROUP_NAMES.items():
-            group, _ = Group.objects.get_or_create(name=name)
-            group.permissions.set(Permission.objects.filter(content_type__app_label='accounts',codename__in=PRESETS[role]))
-        AccountsCase.setUpTestData.__func__(type(self))
-        super().setUp()
-
+class PostgresTests(ConnectionsTransactionCase):
     def race(self, operations):
         barrier = Barrier(2)
         def execute(operation):
