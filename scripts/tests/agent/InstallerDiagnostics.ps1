@@ -7,7 +7,7 @@ function Test-AgentDiagnosticCode([string]$Code) {
     if ($Code -cmatch '^hresult_(0|-?[1-9][0-9]{0,9})$') { return [int]::TryParse($Matches[1],[ref]$number) }
     return $false
 }
-function Test-AgentDiagnosticStage([string]$Stage) { return @('preflight','installer','configuration','status','restart','uninstall','owner_conflict','helper') -ccontains $Stage }
+function Test-AgentDiagnosticStage([string]$Stage) { return @('preflight','installer','configuration','status','status_upgrade_initial','status_upgrade_stopped','status_upgrade_restarted','restart','uninstall','owner_conflict','helper') -ccontains $Stage }
 function Get-AgentStatusDiagnostic([string]$ErrorText) {
     # Only the CLI's exact closed error object is projected. Extra/duplicate
     # fields, multiple lines, oversized data and arbitrary messages stay private.

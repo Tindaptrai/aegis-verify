@@ -106,7 +106,8 @@ def connection_test_owner():
     return get_user_model().objects.create_superuser("synthetic-tls-owner", password="synthetic-test-only")
 
 
-NATIVE_DIAGNOSTIC_STAGES = frozenset(("preflight", "installer", "configuration", "status", "restart", "uninstall", "owner_conflict", "helper"))
+NATIVE_DIAGNOSTIC_STAGES = frozenset(("preflight", "installer", "configuration", "status", "restart", "uninstall", "owner_conflict", "helper",
+    "status_upgrade_initial", "status_upgrade_stopped", "status_upgrade_restarted"))
 # This reviewed static vocabulary is also read by the disposable native helpers;
 # never learn labels from captured output or arbitrary exception messages.
 NATIVE_DIAGNOSTIC_CODES = frozenset((Path(__file__).resolve().parents[3] /
@@ -152,8 +153,9 @@ def assert_native_result(action, result, *, code=None):
     if len(result.stdout) >= 4096:
         raise AssertionError("Native output exceeded public result cap")
     if result.returncode != 0:
-        safe_action = action if action in ("Install", "Restart", "Reinstall", "Status", "Uninstall") else "unknown"
+        safe_action = action if action in ("Install", "Restart", "Reinstall", "Status", "Uninstall", "ExecutionUpgrade", "MissingVendor", "Cleanup") else "unknown"
         diagnostic = native_diagnostic(result.stderr)
+        if diagnostic and diagnostic.startswith("status_upgrade_") and action != "ExecutionUpgrade": diagnostic = None
         suffix = " [" + diagnostic + "]" if diagnostic is not None else ""
         raise AssertionError("Native " + safe_action + " failed" + suffix + "; output withheld")
 
@@ -233,6 +235,26 @@ foreach ($name in @('Get-FileHash', 'Get-Acl', 'Get-CimInstance')) {
 
 
 class NativeDiagnosticsTests(SimpleTestCase):
+    def test_execution_status_sites_keep_first_snapshot_and_mapped_actions(self):
+        for action, stage in (("ExecutionUpgrade", "published_native_execution_upgrade"),
+                              ("MissingVendor", "published_native_missing_vendor"), ("Cleanup", "published_native_cleanup")):
+            with self.subTest(action=action), tempfile.TemporaryDirectory() as temporary:
+                case = PublishedConnectionTests("test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall")
+                case.root = Path(temporary); case.origin = "https://synthetic.invalid"
+                native_stage = "status_upgrade_restarted" if action == "ExecutionUpgrade" else "helper"
+                with patch.dict(os.environ, AEGIS_CONNECTION_SERVICE_PACKAGE=temporary), patch(
+                        "devices.tests.test_connection_agent.subprocess.run", return_value=self.result(
+                            json.dumps(dict(stage=native_stage, code="state_invalid")))):
+                    with self.assertRaises(AssertionError) as caught: case.native_phase(action)
+                self.assertEqual(case.gate_stage, stage)
+                self.assertEqual(case.gate_native_failure, dict(action=action, stage=native_stage, code="state_invalid", exit_code=1))
+                self.assertEqual(caught.exception.gate_native_action, action)
+
+    def test_upgrade_status_stage_is_withheld_for_other_actions(self):
+        result = self.result('{"stage":"status_upgrade_initial","code":"state_invalid"}')
+        with self.assertRaises(AssertionError) as caught: assert_native_result("Status", result)
+        self.assertNotIn("status_upgrade", str(caught.exception))
+
     def test_native_first_failure_survives_successful_cleanup_and_later_failure(self):
         case = PublishedConnectionTests("test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall")
         with tempfile.TemporaryDirectory() as temporary:
@@ -620,7 +642,8 @@ class PublishedConnectionTests(TransactionTestCase):
     def native_phase(self, action, *, identity=None, code=None):
         stage = {"Install": "published_native_install", "Restart": "published_native_restart",
             "Reinstall": "published_native_reinstall", "Status": "published_native_status",
-            "Uninstall": "published_native_uninstall"}.get(action)
+            "Uninstall": "published_native_uninstall", "ExecutionUpgrade": "published_native_execution_upgrade",
+            "MissingVendor": "published_native_missing_vendor", "Cleanup": "published_native_cleanup"}.get(action)
         if not hasattr(self, "gate_native_failure"): self.gate_stage = stage
         result = None
         try:
@@ -666,6 +689,7 @@ class PublishedConnectionTests(TransactionTestCase):
                 diagnostic = None
                 if result is not None and len(result.stdout) < 4096 and (code is None or code not in result.stdout + result.stderr):
                     diagnostic = native_diagnostic(result.stderr)
+                    if diagnostic and diagnostic.startswith("status_upgrade_") and action != "ExecutionUpgrade": diagnostic = None
                 native_stage, native_code = diagnostic.split(":", 1) if diagnostic else (None, None)
                 exit_code = result.returncode if result is not None else None
                 if type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31: exit_code = None

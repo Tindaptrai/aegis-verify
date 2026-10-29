@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from uuid import UUID, uuid4
 from unittest.mock import patch
@@ -309,14 +310,149 @@ class MsiBuildBoundaryTests(unittest.TestCase):
         self.wix.write_bytes(b"external process boundary; never executed")
         self.output = self.root / "new output"
 
-    def invoke_main(self, run):
+    def invoke_main(self, run, diagnostic=None):
         stdout, stderr = io.StringIO(), io.StringIO()
         with patch.object(self.driver.sys, "platform", "win32"), patch.object(
                 self.driver.subprocess, "run", side_effect=run), contextlib.redirect_stdout(stdout), \
                 contextlib.redirect_stderr(stderr):
-            status = self.driver.main(["--release", str(self.release), "--wix", str(self.wix),
-                                       "--out", str(self.output)])
+            arguments = ["--release", str(self.release), "--wix", str(self.wix), "--out", str(self.output)]
+            if diagnostic is not None: arguments += ['--diagnostic-result', str(diagnostic)]
+            status = self.driver.main(arguments)
         return status, stdout.getvalue(), stderr.getvalue()
+
+    def test_probe_failure_record_survives_before_output_allocation(self):
+        failure = subprocess.TimeoutExpired('PRIVATE_COMMAND', 30, output='PRIVATE_OUTPUT', stderr='PRIVATE_STDERR')
+        diagnostic = self.root / 'msi-build-result.json'
+        result = self.invoke_main(lambda *a, **kw: (_ for _ in ()).throw(failure), diagnostic)
+        self.assertEqual(result, (2, '', 'AEGIS MSI build: msi_build_failed\n'))
+        self.assertFalse(self.output.exists())
+        self.assertTrue(diagnostic.is_file(), 'closed pre-allocation diagnostic missing')
+        self.assertEqual(json.loads(diagnostic.read_text()), dict(schema_version=1, kind='windows_msi_build_diagnostic',
+            stage='wix_version', exception_type='TimeoutExpired', exit_code=None, timeout_seconds=30,
+            os_error=None, winerror=None, hresult=None))
+        checks = self.root / 'checks'; checks.mkdir()
+        self.driver.curate_build_diagnostic(self.root, checks)
+        self.assertEqual((checks / diagnostic.name).read_bytes(), diagnostic.read_bytes())
+
+    def test_build_failures_have_closed_numeric_diagnostics_and_original_exit(self):
+        failures = [(subprocess.CalledProcessError(17, 'PRIVATE', output='PRIVATE', stderr='PRIVATE'), 'CalledProcessError', 17, None),
+                    (subprocess.TimeoutExpired('PRIVATE', 600, output='PRIVATE'), 'TimeoutExpired', None, 600)]
+        for index, (error, kind, exit_code, timeout) in enumerate(failures):
+            with self.subTest(kind=kind):
+                parent = self.root / str(index); parent.mkdir(); self.output = parent / 'msi'
+                diagnostic = parent / 'msi-build-result.json'
+                def external(command, **kwargs):
+                    if command[1:] == ['--version']: return subprocess.CompletedProcess(command, 0, stdout='5.0.2', stderr='')
+                    raise error
+                result = self.invoke_main(external, diagnostic)
+                self.assertEqual(result[0], 2)
+                data = self.driver.read_build_diagnostic(diagnostic)
+                self.assertEqual((data['stage'],data['exception_type'],data['exit_code'],data['timeout_seconds']),
+                                 ('wix_build',kind,exit_code,timeout))
+                self.assertNotIn('PRIVATE', json.dumps(data))
+
+    def test_diagnostic_validator_and_curation_reject_hostile_records(self):
+        self.assertTrue(callable(getattr(self.driver, 'read_build_diagnostic', None)), 'strict diagnostic reader missing')
+        valid = dict(schema_version=1,kind='windows_msi_build_diagnostic',stage='wix_version',
+                     exception_type='TimeoutExpired',exit_code=None,timeout_seconds=30,os_error=None,winerror=None,hresult=None)
+        cycle = {}; cycle['cycle'] = cycle
+        invalid = [valid | {'raw':'PRIVATE'},valid | {'schema_version':True},valid | {'stage':'PRIVATE'},
+                   valid | {'exception_type':'PRIVATE'},valid | {'exit_code':True},valid | {'timeout_seconds':600},
+                   valid | {'os_error':cycle},valid | {'hresult':2**31},valid | {'winerror':-1},
+                   valid | {'exception_type':'OSError'},valid | {'stage':'staging'},cycle,
+                   {key:value for key,value in valid.items() if key != 'kind'},
+                   valid | {'exit_code':2**31},valid | {'timeout_seconds':True},type('PrivateDict',(dict,),{})(valid)]
+        for data in invalid:
+            with self.assertRaises(ValueError): self.driver.validate_build_diagnostic(data)
+        record = self.root / 'msi-build-result.json'
+        checks = self.root / 'checks'; checks.mkdir()
+        for text in ('PRIVATE',json.dumps(valid)[:-1]+',"stage":"wix_build"}',json.dumps(valid | {'raw':'PRIVATE'}),'x'*4097):
+            record.write_text(text)
+            with self.assertRaises(ValueError): self.driver.curate_build_diagnostic(self.root, checks)
+            self.assertFalse((checks / record.name).exists())
+
+    def test_diagnostic_sink_cannot_overwrite_or_replace_original_failure(self):
+        diagnostic = self.root / 'msi-build-result.json'; diagnostic.write_text('PRESERVE')
+        result = self.invoke_main(lambda *a, **kw: (_ for _ in ()).throw(OSError(5, 'PRIVATE')), diagnostic)
+        self.assertEqual(result, (2,'','AEGIS MSI build: msi_build_failed\n'))
+        self.assertEqual(diagnostic.read_text(), 'PRESERVE')
+        self.assertFalse(self.output.exists())
+
+    def test_probe_os_error_exposes_only_numeric_fields(self):
+        error = OSError(5, 'PRIVATE_FILENAME_AND_MESSAGE'); error.winerror=5; error.hresult=-2147024891
+        diagnostic = self.root / 'msi-build-result.json'
+        result = self.invoke_main(lambda *a, **kw: (_ for _ in ()).throw(error), diagnostic)
+        self.assertEqual(result[0],2)
+        data=self.driver.read_build_diagnostic(diagnostic)
+        self.assertEqual((data['stage'],data['exception_type'],data['os_error'],data['winerror'],data['hresult']),
+                         ('wix_version','OSError',5,5,-2147024891))
+        self.assertNotIn('PRIVATE',json.dumps(data))
+
+    def test_custom_os_exception_properties_are_never_inspected(self):
+        class PrivateError(OSError):
+            @property
+            def winerror(self): raise AssertionError('PRIVATE_PROPERTY_MUST_NOT_RUN')
+        diagnostic=self.root/'msi-build-result.json'
+        result=self.invoke_main(lambda *a,**kw: (_ for _ in ()).throw(PrivateError('PRIVATE_MESSAGE')),diagnostic)
+        self.assertEqual(result,(2,'','AEGIS MSI build: msi_build_failed\n'))
+        data=self.driver.read_build_diagnostic(diagnostic)
+        self.assertEqual(data['exception_type'],'OtherException')
+        self.assertTrue(all(data[key] is None for key in ('exit_code','timeout_seconds','os_error','winerror','hresult')))
+
+    def test_staging_authoring_and_final_msi_failures_keep_their_boundary(self):
+        for stage in ('staging','authoring','msi_validation'):
+            with self.subTest(stage=stage):
+                parent=self.root/stage; parent.mkdir(); self.output=parent/'msi'
+                diagnostic=parent/'msi-build-result.json'
+                def external(command, **kwargs):
+                    return subprocess.CompletedProcess(command,0,stdout='5.0.2' if command[1:] == ['--version'] else '',stderr='')
+                manager = contextlib.ExitStack()
+                with manager:
+                    if stage == 'staging':
+                        manager.enter_context(patch.object(self.driver.shutil,'copyfile',side_effect=PermissionError(13,'PRIVATE')))
+                    if stage == 'authoring':
+                        manager.enter_context(patch.object(Path,'write_text',side_effect=OSError(5,'PRIVATE')))
+                    result=self.invoke_main(external,diagnostic)
+                self.assertEqual(result[0],2)
+                data=self.driver.read_build_diagnostic(diagnostic)
+                self.assertEqual(data['stage'],stage)
+                self.assertNotIn('PRIVATE',json.dumps(data))
+
+    def test_invalid_or_unwritable_sink_never_changes_probe_failure(self):
+        failure=subprocess.TimeoutExpired('PRIVATE',30,output='PRIVATE')
+        candidates=(self.root/'wrong.json',self.release/'msi-build-result.json',CHECKOUT/'msi-build-result.json')
+        for sink in candidates:
+            with self.subTest(sink=sink):
+                result=self.invoke_main(lambda *a,**kw: (_ for _ in ()).throw(failure),sink)
+                self.assertEqual(result,(2,'','AEGIS MSI build: msi_build_failed\n'))
+                self.assertFalse(sink.exists())
+        sink=self.root/'msi-build-result.json'; sink.mkdir()
+        result=self.invoke_main(lambda *a,**kw: (_ for _ in ()).throw(failure),sink)
+        self.assertEqual(result[0],2)
+        self.assertTrue(sink.is_dir())
+
+    def test_workflow_curates_closed_report_before_msi_output_exists(self):
+        workflow=(CHECKOUT/'.github/workflows/windows-distribution.yml').read_text()
+        block=workflow.split('      - name: Curate delivery files and validation logs\n',1)[1]
+        code=textwrap.dedent(block.split('        run: |\n',1)[1].split('      - name:',1)[0])
+        valid=dict(schema_version=1,kind='windows_msi_build_diagnostic',stage='wix_version',
+                   exception_type='TimeoutExpired',exit_code=None,timeout_seconds=30,os_error=None,winerror=None,hresult=None)
+        for invalid in (False,True):
+            with self.subTest(invalid=invalid):
+                work=self.root/('invalid' if invalid else 'valid'); work.mkdir()
+                (work/'msi-build-result.json').write_text(json.dumps(valid | ({'raw':'PRIVATE'} if invalid else {})))
+                (work/'private-key.pem').write_text('PRIVATE')
+                environment=dict(AEGIS_MSI_WORK=str(work),GITHUB_WORKSPACE=str(CHECKOUT),GITHUB_SHA='a'*40,
+                                 GITHUB_REF='synthetic',GITHUB_EVENT_NAME='synthetic',GITHUB_RUN_ID='1')
+                with patch.dict('os.environ',environment):
+                    if invalid:
+                        with self.assertRaises(ValueError): exec(compile(code,'workflow-curation','exec'),{})
+                    else: exec(compile(code,'workflow-curation','exec'),{})
+                selected=work/'delivery/checks/msi-build-result.json'
+                self.assertEqual(selected.exists(),not invalid)
+                self.assertFalse((work/'msi').exists())
+                self.assertFalse((work/'delivery/private-key.pem').exists())
+                if not invalid: self.assertEqual(json.loads(selected.read_text()),valid)
 
     def test_wrong_wix_version_is_rejected_without_allocating_output(self):
         for version in ("5.0.1", "5.0.20", "6.0.2", "7.0.0", "banner\n5.0.2"):
@@ -366,9 +502,11 @@ class MsiBuildBoundaryTests(unittest.TestCase):
             msi.write_bytes(bytes.fromhex("d0cf11e0a1b11ae1") + b"unit boundary only")
             return subprocess.CompletedProcess(command, 0)
 
-        result = self.invoke_main(external_wix)
+        diagnostic=self.root/'msi-build-result.json'
+        result = self.invoke_main(external_wix,diagnostic)
         self.assertEqual(result[0], 0, result[2])
         self.assertEqual(len(commands), 2)
+        self.assertFalse(diagnostic.exists())
         metadata = json.loads(result[1])
         self.assertEqual(metadata["version"], "0.4.0")
         self.assertEqual(Path(metadata["msi"]).name, "AEGIS-Verify-0.4.0-x64.msi")

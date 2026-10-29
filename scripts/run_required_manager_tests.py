@@ -56,8 +56,10 @@ REQUIRED_TESTS = {
 CATEGORIES = (*PREFIXES, *EXACT, *REQUIRED_TESTS, "published_presence")
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE_ACTION_STAGES = {"Install": "published_native_install", "Restart": "published_native_restart",
-    "Reinstall": "published_native_reinstall", "Status": "published_native_status", "Uninstall": "published_native_uninstall"}
-NATIVE_STAGES = frozenset(("preflight", "installer", "configuration", "status", "restart", "uninstall", "owner_conflict", "helper"))
+    "Reinstall": "published_native_reinstall", "Status": "published_native_status", "Uninstall": "published_native_uninstall",
+    "ExecutionUpgrade": "published_native_execution_upgrade", "MissingVendor": "published_native_missing_vendor", "Cleanup": "published_native_cleanup"}
+NATIVE_STAGES = frozenset(("preflight", "installer", "configuration", "status", "restart", "uninstall", "owner_conflict", "helper",
+    "status_upgrade_initial", "status_upgrade_stopped", "status_upgrade_restarted"))
 NATIVE_CODES = frozenset((ROOT / "scripts/tests/agent/native-diagnostic-codes.txt").read_text(encoding="ascii").splitlines())
 DIAGNOSTIC_STAGES = frozenset((
     "fixture_setup", "source_staging", "source_tls", "authority_setup", "environment_setup",
@@ -68,6 +70,7 @@ DIAGNOSTIC_STAGES = frozenset((
     "published_tls", "published_connect", "published_status", "published_run", "published_wait",
     "published_native_install", "published_native_restart", "published_native_reinstall",
     "published_native_status", "published_native_uninstall",
+    "published_native_execution_upgrade", "published_native_missing_vendor", "published_native_cleanup",
 ))
 DIAGNOSTIC_CODES = frozenset(("worker_process_failed", "published_cli_failed", "published_native_failed",
     "source_probe_failed", "wait_timeout", "gate_execution_failed", "unexpected_success"))
@@ -100,6 +103,7 @@ def safe_native_failure(value):
     if exit_code is not None and (type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31): return {}
     if stage is None and code is None: return dict(action=action, stage=None, code=None, exit_code=exit_code)
     if type(stage) is not str or stage not in NATIVE_STAGES or type(code) is not str or len(code) > 128: return {}
+    if stage.startswith("status_upgrade_") and action != "ExecutionUpgrade": return {}
     known = code in NATIVE_CODES
     if not known:
         match = re.fullmatch(r"(win32|hresult)_(-?(?:0|[1-9][0-9]*))", code)

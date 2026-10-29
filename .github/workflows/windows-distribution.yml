@@ -81,7 +81,7 @@ jobs:
           subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'scripts/smoke_distribution.py'), '--exe', str(work / 'onefile/release/aegis.exe'), '--result', str(work / 'onefile-smoke.json')], cwd=work, check=True)
           launcher_environment = dict(os.environ, AEGIS_DEMO_TEST_EXE=str(work / 'onefile/release/aegis.exe'))
           subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/demo-launcher/test_launcher.py')], cwd=work, env=launcher_environment, check=True)
-          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/msi.py'), '--release', str(release), '--wix', str(tools / 'wix.exe'), '--out', str(work / 'msi')], cwd=work, check=True)
+          subprocess.run([sys.executable, '-I', '-X', 'utf8', str(checkout / 'packaging/windows/msi.py'), '--release', str(release), '--wix', str(tools / 'wix.exe'), '--out', str(work / 'msi'), '--diagnostic-result', str(work / 'msi-build-result.json')], cwd=work, check=True)
       - name: Create labelled synthetic older MSI for upgrade checks
         shell: python
         run: |
@@ -143,6 +143,7 @@ jobs:
           import os
           from pathlib import Path
           import shutil
+          import runpy
 
           work = Path(os.environ['AEGIS_MSI_WORK'])
           delivery = work / 'delivery'
@@ -165,8 +166,12 @@ jobs:
                   shutil.copyfile(authoring, delivery / authoring.name)
           checks = delivery / 'checks'
           checks.mkdir()
+          diagnostic_driver = runpy.run_path(str(Path(os.environ['GITHUB_WORKSPACE']) / 'packaging/windows/msi.py'))
+          diagnostic_driver['curate_build_diagnostic'](work, checks)
           for pattern in ('*-smoke.json', '*result.json'):
               for source in work.glob(pattern):
+                  if source.name == 'msi-build-result.json':
+                      continue
                   shutil.copyfile(source, checks / source.name)
           for name in ('extraction-logs', 'installation-logs'):
               source = work / name
@@ -185,7 +190,9 @@ jobs:
         shell: pwsh
         run: |
           if ($env:AEGIS_MSI_WORK -and (Test-Path -LiteralPath $env:AEGIS_MSI_WORK)) {
-            Get-ChildItem -LiteralPath $env:AEGIS_MSI_WORK -Filter '*result.json' -File | ForEach-Object { Get-Content -LiteralPath $_.FullName }
+            Get-ChildItem -LiteralPath $env:AEGIS_MSI_WORK -Filter '*result.json' -File | Where-Object { $_.Name -cne 'msi-build-result.json' } | ForEach-Object { Get-Content -LiteralPath $_.FullName }
+            $buildDiagnostic = Join-Path $env:AEGIS_MSI_WORK 'delivery/checks/msi-build-result.json'
+            if (Test-Path -LiteralPath $buildDiagnostic) { Get-Content -LiteralPath $buildDiagnostic }
             Get-ChildItem -LiteralPath $env:AEGIS_MSI_WORK -Filter 'installer-steps.json' -File -Recurse | ForEach-Object { Get-Content -LiteralPath $_.FullName }
             Get-ChildItem -LiteralPath $env:AEGIS_MSI_WORK -Filter '*.log' -File -Recurse | ForEach-Object {
               Write-Output ('Installer log: ' + $_.FullName)

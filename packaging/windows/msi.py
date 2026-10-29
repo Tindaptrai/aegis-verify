@@ -28,6 +28,104 @@ DEVICES = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {
     prefix + digit for prefix in ("COM", "LPT") for digit in "123456789¹²³"
 }
 ET.register_namespace("", WXS_NAMESPACE)
+BUILD_DIAGNOSTIC_STAGES = frozenset(('output_validation','release_validation','platform_validation','wix_validation',
+    'wix_version','output_allocation','staging','authoring','wix_build','msi_validation','metadata','checksums'))
+BUILD_DIAGNOSTIC_TYPES = (OSError, PermissionError, FileNotFoundError, FileExistsError, IsADirectoryError,
+    NotADirectoryError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired)
+
+
+def validate_build_diagnostic(data):
+    fields = {'schema_version','kind','stage','exception_type','exit_code','timeout_seconds','os_error','winerror','hresult'}
+    if type(data) is not dict or set(data) != fields:
+        raise ValueError('invalid_build_diagnostic')
+    if (type(data['schema_version']) is not int or data['schema_version'] != 1
+            or type(data['kind']) is not str or data['kind'] != 'windows_msi_build_diagnostic'
+            or type(data['stage']) is not str or data['stage'] not in BUILD_DIAGNOSTIC_STAGES
+            or type(data['exception_type']) is not str
+            or data['exception_type'] not in {item.__name__ for item in BUILD_DIAGNOSTIC_TYPES} | {'OtherException'}):
+        raise ValueError('invalid_build_diagnostic')
+    for field, low, high in (('exit_code',-(2**31),2**31-1),('os_error',0,65535),
+                             ('winerror',0,65535),('hresult',-(2**31),2**31-1)):
+        value = data[field]
+        if value is not None and (type(value) is not int or not low <= value <= high):
+            raise ValueError('invalid_build_diagnostic')
+    kind = data['exception_type']
+    timeout = data['timeout_seconds']
+    expected_timeout = {'wix_version':30,'wix_build':600}.get(data['stage'])
+    if timeout is not None and (kind != 'TimeoutExpired' or type(timeout) is not int or timeout != expected_timeout):
+        raise ValueError('invalid_build_diagnostic')
+    if data['exit_code'] is not None and kind != 'CalledProcessError':
+        raise ValueError('invalid_build_diagnostic')
+    os_types = {item.__name__ for item in BUILD_DIAGNOSTIC_TYPES if issubclass(item, OSError)}
+    if kind not in os_types and any(data[field] is not None for field in ('os_error','winerror','hresult')):
+        raise ValueError('invalid_build_diagnostic')
+    return data
+
+
+def build_failure_diagnostic(stage, error):
+    # Exact standard exception types only: never inspect custom properties/messages.
+    known = type(error) in BUILD_DIAGNOSTIC_TYPES
+    data = dict(schema_version=1,kind='windows_msi_build_diagnostic',stage=stage,
+        exception_type=type(error).__name__ if known else 'OtherException',exit_code=None,
+        timeout_seconds=None,os_error=None,winerror=None,hresult=None)
+    if type(error) is subprocess.CalledProcessError:
+        value = error.returncode
+        if type(value) is int and -(2**31) <= value < 2**31: data['exit_code'] = value
+    if type(error) is subprocess.TimeoutExpired:
+        value = error.timeout
+        if type(value) is int and value == {'wix_version':30,'wix_build':600}.get(stage): data['timeout_seconds'] = value
+    if known and isinstance(error, OSError):
+        for field, attribute, low, high in (('os_error','errno',0,65535),('winerror','winerror',0,65535),
+                                           ('hresult','hresult',-(2**31),2**31-1)):
+            value = getattr(error,attribute,None)
+            if type(value) is int and low <= value <= high: data[field] = value
+    return validate_build_diagnostic(data)
+
+
+def read_build_diagnostic(path):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result: raise ValueError('invalid_build_diagnostic')
+            result[key] = value
+        return result
+    try:
+        information = _plain_path(path)
+        if not stat.S_ISREG(information.st_mode) or information.st_size > 4096:
+            raise ValueError('invalid_build_diagnostic')
+        with path.open('rb') as stream:
+            content = stream.read(4097)
+        if len(content) > 4096: raise ValueError('invalid_build_diagnostic')
+        return validate_build_diagnostic(json.loads(content, object_pairs_hook=unique))
+    except (UnicodeError, RecursionError):
+        raise ValueError('invalid_build_diagnostic') from None
+
+
+def curate_build_diagnostic(work, checks):
+    source = Path(work) / 'msi-build-result.json'
+    if not source.exists() and not source.is_symlink(): return
+    data = read_build_diagnostic(source)
+    with (Path(checks) / source.name).open('x', encoding='utf-8', newline='\n') as stream:
+        stream.write(json.dumps(data, indent=2) + '\n')
+
+
+def _write_build_diagnostic(options, stage, error):
+    if options.diagnostic_result is None: return
+    try:
+        target = options.diagnostic_result.expanduser().absolute()
+        release = options.release.expanduser().absolute().resolve()
+        # One explicit work-root sink; never allocate the MSI output to report it.
+        if (target.name != 'msi-build-result.json' or target.parent != options.out.expanduser().absolute().parent
+                or target.resolve().is_relative_to(CHECKOUT) or target.resolve().is_relative_to(release)):
+            return
+        for ancestor in target.parents:
+            _plain_path(ancestor)
+        data = build_failure_diagnostic(stage, error)
+        with target.open('x', encoding='utf-8', newline='\n') as stream:
+            stream.write(json.dumps(data, indent=2) + '\n')
+    except (OSError, ValueError):
+        # Diagnostic failure cannot replace the original build outcome.
+        pass
 
 
 def _sha256(path):
@@ -274,22 +372,30 @@ def main(argv=None):
     parser.add_argument("--release", required=True, type=Path, help="Verified public onedir release")
     parser.add_argument("--wix", required=True, type=Path, help="Explicit separately prepared WiX 5.0.2 executable")
     parser.add_argument("--out", required=True, type=Path, help="New output directory outside the checkout and release")
+    parser.add_argument("--diagnostic-result", type=Path, help="Optional work-root msi-build-result.json failure record")
     options = parser.parse_args(argv)
+    stage = 'output_validation'
     try:
         release = options.release.expanduser().absolute()
         output = _output_path(options.out, release)
+        stage = 'release_validation'
         verified = validate_release(release)
+        stage = 'platform_validation'
         if sys.platform != "win32":
             raise ValueError("windows_build_required")
         wix = options.wix.expanduser().absolute()
+        stage = 'wix_validation'
         if not wix.is_file() or wix.suffix.lower() != ".exe":
             raise ValueError("wix_executable_missing")
         _plain_path(wix)
         environment = dict(os.environ)
         for name in ("PYTHONPATH", "PYTHONHOME", "PYTHONSTARTUP"):
             environment.pop(name, None)
+        stage = 'wix_version'
         _wix_version(wix, environment)
+        stage = 'output_allocation'
         output.mkdir(parents=True, exist_ok=False)
+        stage = 'staging'
         work = output / "build-context"
         payload = work / "payload"
         payload.mkdir(parents=True)
@@ -302,16 +408,20 @@ def main(argv=None):
         if snapshot != verified:
             raise ValueError("payload_changed_during_staging")
         version = verified["version"]
+        stage = 'authoring'
         authoring = work / "AEGIS-Verify.wxs"
         authoring.write_text(render_wxs(payload, version), encoding="utf-8", newline="\n")
         msi = output / f"AEGIS-Verify-{version}-x64.msi"
         command = [str(wix), "build", "-arch", "x64", "-intermediateFolder", str(work / "wix"),
                    "-o", str(msi), str(authoring)]
         # Native MSI actions only. ICE validation remains enabled.
+        stage = 'wix_build'
         subprocess.run(command, cwd=work, env=environment, check=True, timeout=600,
                        stdout=sys.stderr, stderr=sys.stderr)
+        stage = 'msi_validation'
         if not msi.is_file() or msi.read_bytes()[:8] != bytes.fromhex("d0cf11e0a1b11ae1"):
             raise ValueError("msi_missing_or_invalid")
+        stage = 'metadata'
         build_info = output / "MSI-BUILD-INFO.json"
         information = {"kind": "aegis_windows_msi", "schema_version": "1.0.0",
             "application_version": version, "architecture": "x64", "scope": "perMachine", "signed": False,
@@ -323,6 +433,7 @@ def main(argv=None):
         build_info.write_text(json.dumps(information, indent=2) + "\n", encoding="utf-8", newline="\n")
         guide = output / "INSTALL.md"
         guide.write_text(_install_guide(version, product_code(version)), encoding="utf-8", newline="\n")
+        stage = 'checksums'
         checksums = output / "SHA256SUMS.txt"
         checksums.write_text("".join(f"{_sha256(path)}  {path.name}\n"
                                     for path in (msi, guide, build_info)), encoding="utf-8", newline="\n")
@@ -333,6 +444,7 @@ def main(argv=None):
         return 0
     except (OSError, ValueError, subprocess.SubprocessError):
         error = sys.exception()
+        _write_build_diagnostic(options, stage, error)
         code = str(error) if isinstance(error, ValueError) else "msi_build_failed"
         print(f"AEGIS MSI build: {code}", file=sys.stderr)
         # Failed output remains available for diagnosis; never delete user files.

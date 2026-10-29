@@ -305,6 +305,20 @@ def test_native_failure_projects_first_action_and_closed_pair_instead_of_cleanup
     assert gate.safe_diagnostic(case, None)["revocation_status"] == case.gate_revocation_status
 
 
+def test_execution_actions_and_status_sites_project_without_schema_growth():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    for action, stage in (("ExecutionUpgrade", "published_native_execution_upgrade"),
+                          ("MissingVendor", "published_native_missing_vendor"), ("Cleanup", "published_native_cleanup")):
+        native_stage = "status_upgrade_stopped" if action == "ExecutionUpgrade" else "helper"
+        case.gate_native_failure = dict(action=action, stage=native_stage, code="state_invalid", exit_code=1)
+        result = gate.safe_diagnostic(case, None)
+        assert result["stage"] == stage
+        assert result["native_failure"] == case.gate_native_failure
+    case.gate_native_failure = dict(action="Status", stage="status_upgrade_initial", code="state_invalid", exit_code=1)
+    assert gate.safe_diagnostic(case, None)["native_failure"] == {}
+
+
 def test_native_and_revocation_diagnostics_reject_raw_extra_oversize_cycles_and_numbers():
     gate = gate_module()
     case = unittest.FunctionTestCase(lambda: None)
@@ -332,7 +346,7 @@ def test_native_and_revocation_diagnostics_reject_raw_extra_oversize_cycles_and_
         assert "PRIVATE" not in json.dumps(diagnostic)
 
 
-def test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_raw_output(tmp_path, monkeypatch):
+def test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_raw_output(tmp_path, monkeypatch, failure_action='Status'):
     gate = gate_module()
     path = ROOT / 'manager/devices/tests/test_connection_agent.py'
     tree = ast.parse(path.read_text())
@@ -349,7 +363,7 @@ def test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_
         def id(self): return gate.EXACT['published_service']
         def runTest(self):
             try:
-                self.native_phase('Status', identity='synthetic-id')
+                self.native_phase(failure_action, identity='synthetic-id')
             finally:
                 self.native_phase('Uninstall', identity='synthetic-id')
     monkeypatch.setenv('AEGIS_CONNECTION_SERVICE_PACKAGE', str(tmp_path))
@@ -364,7 +378,8 @@ def test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_
         (1, 'PRIVATE' * 100, '', (None, None)),
         (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary"}', 'PRIVATE' * 700, (None, None)),
     ):
-        children = iter((subprocess.CompletedProcess([], 1, '', '{"stage":"status","code":"state_invalid"}'),
+        native_stage = 'status' if failure_action == 'Status' else 'status_upgrade_stopped'
+        children = iter((subprocess.CompletedProcess([], 1, '', json.dumps(dict(stage=native_stage, code='state_invalid'))),
                          subprocess.CompletedProcess([], cleanup_exit, stdout, stderr)))
         scope['subprocess'] = SimpleNamespace(run=lambda *args, **kwargs: next(children))
         case = Case(); case.root = tmp_path; case.origin = 'https://synthetic.invalid'
@@ -374,14 +389,18 @@ def test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_
                                  'https://github.com/example/project/actions/runs/1')
         assert value['result'] == 'failed' and value['totals']['failed'] == 1
         diagnostic = value['diagnostics'][0]
-        assert diagnostic['stage'] == 'published_native_status'
-        assert diagnostic['native_failure'] == dict(action='Status', stage='status', code='state_invalid', exit_code=1)
+        assert diagnostic['stage'] == ('published_native_status' if failure_action == 'Status' else 'published_native_execution_upgrade')
+        assert diagnostic['native_failure'] == dict(action=failure_action, stage=native_stage, code='state_invalid', exit_code=1)
         expected_cleanup = {} if expected_pair is None else dict(
             action='Uninstall', stage=expected_pair[0], code=expected_pair[1], exit_code=1)
         assert diagnostic.get('native_cleanup_failure') == expected_cleanup
-        assert diagnostic.get('native_traceback_action') == ('Status' if cleanup_exit == 0 else 'Uninstall')
+        assert diagnostic.get('native_traceback_action') == (failure_action if cleanup_exit == 0 else 'Uninstall')
         assert diagnostic['frames'] and all(frame['path'] == 'manager/devices/tests/test_connection_agent.py' for frame in diagnostic['frames'][-2:])
         assert 'PRIVATE' not in json.dumps(value)
+
+
+def test_actual_execution_upgrade_finally_preserves_first_status_site(tmp_path, monkeypatch):
+    test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_raw_output(tmp_path, monkeypatch, 'ExecutionUpgrade')
 
 
 def test_cleanup_failure_and_traceback_action_reject_malformed_and_cyclic_metadata():

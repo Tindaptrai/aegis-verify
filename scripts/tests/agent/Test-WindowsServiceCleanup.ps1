@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'InstallerDiagnostics.ps1')
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Test-WindowsService.ps1'),[ref]$tokens,[ref]$errors)

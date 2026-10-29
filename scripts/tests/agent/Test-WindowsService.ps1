@@ -35,15 +35,24 @@ function Invoke-NativeStatusCommand([string]$Executable,[string]$StateDirectory)
         return @{stdout=$output;stderr=$errorText;exit_code=$process.ExitCode}
     } finally {$process.Dispose()}
 }
-function Read-NativeStatus([string]$Executable=$binary) {
-    $result=Invoke-NativeStatusCommand $Executable $stateDirectory
-    if ($result.exit_code -ne 0) {
-        $script:AgentInnerDiagnostic=Get-AgentStatusDiagnostic $result.stderr
-        throw 'status_failed'
+function Read-NativeStatus([string]$Executable=$binary,[ValidateSet('status','status_upgrade_initial','status_upgrade_stopped','status_upgrade_restarted')][string]$DiagnosticStage='status') {
+    $script:AgentInnerDiagnostic=$null
+    try {
+        $result=Invoke-NativeStatusCommand $Executable $stateDirectory
+        if ($result.exit_code -ne 0) {
+            $script:AgentInnerDiagnostic=Get-AgentStatusDiagnostic $result.stderr
+            throw 'status_failed'
+        }
+        $value = $result.stdout | ConvertFrom-Json
+        if ($ExpectedDeviceId -and $value.device_id -cne $ExpectedDeviceId) { throw 'ci_identity_conflict' }
+        return $value
+    } catch {
+        if(!$script:AgentInnerDiagnostic){$script:AgentInnerDiagnostic=Get-AgentErrorDiagnostic $_ 'status'}
+        # Shared stack classification deliberately maps this reader to status;
+        # apply its fixed call-site label only after safe code classification.
+        $script:AgentInnerDiagnostic.stage=$DiagnosticStage
+        throw
     }
-    $value = $result.stdout | ConvertFrom-Json
-    if ($ExpectedDeviceId -and $value.device_id -cne $ExpectedDeviceId) { throw 'ci_identity_conflict' }
-    return $value
 }
 function Get-NativeKeyHash {
     # The service can publish an acknowledgement while this helper checks its
@@ -171,7 +180,10 @@ if ($Action -eq 'Install') {
         # Uninstall removed the installed binary; validate preserved state with the verified package CLI.
         $null=Get-VerifiedAgentPackage $PackageRoot
         $status=Read-NativeStatus (Join-Path $PackageRoot 'bin/aegis-agent.exe')
-    } else {$status=Read-NativeStatus}
+    } else {
+        $initialStage=if($Action -ceq 'ExecutionUpgrade'){'status_upgrade_initial'}else{'status'}
+        $status=Read-NativeStatus -DiagnosticStage $initialStage
+    }
     if ($Action -eq 'Restart' -or $Action -eq 'Reinstall') {
         $id=$status.device_id; $keyHash=Get-NativeKeyHash
         $watch=[Diagnostics.Stopwatch]::StartNew()
@@ -236,10 +248,10 @@ if ($Action -eq 'Install') {
         Stop-AgentService
         foreach($file in Get-ChildItem -LiteralPath $journal -File){if(!$journalBefore.ContainsKey($file.Name) -or $journalBefore[$file.Name] -cne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash){throw 'upgrade_journal_changed'}}
         if(@(Get-ChildItem -LiteralPath $journal -File).Count -ne $journalBefore.Count){throw 'upgrade_journal_lost'}
-        if((Read-NativeStatus).device_id -cne $ExpectedDeviceId){throw 'upgrade_identity_changed'}
+        if((Read-NativeStatus -DiagnosticStage 'status_upgrade_stopped').device_id -cne $ExpectedDeviceId){throw 'upgrade_identity_changed'}
         Assert-AgentStoppedJournal $binary $stateDirectory
         Start-Service AegisAgent;Wait-AgentRunning
-        $status=Read-NativeStatus
+        $status=Read-NativeStatus -DiagnosticStage 'status_upgrade_restarted'
     } elseif ($Action -eq 'Uninstall') {
         Stop-AgentService
         $before=(Get-FileHash -LiteralPath $stateFile -Algorithm SHA256).Hash

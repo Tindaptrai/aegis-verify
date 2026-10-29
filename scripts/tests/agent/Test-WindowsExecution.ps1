@@ -26,14 +26,15 @@ function ConvertTo-GatePublishedDiagnostics($Diagnostics,[string[]]$NativeCodes)
     $fields=@('subphase','exception_type','gate_stage','gate_codes','native_stage','native_code')
     $subphases=@('install','service_status','heartbeat','network','noexecution','missingvendor','upgrade','uninstall','cleanup')
     $types=@('AssertionError','AttributeError','ValueError','TypeError','KeyError','IndexError','RuntimeError','OSError','PermissionError','FileNotFoundError','TimeoutError','TimeoutExpired','OtherException')
-    $stages=@('published_fixture','published_authority','published_tls','published_connect','published_status','published_run','published_wait','published_native_install','published_native_restart','published_native_reinstall','published_native_status','published_native_uninstall')
+    $stages=@('published_fixture','published_authority','published_tls','published_connect','published_status','published_run','published_wait','published_native_install','published_native_restart','published_native_reinstall','published_native_status','published_native_uninstall','published_native_execution_upgrade','published_native_missing_vendor','published_native_cleanup')
     foreach($item in $Diagnostics){
         if($null -eq $item -or @($item.PSObject.Properties.Name).Count -ne $fields.Count -or @($item.PSObject.Properties.Name|Where-Object{$_ -cnotin $fields}).Count){throw 'published_result_invalid'}
         if(($null -ne $item.subphase -and ($item.subphase -isnot [string] -or $item.subphase -cnotin $subphases)) -or $item.exception_type -isnot [string] -or $item.exception_type -cnotin $types -or ($null -ne $item.gate_stage -and ($item.gate_stage -isnot [string] -or $item.gate_stage -cnotin $stages))){throw 'published_result_invalid'}
         if($item.gate_codes -isnot [Array] -or $item.gate_codes.Count -gt 8 -or @($item.gate_codes|Where-Object{$_ -isnot [string] -or $_ -cnotin @('published_cli_failed','published_native_failed','wait_timeout')}).Count){throw 'published_result_invalid'}
         if(($null -eq $item.native_stage) -ne ($null -eq $item.native_code)){throw 'published_result_invalid'}
         if($null -ne $item.native_stage){
-            if($item.native_stage -isnot [string] -or $item.native_stage -cnotin @('preflight','installer','configuration','status','restart','uninstall','owner_conflict','helper') -or $item.native_code -isnot [string] -or $item.native_code.Length -gt 128){throw 'published_result_invalid'}
+            if($item.native_stage -isnot [string] -or $item.native_stage -cnotin @('preflight','installer','configuration','status','status_upgrade_initial','status_upgrade_stopped','status_upgrade_restarted','restart','uninstall','owner_conflict','helper') -or $item.native_code -isnot [string] -or $item.native_code.Length -gt 128){throw 'published_result_invalid'}
+            if($item.native_stage.StartsWith('status_upgrade_') -and $item.gate_stage -cne 'published_native_execution_upgrade'){throw 'published_result_invalid'}
             $known=$item.native_code -cin $NativeCodes
             if(!$known -and $item.native_code -cmatch '^(win32|hresult)_(-?(?:0|[1-9][0-9]*))$'){
                 $number=0L;$kind=$Matches[1];$digits=$Matches[2]

@@ -27,7 +27,10 @@ $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot
 if($errors.Count){throw 'status_reader_parse_failed'}
 $definition=$ast.Find({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Read-NativeStatus'},$false)
 . ([scriptblock]::Create($definition.Extent.Text))
-function Invoke-NativeStatusCommand { return $script:statusResult }
+function Invoke-NativeStatusCommand {
+    if($script:statusTransportFailure){throw (New-Object IO.IOException('PRIVATE_TRANSPORT'))}
+    return $script:statusResult
+}
 $binary='synthetic-unopened-agent';$stateDirectory='synthetic-unopened-state';$ExpectedDeviceId='synthetic-id'
 foreach($case in @(
     @{stderr='{"error":{"code":"state_invalid"}}';exit=3;want='state_invalid'},
@@ -43,6 +46,33 @@ foreach($case in @(
 $script:statusResult=@{stdout='{"device_id":"synthetic-id","state":"identity_denied"}';stderr='';exit_code=0}
 $status=Read-NativeStatus
 if($status.device_id -cne 'synthetic-id' -or $status.state -cne 'identity_denied'){throw 'status_reader_success_changed'}
+$siteCount=0
+foreach($stage in @('status_upgrade_initial','status_upgrade_stopped','status_upgrade_restarted')){
+    foreach($case in @(
+        @{stdout='PRIVATE_STDOUT';stderr='{"error":{"code":"state_invalid"}}';exit=3;want='state_invalid'},
+        @{stdout='PRIVATE_BAD_JSON';stderr='';exit=0;want=$null},
+        @{stdout='{"device_id":"PRIVATE_ID"}';stderr='';exit=0;want='ci_identity_conflict'}
+    )){
+        $script:statusResult=@{stdout=$case.stdout;stderr=$case.stderr;exit_code=$case.exit}
+        $script:AgentInnerDiagnostic=$null;$failed=$false
+        try{Read-NativeStatus -DiagnosticStage $stage|Out-Null}catch{$failed=$true}
+        if(!$failed -or $script:AgentInnerDiagnostic.stage -cne $stage -or ($case.want -and $script:AgentInnerDiagnostic.code -cne $case.want) -or ($script:AgentInnerDiagnostic|ConvertTo-Json -Compress).Contains('PRIVATE')){throw 'upgrade_status_site_missing'}
+        $siteCount++
+    }
+    $script:statusTransportFailure=$true;$failed=$false
+    try{Read-NativeStatus -DiagnosticStage $stage|Out-Null}catch{$failed=$true}
+    $script:statusTransportFailure=$false
+    if(!$failed -or $script:AgentInnerDiagnostic.stage -cne $stage -or ($script:AgentInnerDiagnostic|ConvertTo-Json -Compress).Contains('PRIVATE')){throw 'upgrade_transport_site_missing'}
+    $script:statusResult=@{stdout='{"device_id":"synthetic-id"}';stderr='';exit_code=0}
+    Read-NativeStatus -DiagnosticStage $stage|Out-Null
+    if($null -ne $script:AgentInnerDiagnostic){throw 'upgrade_status_site_stale'}
+    $pair='{"stage":"'+$stage+'","code":"state_invalid"}'
+    $Error.Clear()
+    try{try{throw $pair}catch{throw 'service_operation_failed'}}catch{
+        $first=Get-AgentFirstFailureDiagnostic @($Error) $_ 'installer'
+        if($first.stage -cne $stage -or $first.code -cne 'state_invalid'){throw 'upgrade_first_failure_lost'}
+    }
+}
 $script:AgentInnerDiagnostic=$null
 # Exercise the actual process transport with an inert temporary executable;
 # arguments/streams/exit handling are real, and SCM is never called.
@@ -74,9 +104,11 @@ public static class InertStatusDiagnostic {
         try{$output=Read-NativeStatus}catch{$failure=$_.Exception.Message}
         if($failure -cne 'status_failed' -or $null -ne $output -or $script:AgentInnerDiagnostic.code -cne $case.want){throw 'status_transport_failed_to_capture_closed_error'}
     }
-    $stateDirectory='stdout oversize';$failure=$null
-    try{Read-NativeStatus|Out-Null}catch{$failure=$_.Exception.Message}
-    if($failure -cne 'status_failed'){throw 'status_transport_stdout_cap_failed'}
+    foreach($stage in @('status','status_upgrade_initial','status_upgrade_stopped','status_upgrade_restarted')){
+        $stateDirectory='stdout oversize';$failure=$null
+        try{Read-NativeStatus -DiagnosticStage $stage|Out-Null}catch{$failure=$_.Exception.Message}
+        if($failure -cne 'status_failed' -or $script:AgentInnerDiagnostic.stage -cne $stage){throw 'status_transport_stdout_cap_failed'}
+    }
 } finally{
     $target=[IO.Path]::GetFullPath($transportRoot)
     if([IO.Path]::GetDirectoryName($target) -cne [IO.Path]::GetTempPath().TrimEnd('\') -or [IO.Path]::GetFileName($target) -cnotmatch '^aegis-status-diagnostic-[0-9a-f]{32}$'){throw 'status_transport_cleanup_path_invalid'}
@@ -137,4 +169,4 @@ try {
         if ($scenario -ne 'leak' -and ($outText.Trim() -ne '' -or $errText.Trim() -cne '{"stage":"installer","code":"state_invalid"}')) { throw 'Diagnostic child exposed raw failure text' }
     }
 } finally { if(Test-Path -LiteralPath $testPackage){Remove-Item -LiteralPath $testPackage -Recurse -Force} }
-Write-Output '40 safe Windows diagnostic contracts passed; no SCM call made'
+Write-Output 'Safe Windows diagnostic contracts passed, including all three upgrade status sites; no SCM call made'
