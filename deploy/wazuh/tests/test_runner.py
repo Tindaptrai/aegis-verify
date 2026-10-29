@@ -552,6 +552,74 @@ class NativeFixtureSafety(unittest.TestCase):
                 exec(code, env)
             self.assertNotIn("restart", [a[0] for a in actions])
 
+    def test_mixed_first_stop_failure_preserves_error_and_closed_snapshot(self):
+        from deploy.wazuh.tests import test_native as native
+        tree = ast.parse(Path(native.__file__).read_text(encoding="utf-8"))
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "dependency_observations")
+        branch = next(n for n in ast.walk(function) if isinstance(n, ast.If) and isinstance(n.test, ast.Name) and n.test.id == "propagated")
+        code = compile(ast.Module(body=branch.body, type_ignores=[]), "mixed-stop-failure", "exec")
+        fields = ("LoadState", "ActiveState", "SubState", "ActiveEnterTimestampMonotonic",
+                  "ExecMainStartTimestampMonotonic", "InactiveEnterTimestampMonotonic")
+        raw = b"LoadState=loaded\nActiveState=active\nSubState=exited\nActiveEnterTimestampMonotonic=50\nExecMainStartTimestampMonotonic=40\nInactiveEnterTimestampMonotonic=30\n"
+        for fault in ("none", "unsafe", "query", "unexpected", "nonmixed", "second_wait", "success"):
+            actions, queries, waits, item = [], [], [], {"refused": True}
+            original = AssertionError("propagation_observation_timeout")
+            def systemctl(*args, **kwargs):
+                if args[0] in {"start", "stop", "restart"}:
+                    actions.append(args)
+                if args[0] == "show" and "--all" in args:
+                    queries.append((args, kwargs))
+                    if fault == "query": raise OSError("private-query-error")
+                    if fault == "unexpected": raise RuntimeError("private-unexpected-error")
+                    return SimpleNamespace(stdout=raw if fault != "unsafe" else b"LoadState=private-state\nActiveEnterTimestampMonotonic=private-timestamp\nUnit=private-unit\n")
+                return SimpleNamespace(stdout=b"active" if args[0] == "is-active" else b"50")
+            def wait(*args, **kwargs):
+                waits.append((args, kwargs))
+                if fault != "success" and (fault != "second_wait" or len(waits) == 2):
+                    raise original
+            fixture = SimpleNamespace(test=self, systemctl=systemctl)
+            env = dict(vars(native), fixture=fixture, case="direct_guard" if fault == "nonmixed" else "mixed",
+                       ufw="private-wrapper", indexer="private-indexer", guard="private-guard", bridge="private-bridge",
+                       mapping=dict(ufw="private-wrapper", indexer="private-indexer", guard="private-guard", bridge="private-bridge"),
+                       item=item, wait_propagated_state=wait)
+            with self.subTest(fault=fault):
+                if fault == "success":
+                    exec(code, env)
+                else:
+                    with self.assertRaises(AssertionError) as caught:
+                        exec(code, env)
+                    self.assertIs(caught.exception, original)
+                if fault in {"nonmixed", "second_wait", "success"}:
+                    self.assertNotIn("failure", item)
+                    self.assertEqual(queries, [])
+                    continue
+                self.assertEqual([a[0] for a in actions], ["start", "stop"])
+                self.assertEqual(actions[-1], ("stop", "private-guard"))
+                self.assertEqual(len(waits), 1)
+                self.assertNotIn("propagation_verified", item)
+                failure = item["failure"]
+                self.assertEqual(set(failure), {"phase", "units"})
+                self.assertEqual(failure["phase"], "source_stop")
+                self.assertEqual(set(failure["units"]), {"wrapper", "guard", "indexer", "bridge"})
+                self.assertEqual([q[0][1] for q in queries], ["private-" + role for role in failure["units"]])
+                for args, kwargs in queries:
+                    self.assertEqual(args[0], "show")
+                    self.assertEqual(args[2:], ("--all", "--property=" + ",".join(fields)))
+                    self.assertEqual(kwargs, {"timeout": 2})
+                expected = dict(zip(fields, ("loaded", "active", "exited", 50, 40, 30))) if fault == "none" else dict.fromkeys(fields, "unavailable")
+                self.assertEqual(failure["units"], dict.fromkeys(("wrapper", "guard", "indexer", "bridge"), expected))
+                self.assertNotIn("private", json.dumps(failure))
+                gate = RunnerTests().runner()
+                proof = RunnerTests().observation_fixture(gate)
+                identity = gate.NATIVE_MODULE + ".NativeTests.test_ufw_disabled_wrapper_preserved"
+                mixed = proof[identity]["dependency_cases"]["mixed"]
+                mixed["failure"] = failure
+                with self.assertRaises(ValueError):
+                    gate.validate_native_observations(proof)
+                mixed.pop("propagation_verified")
+                with self.assertRaises(ValueError):
+                    gate.validate_native_observations(proof)
+
     def test_mixed_probe_keeps_active_context_and_partial_actual_evidence(self):
         from deploy.wazuh.tests import test_native as native
         tree = ast.parse(Path(native.__file__).read_text(encoding="utf-8"))

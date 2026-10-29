@@ -883,7 +883,20 @@ TimeoutStopSec=5
             fixture.test.assertEqual(fixture.systemctl("is-active", ufw).stdout.strip(), b"active")
             source = indexer if case == "direct_indexer" else guard
             fixture.systemctl("stop", source)
-            wait_propagated_state(fixture, ufw)
+            try:
+                wait_propagated_state(fixture, ufw)
+            except AssertionError:
+                if case == "mixed":
+                    failure = item["failure"] = dict(phase="source_stop", units={})
+                    for role, unit in (("wrapper", ufw), ("guard", guard), ("indexer", indexer), ("bridge", bridge)):
+                        try:
+                            failure["units"][role] = stop_unit_sample(fixture, unit)
+                        except Exception:
+                            # Diagnostic failure must never replace the original assertion.
+                            failure["units"][role] = dict.fromkeys(("LoadState", "ActiveState", "SubState",
+                                "ActiveEnterTimestampMonotonic", "ExecMainStartTimestampMonotonic",
+                                "InactiveEnterTimestampMonotonic"), "unavailable")
+                raise
             # Restart propagation gets separate evidence with both units active.
             fixture.systemctl("start", *mapping.values())
             before_raw = fixture.systemctl("show", ufw, "--property=ActiveEnterTimestampMonotonic", "--value", timeout=1).stdout.strip()
