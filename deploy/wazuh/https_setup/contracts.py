@@ -21,7 +21,7 @@ class SetupError(Exception):
                 "state_changed", "operation_locked", "intent_exists",
                 "recovery_required", "verification_failed", "manifest_invalid",
                 "installed_only", "root_required", "command_failed", "no_intent",
-                "vendor_drift", "filesystem_unsupported"}
+                "vendor_drift", "filesystem_unsupported", "ufw_unsupported", "ufw_drift"}
         self.code = code if code in safe else "setup_failed"
         super().__init__(self.code)
 
