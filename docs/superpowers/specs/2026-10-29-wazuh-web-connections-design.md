@@ -1,6 +1,7 @@
 # Kết nối Wazuh qua web và phục hồi kết nối agent
 
-Ngày: 2026-10-29. Trạng thái: đề xuất cụ thể, chờ chủ sản phẩm duyệt.
+Ngày: 2026-10-29. Trạng thái: chủ sản phẩm duyệt thiết kế và giao triển khai
+lát 1 cho Wazuh 4.14.4 kèm hướng dẫn account đọc/public CA ngày 2026-10-29.
 Mốc nguồn đã đối chiếu: `ae7399b84c6a276dc7145e056ad33e6a7417ef89`.
 
 ## Mục đích và lựa chọn
@@ -103,7 +104,7 @@ API kiểm session generation, quyền hiện tại, CSRF và optimistic concurr
 
 Bổ sung từ phản hồi chủ sản phẩm ngày 2026-10-29: cần trang hướng dẫn riêng,
 có ảnh theo phiên bản SIEM, cách tạo tài khoản/quyền và lấy public CA. Phần
-này còn chờ duyệt cùng thiết kế tổng thể; không có connector live mới được
+này được duyệt cùng thiết kế tổng thể; không có connector live mới được
 triển khai chỉ do bổ sung tài liệu.
 
 Chọn cách kết hợp: một mục **Hướng dẫn tích hợp** dùng ngay trong Manager,
