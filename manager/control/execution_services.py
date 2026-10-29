@@ -103,6 +103,9 @@ def _definition(release):
 
 
 def _connection(connection_id, revision):
+    from connections.services import is_managed_registration
+    if is_managed_registration(connection_id):
+        raise wire.ExecutionError('binding_conflict')
     connection = RegisteredExecutionConnection.objects.filter(connection_id=connection_id).order_by('-revision').first()
     if connection is None or connection.revision != revision:
         raise wire.ExecutionError('binding_conflict')

@@ -6,6 +6,7 @@ from devices.urls import human_urls, human_v2_urls, machine_urls
 from control.execution_urls import human_urls as execution_human_urls, machine_urls as execution_machine_urls
 
 urlpatterns = [path("", RedirectView.as_view(url="/manager/", permanent=False)),
+               path("api/v1/connections/", include("connections.urls")),
                path("api/v1/", include(execution_human_urls)),
                path("agent/v2/execution/", include(execution_machine_urls)),
                path("manager/", manager_shell), path("admin/", admin.site.urls),

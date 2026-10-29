@@ -7,8 +7,11 @@ USE_TZ = True
 TIME_ZONE = "UTC"
 STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+INSTALLED_APPS += ["connections.apps.ConnectionsConfig"]
+MIDDLEWARE.insert(MIDDLEWARE.index("django.middleware.csrf.CsrfViewMiddleware"), "connections.middleware.ConnectionBodyMiddleware")
 DATA_UPLOAD_MAX_MEMORY_SIZE = 65536
 ENROLLMENT_CA_KEY = None
 ENROLLMENT_CA_CERT = None
 import os
 MANAGER_EXECUTION_SIGNING_KEY = os.environ.get('AEGIS_MANAGER_EXECUTION_SIGNING_KEY') or None
+CONNECTION_POLICY = os.environ.get('AEGIS_MANAGER_CONNECTION_POLICY') or None

@@ -410,3 +410,5 @@ References hãng hỗ trợ nghiên cứu hướng dẫn; chưa là ma trận t�
 Các quyết định nhỏ còn lại giao người triển khai: tên model/route theo conventions
 của repo, chia test file và bố trí CSS. Các ranh giới authority, versioning,
 worker lifecycle và không tự thực thi ở trên phải được giữ nguyên.
+
+Slice-1 implementation constraint (2026-10-29): new onboarding supports explicitly pinned private/global IPv4 and globally routable IPv6 only, after rejecting loopback, link-local, unspecified, multicast and mapped addresses. Shared IPv4 space and non-global IPv6, including ULA, fail closed even if listed. This deliberately excludes CGNAT/ULA compatibility without embedding vendor metadata addresses or claiming exhaustive future metadata classification. The existing legacy path is unchanged.
