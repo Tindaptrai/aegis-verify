@@ -53,6 +53,10 @@ Reader dùng chung giải mã đúng một lớp quote/backslash của mảng st
 Chỉ nhận biểu diễn canonical, đúng 18 thuộc tính và các giới hạn hiện có;
 quote lỗi, tên trùng hoặc dữ liệu không hợp lệ đều bị từ chối, không bỏ edge.
 Cùng mapper phải admit baseline an toàn trước khi thêm dependency để thử refusal.
+Riêng mixed giữ bridge sở hữu active từ baseline chưa khai báo dependency đến probe hostile,
+không thêm edge; phải quan sát đủ Requires/RequiredBy và PropagatesStopTo/StopPropagatedFrom.
+Proof mixed bắt buộc có context sáu cờ đúng; facts của case đang chạy được giữ trước
+assertion, còn refused/propagation chỉ ghi sau khi đã chứng minh, partial proof vẫn fail.
 Giữ sáu case cũ và thêm `conflict_indexer`, `conflict_guard`, `conflict_stop`:
 restart unit sở hữu kéo relay qua Wants; conflict của relay dừng wrapper giả
 trực tiếp hoặc qua PartOf. Case guard giữ cả inverse ConflictedBy thực. Proof

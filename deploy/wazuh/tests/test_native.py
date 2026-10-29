@@ -793,7 +793,14 @@ TimeoutStopSec=5
                  "conflict_indexer", "conflict_guard", "conflict_stop"):
         mapping = {role: f"aegis-native-{fixture.token}-dep-{case}-{name}.service"
                    for role, name in (("ufw.service", "ufw"), (uh.INDEXER, "indexer"), (uh.GUARD, "guard"), ("bridge.service", "bridge"))}
+        item = observations[case] = {"mapping": mapping}
         ufw, indexer, guard, bridge = (mapping[k] for k in ("ufw.service", uh.INDEXER, uh.GUARD, "bridge.service"))
+        def record_bridge_active(key):
+            sample = stop_unit_sample(fixture, bridge)
+            item["mixed_context"][key] = all(sample[field] == value for field, value in
+                                            (("LoadState", "loaded"), ("ActiveState", "active"), ("SubState", "exited")))
+            if not item["mixed_context"][key]:
+                raise AssertionError("mixed_context_required")
         relations = {name: "" for name in mapping.values()}
         if case.startswith("direct_"):
             relations[ufw] = "Requires=" + (indexer if case == "direct_indexer" else guard)
@@ -823,21 +830,41 @@ TimeoutStopSec=5
             fixture.test.assertEqual(fixture.unit(role, base.format(relations="")), name)
             paths[name] = fixture.units[-1][1]
         fixture.systemctl("daemon-reload")
+        if case == "mixed":
+            item["mixed_context"] = {}
+            fixture.systemctl("start", bridge)  # empty authored relations; retain the same unit across both probes
+            record_bridge_active("bridge_active_baseline")
         actual = h.LinuxHost()
         baseline = MappedDependencyHost(actual, mapping)
         uh.UfwHostReader(baseline).dependency_facts()  # same complete mapper must admit the safe control
         baseline_proof = {"identity_mapping": baseline.mapping.queries,
                           "raw_facts_sha256": tx.digest(baseline.raw), "admitted": True}
+        item["baseline"] = baseline_proof
         if case.startswith("conflict_"):
             # Establish the exact safe active UFW + inactive relay state first.
             fixture.systemctl("start", ufw, source, *([guard] if case == "conflict_stop" else []))
         for name, relation in relations.items():
             replace_fixture_file(Path("/run/systemd/system"), paths[name], base.format(relations=relation).encode(), 0o644)
         fixture.systemctl("daemon-reload")
+        if case == "mixed":
+            record_bridge_active("bridge_active_hostile")
         raw = {name: actual.dependency_properties(name) for name in mapping.values()}
+        item["facts"] = {name: {key: sorted(value.split()) for key, value in facts.items()} for name, facts in raw.items()}
         hostile = MappedDependencyHost(actual, mapping)
-        with fixture.test.assertRaisesRegex(SetupError, "ufw_unsupported"):
-            uh.UfwHostReader(hostile).dependency_facts()
+        try:
+            if case == "mixed":
+                item["mixed_context"].update(
+                    bridge_requires_guard=guard in raw[bridge]["Requires"].split(),
+                    bridge_propagates_stop_to_wrapper=ufw in raw[bridge]["PropagatesStopTo"].split(),
+                    guard_required_by_bridge=bridge in raw[guard]["RequiredBy"].split(),
+                    wrapper_stop_propagated_from_bridge=bridge in raw[ufw]["StopPropagatedFrom"].split())
+                if not all(item["mixed_context"].values()):
+                    raise AssertionError("mixed_context_required")
+            with fixture.test.assertRaisesRegex(SetupError, "ufw_unsupported"):
+                uh.UfwHostReader(hostile).dependency_facts()
+            item["refused"] = True
+        finally:
+            item.update(identity_mapping=hostile.mapping.queries, raw_facts_sha256=tx.digest(hostile.raw))
         propagated = case not in {"activation", "ordering"}
         lifecycle = {}
         if case.startswith("conflict_"):
@@ -869,13 +896,9 @@ TimeoutStopSec=5
                 wait_propagated_state(fixture, ufw)
             else:
                 wait_propagated_state(fixture, ufw, after=before)
-        observations[case] = {"mapping": mapping, "facts": {name: {key: sorted(value.split()) for key, value in facts.items()} for name, facts in raw.items()},
-                              "refused": True, "propagation_verified": propagated,
-                              "baseline": baseline_proof,
-                              "identity_mapping": hostile.mapping.queries,
-                              "raw_facts_sha256": tx.digest(hostile.raw)}
+        item["propagation_verified"] = propagated
         if lifecycle:
-            observations[case]["lifecycle"] = lifecycle
+            item["lifecycle"] = lifecycle
         fixture.systemctl("stop", *mapping.values())
         # Remove hostile edges before the next safe control, retaining owned units for teardown.
         for path in paths.values():

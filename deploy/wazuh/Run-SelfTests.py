@@ -266,7 +266,12 @@ def validate_native_observations(observations):
     from deploy.wazuh.https_setup.ufw_host import DEPENDENCIES
     for name, case in cases.items():
         require(set(case) == {"mapping", "facts", "refused", "propagation_verified", "baseline", "identity_mapping", "raw_facts_sha256"} |
-                ({"lifecycle"} if name.startswith("conflict_") else set()) and case["refused"] is True)
+                ({"lifecycle"} if name.startswith("conflict_") else {"mixed_context"} if name == "mixed" else set()) and case["refused"] is True)
+        if name == "mixed":
+            context = case["mixed_context"]
+            require(type(context) is dict and set(context) == {"bridge_active_baseline", "bridge_active_hostile",
+                "bridge_requires_guard", "bridge_propagates_stop_to_wrapper", "guard_required_by_bridge", "wrapper_stop_propagated_from_bridge"})
+            require(all(value is True for value in context.values()))
         if name.startswith("conflict_"):
             require(type(case["lifecycle"]) is dict and set(case["lifecycle"]) == {
                 "source_active_before", "wrapper_active_before", "relay_inactive_before", "relay_active_after", "wrapper_inactive_after"})
@@ -300,6 +305,8 @@ def validate_native_observations(observations):
         elif name in {"transitive", "mixed"}:
             require(guard in facts["bridge.service"]["Requires"])
             require(bridge in facts["ufw.service"]["Requires"] if name == "transitive" else ufw in facts["bridge.service"]["PropagatesStopTo"])
+            if name == "mixed":
+                require(bridge in facts["aegis-wazuh-http-guard.service"]["RequiredBy"] and bridge in facts["ufw.service"]["StopPropagatedFrom"])
         elif name == "activation":
             require(ufw in facts["aegis-wazuh-http-guard.service"]["Wants"])
         elif name.startswith("conflict_"):

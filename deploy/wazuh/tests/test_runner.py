@@ -182,7 +182,10 @@ class RunnerTests(unittest.TestCase):
             elif name in {"transitive", "mixed"}:
                 edge("bridge.service", "Requires", ufw_host.GUARD)
                 if name == "transitive": edge("ufw.service", "Requires", "bridge.service")
-                else: edge("bridge.service", "PropagatesStopTo", "ufw.service")
+                else:
+                    edge("bridge.service", "PropagatesStopTo", "ufw.service")
+                    edge(ufw_host.GUARD, "RequiredBy", "bridge.service")
+                    edge("ufw.service", "StopPropagatedFrom", "bridge.service")
             elif name == "activation": edge(ufw_host.GUARD, "Wants", "ufw.service")
             elif name.startswith("conflict_"):
                 edge(ufw_host.GUARD if name == "conflict_guard" else ufw_host.INDEXER, "Wants", "bridge.service")
@@ -197,6 +200,10 @@ class RunnerTests(unittest.TestCase):
             if name.startswith("conflict_"):
                 cases[name]["lifecycle"] = dict(source_active_before=True, wrapper_active_before=True,
                     relay_inactive_before=True, relay_active_after=True, wrapper_inactive_after=True)
+            if name == "mixed":
+                cases[name]["mixed_context"] = dict(bridge_active_baseline=True, bridge_active_hostile=True,
+                    bridge_requires_guard=True, bridge_propagates_stop_to_wrapper=True,
+                    guard_required_by_bridge=True, wrapper_stop_propagated_from_bridge=True)
         bus = {key: {"type": signature, "data": []} for key, signature in ufw.EMPTY_ARRAYS.items()}
         bus["Job"] = {"type": "(uo)", "data": [0, "/"]}
         for key, args in (("ExecStartEx", ["start", "quiet"]), ("ExecStopEx", ["stop"])):
@@ -332,6 +339,29 @@ class RunnerTests(unittest.TestCase):
         for commit in (None, "HEAD", "a" * 39, "A" * 40, "a" * 41):
             with self.subTest(commit=commit), self.assertRaisesRegex(ValueError, "source_commit_required"):
                 module.source_snapshot(commit)
+
+    def test_mixed_context_is_required_exact_and_backed_by_actual_facts(self):
+        gate = self.runner()
+        observations = self.observation_fixture(gate)
+        identity = gate.NATIVE_MODULE + ".NativeTests.test_ufw_disabled_wrapper_preserved"
+        gate.validate_native_observations(observations)
+        original = observations[identity]["dependency_cases"]["mixed"]
+        mutations = [lambda case: case.pop("mixed_context"),
+                     lambda case: case["mixed_context"].__setitem__("extra", True)]
+        for value in (None, [], "active"):
+            mutations.append(lambda case, v=value: case.__setitem__("mixed_context", v))
+        for key in original["mixed_context"]:
+            mutations.append(lambda case, k=key: case["mixed_context"].pop(k))
+            for value in (False, 1, "true", None):
+                mutations.append(lambda case, k=key, v=value: case["mixed_context"].__setitem__(k, v))
+        for role, relation in (("bridge.service", "Requires"), ("bridge.service", "PropagatesStopTo"),
+                               ("aegis-wazuh-http-guard.service", "RequiredBy"), ("ufw.service", "StopPropagatedFrom")):
+            mutations.append(lambda case, r=role, p=relation: case["facts"][case["mapping"][r]].__setitem__(p, []))
+        for mutate in mutations:
+            changed = copy.deepcopy(observations)
+            mutate(changed[identity]["dependency_cases"]["mixed"])
+            with self.assertRaises(ValueError):
+                gate.validate_native_observations(changed)
 
     def test_proof_scope_names_relocations_without_vendor_claim(self):
         module = self.runner()
@@ -521,6 +551,107 @@ class NativeFixtureSafety(unittest.TestCase):
             with self.subTest(before=raw), self.assertRaisesRegex(AssertionError, "^propagation_observation_invalid$"):
                 exec(code, env)
             self.assertNotIn("restart", [a[0] for a in actions])
+
+    def test_mixed_probe_keeps_active_context_and_partial_actual_evidence(self):
+        from deploy.wazuh.tests import test_native as native
+        tree = ast.parse(Path(native.__file__).read_text(encoding="utf-8"))
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "dependency_observations")
+        loop = next(n for n in function.body if isinstance(n, ast.For))
+        loop.iter = ast.Tuple(elts=[ast.Constant("mixed")], ctx=ast.Load())
+        code = compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])), "mixed-probe", "exec")
+        for fault in (None, "baseline_inactive", "hostile_inactive", "Requires", "PropagatesStopTo",
+                      "RequiredBy", "StopPropagatedFrom", "admitted"):
+            records, actions, probes, observation = {}, [], [], {}
+            state = dict(bridge=False, wrapper="inactive")
+            fixture = SimpleNamespace(test=self, token="0123456789ab", units=[])
+            def unit(role, body):
+                name = "aegis-native-" + fixture.token + "-" + role + ".service"
+                self.assertNotIn("Requires=", body)
+                self.assertNotIn("PropagatesStopTo=", body)
+                self.assertFalse(any(line.partition("=")[0] in native.uh.DEPENDENCIES and line.partition("=")[2]
+                                     for line in body.splitlines()))
+                fixture.units.append((name, Path("/run/systemd/system") / name))
+                records[name] = {key: "" for key in native.uh.DEPENDENCIES}
+                return name
+            fixture.unit = unit
+            def systemctl(*args, **kwargs):
+                if args[0] in {"start", "stop", "restart"}:
+                    self.assertTrue(set(args[1:]) <= set(records))
+                    actions.append(args)
+                    if args[0] == "start":
+                        state.update(bridge=fault != "baseline_inactive", wrapper="active" if len(args) > 2 else "inactive")
+                    else: state["wrapper"] = "inactive"
+                    return SimpleNamespace(stdout=b"")
+                if args[0] == "daemon-reload": return SimpleNamespace(stdout=b"")
+                if args[0] == "is-active": return SimpleNamespace(stdout=b"active")
+                if args[1].endswith("-bridge.service"):
+                    hostile = any(row["Requires"] for row in records.values())
+                    active = state["bridge"] and not (fault == "hostile_inactive" and hostile)
+                    return SimpleNamespace(stdout=("LoadState=loaded\nActiveState=" + ("active" if active else "inactive") + "\nSubState=" + ("exited" if active else "dead") + "\n").encode())
+                if "--value" in args:
+                    return SimpleNamespace(stdout=b"50" if "--property=ActiveEnterTimestampMonotonic" in args else state["wrapper"].encode())
+                return SimpleNamespace(stdout=f"ActiveState={state['wrapper']}\nActiveEnterTimestampMonotonic=50\n".encode())
+            fixture.systemctl = systemctl
+            def rewrite(root, path, body, mode):
+                row = records[path.name]
+                for key in row: row[key] = ""
+                for line in body.decode().splitlines():
+                    key, _, value = line.partition("=")
+                    if key in row: row[key] = value
+            def properties(name):
+                row = dict(records[name])
+                for source, outgoing in records.items():
+                    if state["bridge"] and name in outgoing["Requires"].split(): row["RequiredBy"] = source
+                    if state["bridge"] and name in outgoing["PropagatesStopTo"].split(): row["StopPropagatedFrom"] = source
+                if fault in row: row[fault] = ""
+                return row
+            actual = SimpleNamespace(properties=lambda *args: {"LoadState": "loaded"}, dependency_properties=properties)
+            def reader(host):
+                actual_reader = native.uh.UfwHostReader(host)
+                def read():
+                    probes.append("hostile" if any(row["Requires"] for row in records.values()) else "baseline")
+                    self.assertTrue(state["bridge"])
+                    authored = {name: {key: value for key, value in row.items() if value} for name, row in records.items()}
+                    expected = {name: {} for name in records}
+                    if probes[-1] == "hostile":
+                        expected[host.mapping.actual("bridge.service")] = {
+                            "Requires": host.mapping.actual(native.uh.GUARD),
+                            "PropagatesStopTo": host.mapping.actual("ufw.service")}
+                    self.assertEqual(authored, expected)
+                    if fault == "admitted" and probes[-1] == "hostile":
+                        for logical in list(host.mapping.queries): host.dependency_properties(logical)
+                        return {}
+                    return actual_reader.dependency_facts()
+                return SimpleNamespace(dependency_facts=read)
+            env = dict(vars(native), OBSERVATIONS=observation, h=SimpleNamespace(LinuxHost=lambda: actual),
+                       uh=SimpleNamespace(GUARD=native.uh.GUARD, INDEXER=native.uh.INDEXER,
+                                          DEPENDENCIES=native.uh.DEPENDENCIES, UfwHostReader=reader),
+                       replace_fixture_file=rewrite)
+            exec(code, env)
+            with self.subTest(fault=fault):
+                if fault is None: env["dependency_observations"](fixture)
+                else:
+                    with self.assertRaisesRegex(AssertionError, "SetupError not raised" if fault == "admitted" else "mixed_context_required"):
+                        env["dependency_observations"](fixture)
+                item = observation[self.id()]["dependency_cases"]["mixed"]
+                bridge = item["mapping"]["bridge.service"]
+                self.assertEqual(actions[0], ("start", bridge))
+                if fault is None:
+                    self.assertEqual(probes, ["baseline", "hostile"])
+                    self.assertTrue(item["refused"] and item["propagation_verified"])
+                    self.assertTrue(all(v is True for v in item["mixed_context"].values()))
+                else:
+                    self.assertNotIn("refused", item)
+                    self.assertNotIn("propagation_verified", item)
+                    self.assertEqual(probes, [] if fault == "baseline_inactive" else ["baseline", "hostile"] if fault == "admitted" else ["baseline"])
+                    if fault == "admitted":
+                        self.assertEqual(set(item["facts"]), set(item["mapping"].values()))
+                        self.assertEqual(item["raw_facts_sha256"], native.tx.digest({name: {key: sorted(value.split()) for key, value in properties(name).items()} for name in records}))
+                        gate = RunnerTests().runner()
+                        proof = RunnerTests().observation_fixture(gate)
+                        identity = gate.NATIVE_MODULE + ".NativeTests.test_ufw_disabled_wrapper_preserved"
+                        proof[identity]["dependency_cases"]["mixed"] = item
+                        with self.assertRaises(ValueError): gate.validate_native_observations(proof)
 
     def test_completed_probe_observations_survive_later_fixture_failure(self):
         from deploy.wazuh.tests import test_native as native
