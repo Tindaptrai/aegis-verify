@@ -58,6 +58,19 @@ disposable `/usr/bin/true`, không thao tác vendor wrapper hoặc UFW thật.
 Unit ngoài fixture chỉ được đọc; start/stop/restart/reload chỉ chấp nhận danh sách
 unit fixture đã sở hữu, không dùng alias để gửi action tới UFW thật.
 
+Đo stop order dùng một observer oneshot `/usr/bin/true` sở hữu, active/exited,
+`DefaultDependencies=no`, chỉ khai báo `After=` ba unit được đo. Output null tránh
+dependency journal socket. Effective graph phải đúng ba After cộng `system.slice`,
+Requires chỉ `system.slice` do systemd tự thêm cho service; mọi dependency khác
+phải rỗng. Không gửi action tới slice. Observer giữ runtime timestamp khỏi GC,
+không kích hoạt/dừng ba unit và không thêm thứ tự giữa chúng; giữ nguyên một stop
+transaction và so sánh timestamp dương Indexer <= guard <= wrapper. GC của lần CI
+thất bại trước vẫn là giả thuyết, không phải quan sát. JSON assertion khi đo lỗi
+chỉ giữ role/state/timestamp đã lọc. Resource/check/operation đã hoàn thành được
+giữ ngay trong proof hiện có nếu bước sau lỗi; partial proof vẫn không qualify.
+Case conflict chỉ restart source một lần rồi poll read-only có deadline để đợi
+relay active và wrapper inactive; timeout phải fail, không dùng sleep làm bằng chứng order.
+
 Proof tách hành vi vendor/packet/order thực; file/backend/typed D-Bus thực; và
 admission dương qua reader tổng hợp. RootDirectory/FragmentPath khác stock phải
 bị classifier production từ chối, không sửa facts để giả stock. Reader tổng hợp

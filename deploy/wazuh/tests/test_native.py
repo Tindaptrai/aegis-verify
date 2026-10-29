@@ -383,7 +383,7 @@ class NetworkFixture:
         self.unit_roles[full_name] = name
         return full_name
 
-    def systemctl(self, *args, check=True):
+    def systemctl(self, *args, check=True, timeout=25):
         actions = {"start", "stop", "restart", "reload", "reset-failed"}
         if not args or args[0] not in actions | {"show", "is-active", "daemon-reload"}:
             raise AssertionError("owned_unit_action_required")
@@ -391,7 +391,7 @@ class NetworkFixture:
             owned = {name for name, _ in self.units}
             if len(args) < 2 or any(name not in owned for name in args[1:]):
                 raise AssertionError("owned_unit_action_required")
-        result = command("systemctl", *args, check=False, timeout=25)
+        result = command("systemctl", *args, check=False, timeout=timeout)
         if check and result.returncode:
             self.capture_service_failure()
             raise AssertionError("native command failed: systemctl")
@@ -646,9 +646,107 @@ class MappedDependencyHost:
         return {key: " ".join(self.mapping.logical(name) for name in value.split()) for key, value in values.items()}
 
 
+def stop_participants(fixture, mapping):
+    if (set(mapping) != {"ufw.service", uh.GUARD, uh.INDEXER} or len(set(mapping.values())) != 3 or
+            not set(mapping.values()) <= {name for name, _ in fixture.units}):
+        raise AssertionError("owned_stop_participants_required")
+    return tuple(mapping[role] for role in ("ufw.service", uh.GUARD, uh.INDEXER))
+
+
+def make_stop_observer(fixture, mapping):
+    participants = stop_participants(fixture, mapping)
+    # Active After references retain stopped units' runtime timestamps in v255.
+    # Null output avoids the journal socket dependency of a journal-output service.
+    return fixture.unit("stop-observer", "[Unit]\nDefaultDependencies=no\nAfter=" + " ".join(participants) + '''
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/true
+StandardOutput=null
+StandardError=null
+TimeoutStartSec=10
+TimeoutStopSec=5
+''')
+
+
+def stop_unit_sample(fixture, unit):
+    states = {"LoadState": {"loaded", "not-found", "error", "masked", "stub", "bad-setting", "merged"},
+              "ActiveState": {"active", "inactive", "activating", "deactivating", "failed", "reloading", "maintenance"},
+              "SubState": {"running", "exited", "dead", "failed", "start", "start-pre", "start-post", "stop", "stop-post", "stop-sigterm", "stop-sigkill"}}
+    times = ("ActiveEnterTimestampMonotonic", "ExecMainStartTimestampMonotonic", "InactiveEnterTimestampMonotonic")
+    sample = {key: "unavailable" for key in (*states, *times)}
+    try:
+        raw = fixture.systemctl("show", unit, "--all", "--property=" + ",".join(sample), timeout=2).stdout
+        if len(raw) > 4096:
+            return sample
+        pairs = [line.split("=", 1) for line in raw.decode("ascii").splitlines()]
+        values = dict(pairs)
+        if len(pairs) != len(values):
+            return sample
+        for key, allowed in states.items():
+            if values.get(key) in allowed:
+                sample[key] = values[key]
+        for key in times:
+            value = values.get(key, "")
+            if re.fullmatch(r"[0-9]{1,20}", value) and int(value) < 2**64:
+                sample[key] = int(value)
+    except (OSError, AssertionError, subprocess.SubprocessError, ValueError, UnicodeError):
+        pass
+    return sample
+
+
+def measure_retained_stop(fixture, mapping, observer):
+    participants = stop_participants(fixture, mapping)
+    if (observer != "aegis-native-" + fixture.token + "-stop-observer.service" or
+            observer not in {name for name, _ in fixture.units}):
+        raise AssertionError("owned_stop_observer_required")
+    host = h.LinuxHost()
+    # Keep actual effective facts intact. A service intrinsically requires/orders
+    # after its slice even with DefaultDependencies=no; no other edge is admitted.
+    relations = host.dependency_properties(observer)
+    expected = {key: [] for key in uh.DEPENDENCIES}
+    expected.update(After=sorted([*participants, "system.slice"]), Requires=["system.slice"])
+    if (host.properties(observer, ("Slice",)) != {"Slice": "system.slice"} or
+            {key: sorted(value.split()) for key, value in relations.items()} != expected):
+        raise AssertionError("stop_observer_relations_required")
+    roles = dict(zip(("wrapper", "guard", "indexer"), participants))
+    samples = {role: stop_unit_sample(fixture, unit) for role, unit in roles.items()}
+    if any(row["LoadState"] != "loaded" or row["ActiveState"] != "active" for row in samples.values()):
+        raise AssertionError(tx.encoded(dict(stage="stop_participants_active", units=samples)).decode("ascii"))
+    fixture.systemctl("start", observer)
+    def observer_active():
+        samples["observer"] = stop_unit_sample(fixture, observer)
+        return all(samples["observer"][key] == value for key, value in
+                   (("LoadState", "loaded"), ("ActiveState", "active"), ("SubState", "exited")))
+    if not observer_active():
+        raise AssertionError(tx.encoded(dict(stage="stop_observer_active", units=samples)).decode("ascii"))
+    fixture.systemctl("stop", *participants)  # unchanged single measured transaction
+    retained = True
+    for role, unit in roles.items():
+        retained = observer_active() and retained
+        samples[role] = stop_unit_sample(fixture, unit)
+    retained = observer_active() and retained
+    values = [samples[role]["InactiveEnterTimestampMonotonic"] for role in ("indexer", "guard", "wrapper")]
+    if (not retained or any(samples[role]["LoadState"] != "loaded" or samples[role]["ActiveState"] != "inactive" for role in roles) or
+            not all(type(value) is int and value > 0 for value in values) or not values[0] <= values[1] <= values[2]):
+        raise AssertionError(tx.encoded(dict(stage="concurrent_stop_order", units=samples)).decode("ascii"))
+    fixture.systemctl("stop", observer)  # release references; tracked teardown also covers failure
+
+
+def wait_conflict_states(fixture, relay, wrapper):
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        states = [fixture.systemctl("show", unit, "--property=ActiveState", "--value", timeout=1).stdout.strip()
+                  for unit in (relay, wrapper)]
+        if states == [b"active", b"inactive"]:
+            return
+        time.sleep(0.1)
+    raise AssertionError("conflict_states_timeout")
+
+
 def dependency_observations(fixture):
     """Actual D-Bus/systemctl graph and propagation; only disposable true units."""
-    observations = {}
+    observations = OBSERVATIONS.setdefault(fixture.test.id(), {}).setdefault("dependency_cases", {})
     base = '''[Unit]
 DefaultDependencies=no
 {relations}
@@ -717,8 +815,7 @@ TimeoutStopSec=5
             fixture.test.assertEqual(state(ufw), b"active")
             fixture.test.assertEqual(state(bridge), b"inactive")
             fixture.systemctl("restart", source)
-            fixture.test.assertEqual(state(bridge), b"active")
-            fixture.test.assertEqual(state(ufw), b"inactive")
+            wait_conflict_states(fixture, bridge, ufw)
             lifecycle = dict(source_active_before=True, wrapper_active_before=True, relay_inactive_before=True,
                              relay_active_after=True, wrapper_inactive_after=True)
         elif propagated:
@@ -1589,7 +1686,9 @@ ExecStart=+/usr/bin/python3 -I -B {entry} guard-ensure --profile {profile_path}
         spec.loader.exec_module(gate)
         real_before = real_ufw_baseline()
         with network_fixture(self) as fixture:
-            checks, operations = {}, {}
+            observation = OBSERVATIONS.setdefault(self.id(), {})
+            checks, operations, nft_observations = {}, {}, {}
+            observation.update(checks=checks, operations=operations, nft_observations=nft_observations)
             root = vendor_tree(fixture)
             vendor_before = vendor_digest(root)
             # Separate child root: nft tool closure cannot become vendor executables.
@@ -1599,7 +1698,7 @@ ExecStart=+/usr/bin/python3 -I -B {entry} guard-ensure --profile {profile_path}
             (probe_root / "dev").mkdir()
             private_file(probe_root / "dev/null", b"")  # child-only real device bind target
             (probe_root / "run").mkdir()
-            nft_observations = {"empty": native_nft_read(self, fixture, probe_root)}
+            nft_observations["empty"] = native_nft_read(self, fixture, probe_root)
             foreign_name = "aegis_fixture_foreign"
             fixture.nft("--file", "-", data=(f"add table inet {foreign_name}\n"
                         f"add chain inet {foreign_name} input {{ type filter hook input priority 10; policy accept; }}\n"
@@ -1657,6 +1756,7 @@ TimeoutStopSec=5
 ExecStart=/usr/bin/python3 -I -B {fixture.root}/listener.py {fixture.credentials}/cert.pem {fixture.credentials}/key.pem {fixture.indexer}
 '''
             self.assertEqual(fixture.unit("ufw-indexer", listener + "\n" + render(indexer_dropin())), mapping[uh.INDEXER])
+            observer = make_stop_observer(fixture, mapping)
             fixture.systemctl("daemon-reload")
             def props(unit, keys):
                 return h.LinuxHost().properties(unit, keys)
@@ -1744,9 +1844,7 @@ ExecStart=/usr/bin/python3 -I -B {fixture.root}/listener.py {fixture.credentials
             self.assertEqual(timestamp(mapping[uh.GUARD], "ActiveEnterTimestampMonotonic"), guard_started)
             packets("active_guard_restart")
             checks["active_guard_verified"] = True
-            fixture.systemctl("stop", wrapper, mapping[uh.GUARD], mapping[uh.INDEXER])
-            self.assertLessEqual(timestamp(mapping[uh.INDEXER], "InactiveEnterTimestampMonotonic"), timestamp(mapping[uh.GUARD], "InactiveEnterTimestampMonotonic"))
-            self.assertLessEqual(timestamp(mapping[uh.GUARD], "InactiveEnterTimestampMonotonic"), timestamp(wrapper, "InactiveEnterTimestampMonotonic"))
+            measure_retained_stop(fixture, mapping, observer)
             fixture.verify_table()
             checks.update(concurrent_stop_order_verified=True, guard_stop_retained_table=True)
             fixture.systemctl("start", wrapper, mapping[uh.GUARD], mapping[uh.INDEXER])

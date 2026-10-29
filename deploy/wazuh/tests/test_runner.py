@@ -343,6 +343,133 @@ class RunnerTests(unittest.TestCase):
 
 
 class NativeFixtureSafety(unittest.TestCase):
+    def stop_fixture(self):
+        from deploy.wazuh.tests import test_native as native
+        fixture = SimpleNamespace(test=self, token="0123456789ab", units=[], bodies={})
+        def unit(role, body):
+            name = "aegis-native-" + fixture.token + "-" + role + ".service"
+            fixture.units.append((name, Path("/run/systemd/system") / name))
+            fixture.bodies[name] = body
+            return name
+        fixture.unit = unit
+        mapping = {role: unit(suffix, "") for role, suffix in
+                   (("ufw.service", "wrapper"), (native.uh.GUARD, "guard"), (native.uh.INDEXER, "indexer"))}
+        return fixture, mapping
+
+    def test_stop_observer_has_only_owned_authored_ordering(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "make_stop_observer"), "retained stop observer missing")
+        fixture, mapping = self.stop_fixture()
+        observer = native.make_stop_observer(fixture, mapping)
+        lines = fixture.bodies[observer].splitlines()
+        self.assertIn("After=" + " ".join(mapping.values()), lines)
+        for line in ("DefaultDependencies=no", "Type=oneshot", "RemainAfterExit=yes", "ExecStart=/usr/bin/true",
+                     "StandardOutput=null", "StandardError=null", "TimeoutStartSec=10", "TimeoutStopSec=5"):
+            self.assertIn(line, lines)
+        self.assertFalse(any(line.startswith(key + "=") for line in lines for key in native.uh.DEPENDENCIES if key != "After"))
+        self.assertEqual(len(fixture.units), 4)
+        broken = dict(mapping, **{"ufw.service": "ufw.service"})
+        with self.assertRaisesRegex(AssertionError, "owned_stop_participants_required"):
+            native.make_stop_observer(fixture, broken)
+
+    def test_retained_stop_keeps_one_transaction_and_rejects_bad_evidence(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "measure_retained_stop"), "retained stop measurement missing")
+        for fault in (None, "zero", "missing", "reverse", "private", "observer_stopped", "external", "participant_inactive",
+                      "After", "Requires", "Slice", *[key for key in native.uh.DEPENDENCIES if key not in {"After", "Requires"}]):
+            fixture, mapping = self.stop_fixture()
+            observer = native.make_stop_observer(fixture, mapping)
+            actions, phase = [], {"stopped": False}
+            def systemctl(*args, **kwargs):
+                if args[0] != "show":
+                    actions.append(args)
+                    if args == ("stop", *mapping.values()): phase["stopped"] = True
+                    return SimpleNamespace(stdout=b"", returncode=0)
+                unit = args[1]
+                active = unit == observer or not phase["stopped"]
+                row = dict(LoadState="loaded", ActiveState="active" if active else "inactive",
+                           SubState="exited" if active else "dead", ActiveEnterTimestampMonotonic="5",
+                           ExecMainStartTimestampMonotonic="4", InactiveEnterTimestampMonotonic=str(
+                               10 if unit == mapping[native.uh.INDEXER] else 20 if unit == mapping[native.uh.GUARD] else 30))
+                if phase["stopped"] and unit == mapping[native.uh.INDEXER]:
+                    if fault == "zero": row["InactiveEnterTimestampMonotonic"] = "0"
+                    if fault == "missing": del row["InactiveEnterTimestampMonotonic"]
+                    if fault == "reverse": row["InactiveEnterTimestampMonotonic"] = "99"
+                    if fault == "private": row.update(ActiveState="/root/DO_NOT_EXPORT", InactiveEnterTimestampMonotonic="secret")
+                if fault == "observer_stopped" and phase["stopped"] and unit == observer:
+                    row.update(ActiveState="inactive", SubState="dead")
+                if fault == "participant_inactive" and unit == mapping[native.uh.INDEXER]:
+                    row.update(ActiveState="inactive", SubState="dead")
+                return SimpleNamespace(stdout="".join(k + "=" + v + "\n" for k, v in row.items()).encode(), returncode=0)
+            fixture.systemctl = systemctl
+            relations = {key: "" for key in native.uh.DEPENDENCIES}
+            relations.update(After=" ".join([*mapping.values(), "system.slice"]), Requires="system.slice")
+            if fault in relations: relations[fault] += " unexpected.service"
+            host = SimpleNamespace(dependency_properties=lambda unit: dict(relations),
+                                   properties=lambda *args: {"Slice": "unexpected.slice" if fault == "Slice" else "system.slice"})
+            if fault == "external": observer = "ufw.service"
+            with self.subTest(fault=fault), patch.object(native.h, "LinuxHost", return_value=host):
+                if fault:
+                    with self.assertRaises(AssertionError) as caught:
+                        native.measure_retained_stop(fixture, mapping, observer)
+                    self.assertNotIn("DO_NOT_EXPORT", str(caught.exception))
+                    if fault in {"zero", "missing", "reverse", "private", "observer_stopped"}:
+                        payload = json.loads(str(caught.exception))
+                        self.assertEqual(set(payload), {"stage", "units"})
+                        self.assertEqual(set(payload["units"]), {"wrapper", "guard", "indexer", "observer"})
+                        expected = 0 if fault == "zero" else "unavailable" if fault in {"missing", "private"} else 99 if fault == "reverse" else 10
+                        self.assertEqual(payload["units"]["indexer"]["InactiveEnterTimestampMonotonic"], expected)
+                        self.assertEqual(actions, [("start", observer), ("stop", *mapping.values())])
+                    else:
+                        self.assertEqual(actions, [])
+                else:
+                    native.measure_retained_stop(fixture, mapping, observer)
+                    self.assertEqual(actions, [("start", observer), ("stop", *mapping.values()), ("stop", observer)])
+                self.assertEqual(relations.get("Requires"), "system.slice unexpected.service" if fault == "Requires" else "system.slice")
+
+    def test_conflict_final_state_poll_is_bounded_and_read_only(self):
+        from deploy.wazuh.tests import test_native as native
+        self.assertTrue(hasattr(native, "wait_conflict_states"), "bounded final-state poll missing")
+        for succeeds in (True, False):
+            calls, tick = [], {"value": 0}
+            def clock():
+                tick["value"] += 1
+                return tick["value"]
+            def systemctl(*args, **kwargs):
+                calls.append(args)
+                done = succeeds and len(calls) >= 3
+                return SimpleNamespace(stdout=(b"active" if args[1] == "relay.service" else b"inactive") if done else b"activating")
+            fixture = SimpleNamespace(systemctl=systemctl)
+            with self.subTest(succeeds=succeeds), patch.object(native.time, "monotonic", side_effect=clock), patch.object(native.time, "sleep"):
+                if succeeds: native.wait_conflict_states(fixture, "relay.service", "wrapper.service")
+                else:
+                    with self.assertRaisesRegex(AssertionError, "conflict_states_timeout"):
+                        native.wait_conflict_states(fixture, "relay.service", "wrapper.service")
+                self.assertTrue(all(call[0] == "show" for call in calls))
+                self.assertLessEqual(len(calls), 10)
+
+    def test_completed_probe_observations_survive_later_fixture_failure(self):
+        from deploy.wazuh.tests import test_native as native
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = SimpleNamespace(root=Path(temporary), nft=lambda *args, **kwargs: SimpleNamespace(stdout=b'{"nftables":[]}'),
+                start_listener=lambda: (_ for _ in ()).throw(AssertionError("later_fixture_failure")))
+            case = native.NativeTests("test_ufw_disabled_wrapper_preserved")
+            facts = {"resources": {"stage": "complete"}, "document": {"nftables": []}}
+            with patch.dict(native.OBSERVATIONS, clear=True), patch.object(native, "network_fixture", return_value=nullcontext(fixture)), \
+                    patch.object(native, "real_ufw_baseline", return_value="synthetic"), \
+                    patch.object(native, "vendor_tree", return_value=Path(temporary)), patch.object(native, "vendor_digest", return_value="synthetic"), \
+                    patch.object(native, "copy_tool_closure"), patch.object(native, "private_file"), \
+                    patch.object(native, "native_nft_read", return_value=facts):
+                with self.assertRaisesRegex(AssertionError, "later_fixture_failure"):
+                    case.test_ufw_disabled_wrapper_preserved()
+                observed = native.OBSERVATIONS.get(case.id(), {})
+                self.assertEqual(set(observed.get("nft_observations", {})), {"empty", "foreign", "ufw-partial", "ufw6-partial"})
+                self.assertEqual(observed["nft_observations"]["empty"], facts)
+                self.assertEqual(set(observed["checks"]), {"fresh_nft_observation_preserved", "ufw_lock_absent_preserved", "ufw_lock_present_preserved", "partial_ufw_chains_refused"})
+                self.assertEqual(observed["operations"], {})
+                with self.assertRaisesRegex(ValueError, "native_observation_invalid"):
+                    RunnerTests().runner().validate_native_observations(native.OBSERVATIONS)
+
     def test_probe_null_requires_real_device_and_owned_regular_target(self):
         from deploy.wazuh.tests import test_native as native
         self.assertTrue(hasattr(native, "probe_null_metadata"), "checked null resource missing")

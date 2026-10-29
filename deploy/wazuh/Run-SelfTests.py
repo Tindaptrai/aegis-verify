@@ -118,7 +118,8 @@ UFW_RELOCATIONS = ["owned_root:vendor_paths", "owned_units:wrapper_guard_indexer
                    "host.RECORD_PATH", "ufw_host.RECORD_PATH", "loader_query:owned_inactive_inventory",
                    "dependency_roles:bijective_all_observed_units_readonly_external", "positive_reader:synthetic_package_unit_backend_dependencies",
                    "fixture.Commands:root_netns_before_each_execute",
-                   "probe_root/dev/null:real_device_bind_in_child_private_mount_namespace"]
+                   "probe_root/dev/null:real_device_bind_in_child_private_mount_namespace",
+                   "owned_stop_observer:after_only_retention_with_verified_system_slice"]
 UFW_CHECKS = ("vendor_bytes_preserved", "vendor_state_preserved", "real_ufw_baseline_preserved",
               "namespace_assertion_before_mutations", "no_unintended_wrapper_start", "cold_guard_verified",
               "active_guard_verified", "concurrent_start_order_verified", "concurrent_stop_order_verified",
