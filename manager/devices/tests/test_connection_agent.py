@@ -114,7 +114,7 @@ NATIVE_DIAGNOSTIC_CODES = frozenset((Path(__file__).resolve().parents[3] /
 
 
 def native_diagnostic(stderr):
-    if len(stderr) > 512:
+    if type(stderr) is not str or len(stderr) > 512:
         return None
 
     def unique_object(pairs):
@@ -178,6 +178,15 @@ def native_process_environment(platform, environment):
             if platform != "nt" or key.casefold() != "psmodulepath"}
 
 
+def revocation_timeout_observation(exit_code, responses):
+    # A single nonblocking poll plus response counts; no state/pipe reads.
+    if type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31: exit_code = None
+    success = sum(type(value) is int and value == 200 for value in responses)
+    denied = sum(type(value) is int and value == 403 for value in responses)
+    return dict(process_exit_code=exit_code, heartbeat_200=min(success, 2 ** 31 - 1),
+        heartbeat_403=min(denied, 2 ** 31 - 1), other_responses=min(len(responses) - success - denied, 2 ** 31 - 1))
+
+
 class NativeProcessEnvironmentTests(SimpleTestCase):
     def test_windows_preserves_ci_guards_and_other_environment_case_insensitively(self):
         for name in ("PSModulePath", "PSMODULEPATH", "psmodulepath"):
@@ -224,6 +233,79 @@ foreach ($name in @('Get-FileHash', 'Get-Acl', 'Get-CimInstance')) {
 
 
 class NativeDiagnosticsTests(SimpleTestCase):
+    def test_native_first_failure_survives_successful_cleanup_and_later_failure(self):
+        case = PublishedConnectionTests("test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall")
+        with tempfile.TemporaryDirectory() as temporary:
+            case.root = Path(temporary)
+            case.origin = "https://synthetic.invalid"
+            failure = self.result('{"stage":"status","code":"state_invalid"}')
+            cleanup = self.result('', json.dumps(dict(action="Uninstall", device_id="synthetic-id",
+                state="identity_denied", service_status="absent", identity_preserved=True)), 0)
+            later = self.result('{"stage":"configuration","code":"service_operation_failed"}')
+            with patch.dict(os.environ, AEGIS_CONNECTION_SERVICE_PACKAGE=temporary), patch(
+                    "devices.tests.test_connection_agent.subprocess.run", side_effect=(failure, cleanup, later)):
+                with self.assertRaises(AssertionError): case.native_phase("Status", identity="synthetic-id")
+                case.native_phase("Uninstall", identity="synthetic-id")
+                with self.assertRaises(AssertionError): case.native_phase("Uninstall", identity="synthetic-id")
+        self.assertEqual(getattr(case, "gate_native_failure", None), dict(action="Status", stage="status", code="state_invalid", exit_code=1))
+        self.assertEqual(case.gate_stage, "published_native_status")
+        self.assertEqual(case.gate_codes, ("published_native_failed",))
+
+    def test_native_input_leak_guard_prevents_diagnostic_projection(self):
+        case = PublishedConnectionTests("test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall")
+        with tempfile.TemporaryDirectory() as temporary:
+            case.root = Path(temporary)
+            case.origin = "https://synthetic.invalid"
+            code = "a" * 64
+            result = self.result('{"stage":"installer","code":"state_invalid"}', stdout=code)
+            with patch.dict(os.environ, AEGIS_CONNECTION_SERVICE_PACKAGE=temporary), patch(
+                    "devices.tests.test_connection_agent.subprocess.run", return_value=result):
+                with self.assertRaisesRegex(AssertionError, "synthetic input; output withheld"):
+                    case.native_phase("Install", code=code)
+        self.assertEqual(getattr(case, "gate_native_failure", None), dict(action="Install", stage=None, code=None, exit_code=1))
+        self.assertNotIn(code, json.dumps(case.gate_native_failure))
+
+    def test_native_missing_package_failure_is_retained_before_successful_cleanup(self):
+        case = PublishedConnectionTests("test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall")
+        with tempfile.TemporaryDirectory() as temporary:
+            package = Path(temporary) / "missing-package"
+            case.root = Path(temporary); case.origin = "https://synthetic.invalid"
+            with patch.dict(os.environ, AEGIS_CONNECTION_SERVICE_PACKAGE=str(package)):
+                with self.assertRaises(AssertionError): case.native_phase("Status")
+                package.mkdir()
+                cleanup = self.result('', json.dumps(dict(action="Uninstall", device_id="synthetic-id",
+                    state="identity_denied", service_status="absent", identity_preserved=True)), 0)
+                with patch("devices.tests.test_connection_agent.subprocess.run", return_value=cleanup):
+                    case.native_phase("Uninstall", identity="synthetic-id")
+        self.assertEqual(getattr(case, "gate_native_failure", None), dict(action="Status", stage=None, code=None, exit_code=None))
+        self.assertEqual(case.gate_stage, "published_native_status")
+
+    def test_revocation_timeout_observes_poll_and_since_revoke_counts_without_readers(self):
+        class Process:
+            def __init__(self): self.polls = 0
+            def poll(self): self.polls += 1; return None
+            @property
+            def stderr(self): raise AssertionError("must not read a live child pipe")
+        case = PublishedConnectionTests("test_cli_enrolls_over_ip_san_tls_reconnects_same_uuid_and_honors_revoke")
+        self.assertTrue(callable(getattr(case, "wait_for_cli_revocation", None)), "revocation timeout observation missing")
+        case.server = type("Server", (), {"heartbeat_responses": [200, 200, 403, 403, 500]})()
+        process = Process()
+        with patch("devices.tests.test_connection_agent.time.monotonic", side_effect=(0, 36)), patch.object(
+                case, "cli", side_effect=AssertionError("must not read CLI state")):
+            with self.assertRaises(AssertionError): case.wait_for_cli_revocation(process, 1)
+        self.assertEqual(process.polls, 1)
+        self.assertEqual(case.gate_revocation_status, dict(process_exit_code=None, heartbeat_200=1, heartbeat_403=2, other_responses=1))
+
+    def test_revocation_timeout_observation_withholds_untrusted_and_cyclic_values(self):
+        self.assertTrue(callable(globals().get("revocation_timeout_observation")), "bounded revocation projection missing")
+        cycle = []; cycle.append(cycle)
+        for value in ("PRIVATE_KEY", True, 2 ** 31, -(2 ** 31) - 1, cycle):
+            observed = revocation_timeout_observation(value, [200, 403, "PRIVATE_KEY", True, cycle])
+            self.assertEqual(observed, dict(process_exit_code=None, heartbeat_200=1, heartbeat_403=1, other_responses=3))
+            self.assertNotIn("PRIVATE", json.dumps(observed))
+        self.assertEqual(revocation_timeout_observation(3, [403]),
+                         dict(process_exit_code=3, heartbeat_200=0, heartbeat_403=1, other_responses=0))
+
     def test_published_cli_failure_records_only_fixed_stage_and_code(self):
         case = PublishedConnectionTests("test_cli_enrolls_over_ip_san_tls_reconnects_same_uuid_and_honors_revoke")
         case.executable = Path("synthetic-agent")
@@ -392,6 +474,15 @@ class PublishedConnectionTests(TransactionTestCase):
                 pass
         self.assertEqual(status, "identity_denied", "Terminal CLI diagnostic: " + diagnostic)
 
+    def wait_for_cli_revocation(self, process, response_start):
+        try:
+            self.wait_until(lambda: process.poll() is not None, "Client ignored Manager identity revocation")
+        except AssertionError:
+            if self.gate_codes == ("wait_timeout",):
+                self.gate_revocation_status = revocation_timeout_observation(
+                    process.poll(), self.server.heartbeat_responses[response_start:])
+            raise
+
     def test_cli_enrolls_over_ip_san_tls_reconnects_same_uuid_and_honors_revoke(self):
         code = create_pairing_code(actor=self.owner, environment_id="synthetic.tls")["code"]
         self.cli("connect", "--manager", self.origin, "--server-ca", str(self.root / "server-ca.pem"),
@@ -412,8 +503,9 @@ class PublishedConnectionTests(TransactionTestCase):
         self.wait_until(lambda: Device.objects.get(pk=identity).last_heartbeat_at > previous, "Reconnect did not reuse identity")
         self.assertEqual(Device.objects.count(), 1)
         self.assertEqual(json.loads(self.cli("status", "--state-dir", str(self.state)))["device_id"], identity)
+        response_start = len(self.server.heartbeat_responses)
         revoke_device(actor=self.owner, device_id=identity)
-        self.wait_until(lambda: second.poll() is not None, "Client ignored Manager identity revocation")
+        self.wait_for_cli_revocation(second, response_start)
         self.assert_terminal_denial(second)
         self.assertEqual(device_dto(Device.objects.get(pk=identity))["status"], "revoked")
 
@@ -524,39 +616,56 @@ class PublishedConnectionTests(TransactionTestCase):
         self.assert_identity_preserved(before)
 
     def native_phase(self, action, *, identity=None, code=None):
-        self.gate_stage = {"Install": "published_native_install", "Restart": "published_native_restart",
+        stage = {"Install": "published_native_install", "Restart": "published_native_restart",
             "Reinstall": "published_native_reinstall", "Status": "published_native_status",
             "Uninstall": "published_native_uninstall"}.get(action)
-        repository = Path(__file__).resolve().parents[3]
-        package = Path(os.environ["AEGIS_CONNECTION_SERVICE_PACKAGE"])
-        self.assertTrue(package.is_absolute() and package.is_dir(), "Native release package missing")
-        if os.name == "nt":
-            command = [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
-                "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
-                str(repository / "scripts/tests/agent/Test-WindowsService.ps1"),
-                "-Action", action, "-PackageRoot", str(package), "-ManagerOrigin", self.origin,
-                "-ServerCa", str(self.root / "server-ca.pem")]
+        if not hasattr(self, "gate_native_failure"): self.gate_stage = stage
+        result = None
+        try:
+            repository = Path(__file__).resolve().parents[3]
+            package = Path(os.environ["AEGIS_CONNECTION_SERVICE_PACKAGE"])
+            self.assertTrue(package.is_absolute() and package.is_dir(), "Native release package missing")
+            if os.name == "nt":
+                command = [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
+                    "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+                    str(repository / "scripts/tests/agent/Test-WindowsService.ps1"),
+                    "-Action", action, "-PackageRoot", str(package), "-ManagerOrigin", self.origin,
+                    "-ServerCa", str(self.root / "server-ca.pem")]
+                if identity:
+                    command += ["-ExpectedDeviceId", identity]
+            else:
+                command = ["sudo", "--preserve-env=GITHUB_ACTIONS,RUNNER_OS", "bash",
+                    str(repository / "scripts/tests/agent/test-systemd-service.sh"),
+                    "--action", action, "--package-root", str(package), "--manager-origin", self.origin,
+                    "--server-ca", str(self.root / "server-ca.pem")]
+                if identity:
+                    command += ["--expected-device-id", identity]
+            result = subprocess.run(command, input="" if code is None else code + "\n",
+                                    env=native_process_environment(os.name, os.environ),
+                                    capture_output=True, text=True, timeout=120)
+            assert_native_result(action, result, code=code)
+            data = json.loads(result.stdout)
+            self.assertEqual(set(data), {"action", "device_id", "state", "service_status", "identity_preserved"})
+            self.assertEqual(data["action"], action)
+            self.assertTrue(data["identity_preserved"])
             if identity:
-                command += ["-ExpectedDeviceId", identity]
-        else:
-            command = ["sudo", "--preserve-env=GITHUB_ACTIONS,RUNNER_OS", "bash",
-                str(repository / "scripts/tests/agent/test-systemd-service.sh"),
-                "--action", action, "--package-root", str(package), "--manager-origin", self.origin,
-                "--server-ca", str(self.root / "server-ca.pem")]
-            if identity:
-                command += ["--expected-device-id", identity]
-        result = subprocess.run(command, input="" if code is None else code + "\n",
-                                env=native_process_environment(os.name, os.environ),
-                                capture_output=True, text=True, timeout=120)
-        if result.returncode != 0: self.gate_codes = ("published_native_failed",)
-        assert_native_result(action, result, code=code)
-        data = json.loads(result.stdout)
-        self.assertEqual(set(data), {"action", "device_id", "state", "service_status", "identity_preserved"})
-        self.assertEqual(data["action"], action)
-        self.assertTrue(data["identity_preserved"])
-        if identity:
-            self.assertEqual(data["device_id"], identity)
-        return data
+                self.assertEqual(data["device_id"], identity)
+            return data
+        except Exception:
+            if not hasattr(self, "gate_native_failure"):
+                # Input-leak and output-cap guards run before diagnostic projection.
+                diagnostic = None
+                if result is not None and len(result.stdout) < 4096 and (code is None or code not in result.stdout + result.stderr):
+                    diagnostic = native_diagnostic(result.stderr)
+                native_stage, native_code = diagnostic.split(":", 1) if diagnostic else (None, None)
+                exit_code = result.returncode if result is not None else None
+                if type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31: exit_code = None
+                known_actions = ("Install", "Restart", "Reinstall", "Status", "Uninstall", "ExecutionUpgrade", "MissingVendor", "Cleanup")
+                self.gate_native_failure = dict(action=action if action in known_actions else "unknown",
+                    stage=native_stage, code=native_code, exit_code=exit_code)
+                self.gate_stage = stage
+                if result is not None and result.returncode != 0: self.gate_codes = ("published_native_failed",)
+            raise
 
     @skipUnless(os.environ.get("AEGIS_CONNECTION_SERVICE_PACKAGE"), "Disposable native service CI package required")
     def test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall(self):

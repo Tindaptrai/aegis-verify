@@ -55,6 +55,10 @@ REQUIRED_TESTS = {
 }
 CATEGORIES = (*PREFIXES, *EXACT, *REQUIRED_TESTS, "published_presence")
 ROOT = Path(__file__).resolve().parents[1]
+NATIVE_ACTION_STAGES = {"Install": "published_native_install", "Restart": "published_native_restart",
+    "Reinstall": "published_native_reinstall", "Status": "published_native_status", "Uninstall": "published_native_uninstall"}
+NATIVE_STAGES = frozenset(("preflight", "installer", "configuration", "status", "restart", "uninstall", "owner_conflict", "helper"))
+NATIVE_CODES = frozenset((ROOT / "scripts/tests/agent/native-diagnostic-codes.txt").read_text(encoding="ascii").splitlines())
 DIAGNOSTIC_STAGES = frozenset((
     "fixture_setup", "source_staging", "source_tls", "authority_setup", "environment_setup",
     "unit_enable", "unit_start", "worker_health", "service_properties", "worker_lock",
@@ -88,6 +92,33 @@ def diagnostic_id(test):
     return "test_id_withheld"
 
 
+def safe_native_failure(value):
+    # Never recurse into test attributes or learn labels from exception text.
+    if type(value) is not dict or set(value) != {"action", "stage", "code", "exit_code"}: return {}
+    action, stage, code, exit_code = (value[name] for name in ("action", "stage", "code", "exit_code"))
+    if type(action) is not str or action not in (*NATIVE_ACTION_STAGES, "ExecutionUpgrade", "MissingVendor", "Cleanup", "unknown"): return {}
+    if exit_code is not None and (type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31): return {}
+    if stage is None and code is None: return dict(action=action, stage=None, code=None, exit_code=exit_code)
+    if type(stage) is not str or stage not in NATIVE_STAGES or type(code) is not str or len(code) > 128: return {}
+    known = code in NATIVE_CODES
+    if not known:
+        match = re.fullmatch(r"(win32|hresult)_(-?(?:0|[1-9][0-9]*))", code)
+        if match:
+            number = int(match[2])
+            known = str(number) == match[2] and ((match[1] == "win32" and 0 <= number <= 65535)
+                or (match[1] == "hresult" and -(2 ** 31) <= number < 2 ** 31))
+    return dict(action=action, stage=stage, code=code, exit_code=exit_code) if known else {}
+
+
+def safe_revocation_status(value):
+    fields = {"process_exit_code", "heartbeat_200", "heartbeat_403", "other_responses"}
+    if type(value) is not dict or set(value) != fields: return {}
+    exit_code = value["process_exit_code"]
+    if exit_code is not None and (type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31): return {}
+    if any(type(value[name]) is not int or not 0 <= value[name] < 2 ** 31 for name in fields - {"process_exit_code"}): return {}
+    return {name: value[name] for name in sorted(fields)}
+
+
 def safe_diagnostic(test, err):
     frames = []
     traceback = err[2] if err is not None else None
@@ -106,6 +137,8 @@ def safe_diagnostic(test, err):
     if exception not in EXCEPTION_CLASSES and exception != "UnexpectedSuccess": exception = "OtherException"
     stage = getattr(test, "gate_stage", None)
     stage = stage if type(stage) is str and stage in DIAGNOSTIC_STAGES else None
+    native_failure = safe_native_failure(getattr(test, "gate_native_failure", None))
+    if native_failure: stage = NATIVE_ACTION_STAGES.get(native_failure["action"])
     codes = getattr(test, "gate_codes", ())
     codes = sorted({code for code in codes[:16] if type(code) is str and code in DIAGNOSTIC_CODES}) if type(codes) in (tuple, list) else []
     service = getattr(test, "gate_service_status", None)
@@ -134,7 +167,8 @@ def safe_diagnostic(test, err):
             if type(value) is int and 0 <= value <= maximum: cleanup_status[name] = value
     return dict(test_id=diagnostic_id(test), exception_class=exception, frames=frames[-8:],
                 stage=stage, codes=codes, service_status=service_status, runtime_status=runtime_status,
-                cleanup_status=cleanup_status)
+                cleanup_status=cleanup_status, native_failure=native_failure,
+                revocation_status=safe_revocation_status(getattr(test, "gate_revocation_status", None)))
 
 
 def category_for(identity):

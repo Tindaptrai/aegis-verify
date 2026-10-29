@@ -291,6 +291,46 @@ def test_diagnostics_are_bounded_and_external_frames_custom_classes_are_withheld
     assert "PRIVATE" not in json.dumps(value)
 
 
+def test_native_failure_projects_first_action_and_closed_pair_instead_of_cleanup_stage():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    case.gate_stage = "published_native_uninstall"
+    case.gate_codes = ("published_native_failed",)
+    case.gate_native_failure = dict(action="Status", stage="status", code="state_invalid", exit_code=3)
+    diagnostic = gate.safe_diagnostic(case, None)
+    assert diagnostic["stage"] == "published_native_status"
+    assert diagnostic["native_failure"] == dict(action="Status", stage="status", code="state_invalid", exit_code=3)
+    case.gate_revocation_status = dict(process_exit_code=None, heartbeat_200=0, heartbeat_403=2, other_responses=1)
+    assert gate.safe_diagnostic(case, None)["revocation_status"] == case.gate_revocation_status
+
+
+def test_native_and_revocation_diagnostics_reject_raw_extra_oversize_cycles_and_numbers():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    cycle = {}; cycle["cycle"] = cycle
+    native = dict(action="Status", stage="status", code="state_invalid", exit_code=3)
+    for value in ("PRIVATE", cycle, native | {"raw": "PRIVATE"}, native | {"action": "PRIVATE"},
+                  native | {"stage": "PRIVATE"}, native | {"code": "PRIVATE"}, native | {"code": "x" * 65537},
+                  native | {"exit_code": True}, native | {"exit_code": 2 ** 31},
+                  native | {"code": "win32_65536"}, native | {"code": "hresult_-2147483649"},
+                  native | {"stage": None}, native | {"code": cycle}):
+        case.gate_native_failure = value
+        diagnostic = gate.safe_diagnostic(case, None)
+        assert diagnostic["native_failure"] == {}
+        assert "PRIVATE" not in json.dumps(diagnostic)
+    case.gate_native_failure = native | {"code": "hresult_-2147024891"}
+    assert gate.safe_diagnostic(case, None)["native_failure"]["code"] == "hresult_-2147024891"
+    revoke = dict(process_exit_code=None, heartbeat_200=0, heartbeat_403=2, other_responses=1)
+    for value in (cycle, "PRIVATE", revoke | {"raw": "PRIVATE"}, revoke | {"process_exit_code": cycle},
+                  revoke | {"process_exit_code": True}, revoke | {"process_exit_code": 2 ** 31},
+                  revoke | {"heartbeat_403": True}, revoke | {"heartbeat_200": -1},
+                  revoke | {"other_responses": 2 ** 31}):
+        case.gate_revocation_status = value
+        diagnostic = gate.safe_diagnostic(case, None)
+        assert diagnostic["revocation_status"] == {}
+        assert "PRIVATE" not in json.dumps(diagnostic)
+
+
 def test_deep_traceback_and_class_setup_errors_remain_bounded_without_fake_execution():
     gate = gate_module()
     class SetupFailure(unittest.TestCase):

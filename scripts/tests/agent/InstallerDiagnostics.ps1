@@ -8,6 +8,16 @@ function Test-AgentDiagnosticCode([string]$Code) {
     return $false
 }
 function Test-AgentDiagnosticStage([string]$Stage) { return @('preflight','installer','configuration','status','restart','uninstall','owner_conflict','helper') -ccontains $Stage }
+function Get-AgentStatusDiagnostic([string]$ErrorText) {
+    # Only the CLI's exact closed error object is projected. Extra/duplicate
+    # fields, multiple lines, oversized data and arbitrary messages stay private.
+    $code='status_failed'
+    if($ErrorText.Length -le 512 -and $ErrorText -cmatch '\A\{"error":\{"code":"([a-z_]+)"\}\}\r?\n?\z'){
+        $candidate=$Matches[1]
+        if(Test-AgentDiagnosticCode $candidate){$code=$candidate}
+    }
+    return @{stage='status';code=$code}
+}
 function Get-AgentCapturedDiagnostic([string]$Output,[string]$Secret,[string]$Stage) {
     if (!(Test-AgentDiagnosticStage $Stage)) { $Stage='helper' }
     if (($Secret -and $Output.Contains($Secret)) -or $Output.Contains('PRIVATE KEY') -or $Output.Contains('csr_pem')) { return @{stage='helper';code='installer_output_secret_leak'} }

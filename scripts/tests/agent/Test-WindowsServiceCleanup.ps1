@@ -40,6 +40,10 @@ function Get-SyntheticStatus {
     $identity=if($case -ceq 'identity_conflict'){'6c2d47c2-1dd5-4235-a4ce-114679e0332f'}else{$expectedIdentity}
     [pscustomobject]@{device_id=$identity;state='enrolled'}|ConvertTo-Json -Compress
 }
+function Invoke-NativeStatusCommand([string]$Executable,[string]$StateDirectory) {
+    $json=& $Executable status --state-dir $StateDirectory
+    return @{stdout=($json -join "`n");stderr='';exit_code=$global:LASTEXITCODE}
+}
 function Read-NativeStatus([string]$Executable=$binary) {
     $script:statusReads++
     if($Action -ceq 'Cleanup'){

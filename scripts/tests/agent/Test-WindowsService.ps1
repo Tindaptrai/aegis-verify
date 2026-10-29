@@ -16,10 +16,32 @@ $binaryRoot = Join-Path $env:ProgramFiles 'AEGIS Agent'
 $stateDirectory = Join-Path $env:ProgramData 'AEGIS/Agent'
 $binary = Join-Path $binaryRoot 'bin/aegis-agent.exe'
 $stateFile = Join-Path $stateDirectory 'state.json'
+function Invoke-NativeStatusCommand([string]$Executable,[string]$StateDirectory) {
+    # Capture native stderr before Windows PowerShell can turn it into a raw
+    # terminating ErrorRecord. Neither stream is written to the CI console.
+    $start=New-Object Diagnostics.ProcessStartInfo
+    $start.FileName=$Executable
+    $start.Arguments='status --state-dir ' + (ConvertTo-AgentNativeArgument $StateDirectory)
+    $start.UseShellExecute=$false;$start.CreateNoWindow=$true
+    $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+    $process=[Diagnostics.Process]::Start($start)
+    try {
+        $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync()
+        $process.WaitForExit()
+        $output=$stdout.GetAwaiter().GetResult();$errorText=$stderr.GetAwaiter().GetResult()
+        if($output.Length -ge 4096){throw 'status_failed'}
+        # An oversized error is replaced before returning it to the reader.
+        if($errorText.Length -gt 512){$errorText=''}
+        return @{stdout=$output;stderr=$errorText;exit_code=$process.ExitCode}
+    } finally {$process.Dispose()}
+}
 function Read-NativeStatus([string]$Executable=$binary) {
-    $json = & $Executable status --state-dir $stateDirectory
-    if ($LASTEXITCODE -ne 0) { throw 'status_failed' }
-    $value = $json | ConvertFrom-Json
+    $result=Invoke-NativeStatusCommand $Executable $stateDirectory
+    if ($result.exit_code -ne 0) {
+        $script:AgentInnerDiagnostic=Get-AgentStatusDiagnostic $result.stderr
+        throw 'status_failed'
+    }
+    $value = $result.stdout | ConvertFrom-Json
     if ($ExpectedDeviceId -and $value.device_id -cne $ExpectedDeviceId) { throw 'ci_identity_conflict' }
     return $value
 }
