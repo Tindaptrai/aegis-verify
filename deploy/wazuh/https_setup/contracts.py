@@ -214,22 +214,137 @@ def patch_http_config(raw: bytes, p: Profile) -> bytes:
 
 
 def archive_ca_members(raw: bytes, p: Profile) -> tuple[bytes, bytes]:
-    """Offline bytes convenience only; live callers use read_archive_ca_members.
+    """Offline bytes convenience only; live callers use read_vendor_ca_archive.
 
-    Gzip is supported only here, where the complete archive is already in RAM.
     Never obtain this argument by reading/copying/hashing a live CA archive.
     """
-    limit = 32 * 1024 * 1024
-    try:
-        if not isinstance(raw, bytes) or len(raw) > limit:
+    if not isinstance(raw, bytes):
+        raise SetupError("archive_invalid")
+    return read_vendor_ca_archive(io.BytesIO(raw), p)
+
+
+def _archive_member(header: bytes, seen: set, p: Profile):
+    """One shared closed header policy for seek-only and sequential tar intake."""
+    if len(seen) >= 128:
+        raise ValueError
+    member = tarfile.TarInfo.frombuf(header, encoding="utf-8", errors="strict")
+    name = member.name.removesuffix("/") if member.isdir() else member.name
+    if not _path(name, absolute=False) or name in seen:
+        raise ValueError
+    seen.add(name)
+    if member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE) or member.linkname:
+        raise ValueError
+    if member.size < 0 or member.size > 1024 * 1024 or member.isdir() and member.size:
+        raise ValueError
+    if name in (p.ca_member, p.key_member) and (not member.isfile() or not member.size):
+        raise ValueError
+    return name, member
+
+
+def _selected_ca(selected: dict, p: Profile) -> tuple[bytes, bytes]:
+    if set(selected) != {p.ca_member, p.key_member}:
+        raise ValueError
+    if hashlib.sha256(selected[p.ca_member]).hexdigest() != p.expected_ca_file_sha256:
+        raise ValueError
+    return selected[p.ca_member], selected[p.key_member]
+
+
+class _GzipForwardReader:
+    """Single gzip member, bounded raw input/output, no decoded read-ahead."""
+
+    def __init__(self, source: BinaryIO, raw_size: int):
+        self.source = source
+        self.remaining = raw_size
+        self.decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+        self.pending = b""
+        self.decoded = 0
+
+    def read(self, size: int) -> bytes:
+        if not 0 < size <= 65536:
             raise ValueError
-        if raw.startswith(b"\x1f\x8b"):
-            decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
-            raw = decoder.decompress(raw, limit + 1)
-            if len(raw) > limit or not decoder.eof or decoder.unused_data:
+        chunks = []
+        while size and not self.decoder.eof:
+            if not self.pending:
+                if not self.remaining:
+                    raise ValueError  # Missing gzip end/checksum, even after tar EOF.
+                wanted = min(65536, self.remaining)
+                self.pending = self.source.read(wanted)
+                if not isinstance(self.pending, bytes) or not 0 < len(self.pending) <= wanted:
+                    raise ValueError
+                self.remaining -= len(self.pending)
+            old_length = len(self.pending)
+            chunk = self.decoder.decompress(self.pending, min(size, 32 * 1024 * 1024 - self.decoded + 1))
+            self.pending = self.decoder.unconsumed_tail
+            self.decoded += len(chunk)
+            if self.decoded > 32 * 1024 * 1024:
                 raise ValueError
-        return read_archive_ca_members(io.BytesIO(raw), p)
-    except (ValueError, OSError, zlib.error):
+            if self.decoder.eof and (self.decoder.unused_data or self.remaining):
+                raise ValueError  # Concatenation and all trailing compressed bytes refuse.
+            if not chunk and not self.decoder.eof and len(self.pending) == old_length:
+                raise ValueError
+            chunks.append(chunk)
+            size -= len(chunk)
+        return b"".join(chunks)
+
+
+def read_vendor_ca_archive(source: BinaryIO, p: Profile) -> tuple[bytes, bytes]:
+    """Select CA/key from a trusted unbuffered plain or single-member gzip inode.
+
+    Plain tar delegates to the seek-only reader. Gzip necessarily decodes skipped
+    plaintext; discard it in <=64 KiB chunks without interpreting, persisting or
+    logging it. Only the selected bodies (<=1 MiB each) are retained. Raw and
+    decoded sizes each cap at 32 MiB. Fully validate tar end padding and gzip CRC/
+    EOF so trailing streams/data cannot hide records. No filesystem writes occur.
+    Caller performs provenance/stat checks; source offset/lifetime are preserved.
+    """
+    try:
+        if isinstance(source, (io.BufferedReader, io.BufferedRandom)) or not source.seekable() or not source.readable():
+            raise ValueError
+        original = source.tell()
+        try:
+            source.seek(0, io.SEEK_END)
+            raw_size = source.tell()
+            if not 0 < raw_size <= 32 * 1024 * 1024:
+                raise ValueError
+            source.seek(0)
+            magic = source.read(2)
+            if magic != b"\x1f\x8b":
+                return read_archive_ca_members(source, p)
+            source.seek(0)
+            stream = _GzipForwardReader(source, raw_size)
+
+            def take(length, *, retain):
+                chunks = []
+                while length:
+                    chunk = stream.read(min(65536, length))
+                    if not chunk:
+                        raise ValueError
+                    length -= len(chunk)
+                    if retain:
+                        chunks.append(chunk)
+                return b"".join(chunks) if retain else None
+
+            seen, selected = set(), {}
+            while True:
+                header = take(512, retain=True)
+                if header == b"\0" * 512:
+                    if take(512, retain=True) != b"\0" * 512:
+                        raise ValueError
+                    while trailer := stream.read(65536):
+                        if any(trailer):
+                            raise ValueError
+                    if stream.decoded % 512:
+                        raise ValueError
+                    return _selected_ca(selected, p)
+                name, member = _archive_member(header, seen, p)
+                if name in (p.ca_member, p.key_member):
+                    selected[name] = take(member.size, retain=True)
+                else:
+                    take(member.size, retain=False)
+                take(-member.size % 512, retain=False)
+        finally:
+            source.seek(original)
+    except (AttributeError, ValueError, OSError, EOFError, UnicodeError, tarfile.TarError, zlib.error):
         raise SetupError("archive_invalid") from None
 
 
@@ -245,7 +360,6 @@ def read_archive_ca_members(source: BinaryIO, p: Profile) -> tuple[bytes, bytes]
     (including PAX, GNU long-name and sparse records) require bodies and reject.
     """
     limit = 32 * 1024 * 1024
-    member_limit = 1024 * 1024
     block = 512
     try:
         if isinstance(source, (io.BufferedReader, io.BufferedRandom)) or not source.seekable() or not source.readable():
@@ -284,31 +398,17 @@ def read_archive_ca_members(source: BinaryIO, p: Profile) -> tuple[bytes, bytes]
                             raise ValueError
                     ended = True
                     break
-                if len(seen) >= 128:
-                    raise ValueError
-                member = tarfile.TarInfo.frombuf(header, encoding="utf-8", errors="strict")
-                name = member.name.removesuffix("/") if member.isdir() else member.name
-                if not _path(name, absolute=False) or name in seen:
-                    raise ValueError
-                seen.add(name)
-                if member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE) or member.linkname:
-                    raise ValueError
-                if member.size < 0 or member.size > member_limit or member.isdir() and member.size:
-                    raise ValueError
+                name, member = _archive_member(header, seen, p)
                 next_offset = offset + block + ((member.size + block - 1) // block) * block
                 if next_offset > size:
                     raise ValueError
                 if name in (p.ca_member, p.key_member):
-                    if not member.isfile() or not member.size:
-                        raise ValueError
                     selected[name] = read_exact(member.size)
                 # Skip all unselected bodies and all body padding by seek only.
                 offset = next_offset
-            if not ended or set(selected) != {p.ca_member, p.key_member}:
+            if not ended:
                 raise ValueError
-            if hashlib.sha256(selected[p.ca_member]).hexdigest() != p.expected_ca_file_sha256:
-                raise ValueError
-            return selected[p.ca_member], selected[p.key_member]
+            return _selected_ca(selected, p)
         finally:
             source.seek(original)
     except (AttributeError, ValueError, OSError, EOFError, UnicodeError, tarfile.TarError):

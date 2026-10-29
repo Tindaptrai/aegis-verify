@@ -26,9 +26,13 @@ CA signing key is available. Systems with usable HTTPS skip this kit entirely.
   stop a service or create a persistent intent. `apply` takes the profile hash
   and a frozen preflight hash, revalidates drift and takes a durable root-only
   backup/intent before changes. `status` is observational; `rollback` is explicit.
-- Read only the two exact, regular, unique, size-bounded CA members in the
-  seekable uncompressed tar archive; do not extract the archive or read unrelated
-  password members. Reject compressed archives on this strict live path. Match
+- Select only the two exact, regular, unique, size-bounded CA members. Plain tar
+  intake seeks over unrelated bodies. The actual vendor installer also creates
+  gzip archives despite the `.tar` name: a separate bounded streaming decoder
+  necessarily processes skipped plaintext but discards it without interpreting,
+  logging, retaining or extracting unrelated files. Never load/persist the whole
+  decoded archive; reject decoded/raw size overflow, hidden/concatenated streams
+  and unsafe members. Do not claim that gzip can avoid decoding skipped bytes. Match
   archived CA to live CA and its private key locally. Never log/export keys.
 - Create a new RSA-3072 PKCS#8 HTTP key and serverAuth / CA:FALSE certificate,
   preserving the old leaf subject with exactly loopback plus the approved
@@ -53,7 +57,8 @@ CA signing key is available. Systems with usable HTTPS skip this kit entirely.
   backup and intent directories (0700/0600); no writable or linked ancestors.
   The CA archive may be under an owner home: securely open its regular inode,
   revalidate identity/stat, and stage only the two selected members into
-  root-only storage. Never copy/hash the whole archive on the live path.
+  root-only storage. Check never reads member bodies. Apply never copies/hashes
+  the whole archive or keeps unselected decoded bodies.
 - Lock concurrent operators. Atomically persist and fsync intent transitions
   before side effects; handle interruption/partial changes by refusing blind
   retries and providing explicit rollback. A failure must not strand a

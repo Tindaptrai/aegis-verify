@@ -56,6 +56,11 @@ wrapper only. Live intake uses `read_archive_ca_members(source: BinaryIO,
 p: Profile) -> tuple[bytes, bytes]` on a securely opened seekable uncompressed
 tar: inspect headers, seek over unrelated bodies, read only the two targets,
 reject compression/hidden trailers/links/duplicates/traversal and enforce bounds.
+`read_vendor_ca_archive(source: BinaryIO, p: Profile) -> tuple[bytes, bytes]`
+dispatches plain tar to that reader, or bounded streaming gzip/tar selection
+which decodes/discards unrelated plaintext without retaining/logging/extracting
+it. Reject concatenated gzip/trailing junk and cap both raw/decoded bytes at
+32 MiB; per member 1 MiB, count 128. Never fully decompress into memory/disk.
 `create_http_certificate(work: Path, p: Profile, ca_pem: bytes, ca_key: bytes,
 old_leaf: bytes) -> tuple[bytes, bytes]` returns cert/key after real verification.
 `firewall_text(p: Profile) -> str`, `verify_table(document: dict, p: Profile) -> None`,
@@ -77,6 +82,9 @@ TLS output `/etc/wazuh-indexer/aegis-http/tls/indexer-http{,-key}.pem`.
   SAN/EKU, preserved subject, PKCS#8 and bounded validity. Never log key bytes.
   On Windows unavailable OpenSSL can be an explicit local skip, required Linux
   mode must fail. Commands use argv, bounded timeouts and sanitized failures.
+- [ ] Qualify actual vendor gzip input with a synthetic unrelated-credential
+  marker and malformed/concatenated/bomb fixtures. Only CA/key returned or
+  persisted; keep instrumented seek-only plain-tar regression unchanged.
 - [ ] Run components once green; self-review; commit only sanitized code/tests.
 
 ### Task 2: Root host checks and recoverable transaction
@@ -105,8 +113,9 @@ Check creates no files (including lock/intent) and never reads private CA key.
   before each mutation. Copy only the kit's own manifest-pinned code into the
   fixed root-owned installed root. New file/dir metadata is explicit. Original
   files/unit/drop-in/firewall captured before change. Keep a root recovery log.
-  Keep the CA archive open by verified inode/stat, use Task1 streaming intake
-  and stage only selected CA/key bytes; never copy/hash/load unrelated bodies.
+  Keep the CA archive open by verified inode/stat, use `read_vendor_ca_archive`
+  and stage only selected CA/key bytes; never copy/hash the whole archive or
+  retain unselected decoded bodies. Gzip skipping necessarily decodes bytes.
 - [ ] Arm and verify guard before HTTP changes. Install fixed profile/code,
   TLS files, guard unit/drop-in and patch; daemon-reload; restart Indexer only.
   Every Indexer start includes root `ExecStartPre=+... guard-verify` as well as

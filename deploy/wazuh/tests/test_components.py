@@ -1,5 +1,7 @@
 """Synthetic component tests; no services, host firewall or lab files are used."""
 import copy
+import contextlib
+import gzip
 import hashlib
 import importlib
 import io
@@ -228,6 +230,123 @@ class Components(unittest.TestCase):
         for source in [Nonseekable(archive(base)), io.BufferedReader(io.BytesIO(archive(base)))]:
             with source, self.assertRaises(self.c.SetupError):
                 reader(source, p)
+
+    def test_vendor_gzip_selects_only_targets_with_bounded_reads_and_no_output_or_extraction(self):
+        reader = getattr(self.c, "read_vendor_ca_archive", None)
+        self.assertIsNotNone(reader, "bounded vendor archive intake is missing")
+        marker = b"SYNTHETIC_UNRELATED_CREDENTIAL_DO_NOT_RETAIN"
+        base = [("password.txt", marker * 4096, tarfile.REGTYPE),
+                ("certs/root-ca.pem", b"ca", tarfile.REGTYPE),
+                ("other-key.pem", marker * 4096, tarfile.REGTYPE),
+                ("certs/root-ca.key", b"key", tarfile.REGTYPE)]
+        p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(b"ca").hexdigest())).encode())
+
+        class BoundedSource(io.BytesIO):
+            def read(self, size=-1):
+                if not 0 < size <= 65536:
+                    raise AssertionError("source read must be explicit and bounded")
+                return super().read(size)
+
+        source = BoundedSource(gzip.compress(archive(base)))
+        source.seek(7)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with tempfile.TemporaryDirectory() as temporary:
+            before = Path.cwd()
+            try:
+                os.chdir(temporary)
+                with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    actual = reader(source, p)
+                self.assertEqual(list(Path(temporary).iterdir()), [])
+            finally:
+                os.chdir(before)
+        self.assertEqual(actual, (b"ca", b"key"))
+        self.assertNotIn(marker, b"".join(actual))
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertEqual(source.tell(), 7)
+        self.assertFalse(source.closed)
+
+    def test_vendor_intake_dispatches_plain_tar_and_rejects_unsafe_gzip_members(self):
+        reader = getattr(self.c, "read_vendor_ca_archive", None)
+        self.assertIsNotNone(reader, "bounded vendor archive intake is missing")
+        base = [("certs/root-ca.pem", b"ca", tarfile.REGTYPE), ("certs/root-ca.key", b"key", tarfile.REGTYPE)]
+        p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(b"ca").hexdigest())).encode())
+        safe = archive(base)
+        self.assertEqual(reader(io.BytesIO(safe), p), (b"ca", b"key"))
+        self.assertEqual(reader(io.BytesIO(gzip.compress(safe)), p), (b"ca", b"key"))
+        for name, extra in [
+                ("symlink", ("link", b"", tarfile.SYMTYPE)),
+                ("hardlink", ("link", b"", tarfile.LNKTYPE)),
+                ("device", ("device", b"", tarfile.CHRTYPE)),
+                ("duplicate", base[0]),
+                ("parent", ("../outside", b"x", tarfile.REGTYPE)),
+                ("absolute", ("/outside", b"x", tarfile.REGTYPE)),
+                ("unsafe", ("dollar$name", b"x", tarfile.REGTYPE)),
+                ("oversized", ("big", b"x" * (1024 * 1024 + 1), tarfile.REGTYPE)),
+                ("extension", ("pax", b"", tarfile.XHDTYPE)),
+                ("longname", ("longname", b"", tarfile.GNUTYPE_LONGNAME)),
+                ("sparse", ("sparse", b"", tarfile.GNUTYPE_SPARSE))]:
+            with self.subTest(defect=name), self.assertRaises(self.c.SetupError) as caught:
+                reader(io.BytesIO(gzip.compress(archive(base + [extra]))), p)
+            self.assertEqual(str(caught.exception), "archive_invalid")
+
+    def test_vendor_gzip_does_not_accumulate_unselected_plaintext(self):
+        import tracemalloc
+        reader = getattr(self.c, "read_vendor_ca_archive", None)
+        self.assertIsNotNone(reader, "bounded vendor archive intake is missing")
+        base = [(f"unrelated-{n}", b"x" * (1024 * 1024), tarfile.REGTYPE) for n in range(20)]
+        base.extend([("certs/root-ca.pem", b"ca", tarfile.REGTYPE), ("certs/root-ca.key", b"key", tarfile.REGTYPE)])
+        compressed = gzip.compress(archive(base))
+        p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(b"ca").hexdigest())).encode())
+        # Fixture construction is outside tracing; measure only real intake.
+        source = io.BytesIO(compressed)
+        tracemalloc.start()
+        try:
+            result = reader(source, p)
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(result, (b"ca", b"key"))
+        self.assertLess(peak, 4 * 1024 * 1024, "intake accumulated unselected decoded data")
+
+    def test_vendor_gzip_rejects_bombs_counts_bad_checksums_and_hidden_trailers(self):
+        reader = getattr(self.c, "read_vendor_ca_archive", None)
+        self.assertIsNotNone(reader, "bounded vendor archive intake is missing")
+        base = [("certs/root-ca.pem", b"ca", tarfile.REGTYPE), ("certs/root-ca.key", b"key", tarfile.REGTYPE)]
+        p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(b"ca").hexdigest())).encode())
+        safe = archive(base)
+        compressed = gzip.compress(safe)
+        self.assertEqual(reader(io.BytesIO(compressed), p), (b"ca", b"key"))
+        # The malformed header is an additional member, after both valid targets.
+        damaged = bytearray(archive(base + [("damaged", b"x", tarfile.REGTYPE)]))
+        damaged[2048] ^= 1
+        bad_crc = compressed[:-8] + bytes([compressed[-8] ^ 1]) + compressed[-7:]
+        extra_zeros = b"\0" * (32 * 1024 * 1024 + 512 - len(safe))
+        # Legal gzip FCOMMENT grows only raw input; decoded tar stays valid.
+        oversized_header = (compressed[:3] + bytes([compressed[3] | 16]) + compressed[4:10]
+                            + b"c" * (32 * 1024 * 1024) + b"\0" + compressed[10:])
+        defects = {
+            "gzip concatenation": compressed + compressed,
+            "compressed junk": compressed + b"junk",
+            "zero compressed trailer": compressed + b"\0" * 512,
+            "gzip crc": bad_crc,
+            "truncated gzip": compressed[:-1],
+            "hidden tar member": gzip.compress(safe + archive([("hidden", b"x", tarfile.REGTYPE)])),
+            "nonzero tar trailer": gzip.compress(safe + b"x" * 512),
+            "short tar trailer": gzip.compress(safe + b"\0"),
+            "missing tar terminator": gzip.compress(safe[:2048]),
+            "truncated tar body": gzip.compress(archive(base + [("truncated", b"x" * 512, tarfile.REGTYPE)])[:2570]),
+            "tar checksum": gzip.compress(damaged),
+            "decoded limit": gzip.compress(safe + extra_zeros),
+            "raw limit": oversized_header,
+            "member count": gzip.compress(archive(base + [(f"member-{n}", b"x", tarfile.REGTYPE) for n in range(127)])),
+        }
+        for name, raw in defects.items():
+            with self.subTest(defect=name), self.assertRaises(self.c.SetupError) as caught:
+                reader(io.BytesIO(raw), p)
+            self.assertEqual(str(caught.exception), "archive_invalid")
+        with self.assertRaises(self.c.SetupError):
+            reader(io.BytesIO(compressed), self.p)  # Only defect: CA file pin.
 
     def nft_document(self):
         table = "aegis_wazuh_http_v1"
