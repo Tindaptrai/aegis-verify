@@ -132,6 +132,12 @@ class VendorPublisher:
                     raise SetupError("vendor_drift")
                 target_fd = self.ops.open(parent, name)
                 self._same(parent, name, target_fd, before)
+                # Existing vendor replacements preserve the caller's frozen
+                # attributes; a later inspection must not bless an intervening
+                # ownership/mode edit as a new baseline (including rollback).
+                held = self.ops.fstat(target_fd)
+                if (held.st_uid, held.st_gid, stat.S_IMODE(held.st_mode)) != (owner, group, mode):
+                    raise SetupError("vendor_drift")
                 original = self.ops.read(target_fd)
                 self._same(parent, name, target_fd, before, body=original)
                 if sha(original) not in expected:

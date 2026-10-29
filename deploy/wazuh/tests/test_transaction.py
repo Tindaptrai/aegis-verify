@@ -878,6 +878,82 @@ class PublicationTests(unittest.TestCase):
         with self.assertRaisesRegex(SetupError, "vendor_drift"):
             host.restore(SimpleNamespace(config_path="synthetic"), snapshot, Path("synthetic"))
 
+    def _assert_patched_rollback_preserves_metadata_edit(self, *, handoff):
+        transaction = importlib.import_module("deploy.wazuh.https_setup.transaction")
+        cases = [({"uid": 123, "gid": 123, "mode": 0o660}, {"mode": 0o640}),
+                 ({"uid": 123, "gid": 123, "mode": 0o660}, {"uid": 0}),
+                 ({"uid": 123, "gid": 0, "mode": 0o640}, {"gid": 123})]
+        for original_meta, edit in cases:
+            with self.subTest(edit=edit, handoff=handoff), tempfile.TemporaryDirectory() as temporary:
+                ops = PublicationKernel()
+                target = ops.node(body=b"patched", **original_meta)
+                ops.entries[1, "config"] = target
+                ops.fds[2] = ops.node(directory=True, uid=0, gid=0, mode=0o700)
+                publisher = self.h.VendorPublisher(ops, stage_fd=2)
+                fs = self.h.SecureFS()
+                journals = []
+                @contextmanager
+                def parent(path, uid, gid):
+                    yield 1, "config"
+                @contextmanager
+                def publication(path, kind):
+                    record = {"status": "prepared"}
+                    journals.append(record)
+                    if handoff:
+                        target.update(edit)
+                    try:
+                        yield publisher
+                        record["status"] = "complete"
+                    except BaseException:
+                        record["status"] = "failed"
+                        raise
+                fs.vendor_parent, fs.publication = parent, publication
+                fs.check_publications = lambda: None
+                fs.read = lambda path, **kwargs: b"original"
+                linux = self.h.LinuxHost(fs=fs, commands=object())
+                linux.vread = lambda _: target["body"]
+                linux.vstat = lambda _: ops.info(target)
+                commands = []
+                linux.run = lambda *args, **kwargs: commands.append(args)
+                synthetic = SyntheticHost()
+                store = transaction.DurableStore(Path(temporary) / "state", sync_directory=lambda _: None)
+                coordinator = transaction.Coordinator(synthetic, store)
+                checked = coordinator.check("profile")
+                coordinator.apply("profile", checked["profile_sha256"], checked["check_sha256"])
+                snapshot = {"uid": 123, "gid": 123,
+                    "metadata": original_meta | {"mode": stat.S_IFREG | original_meta["mode"]},
+                    "original_sha256": hashlib.sha256(b"original").hexdigest(),
+                    "patched_sha256": hashlib.sha256(b"patched").hexdigest(),
+                    "guard_unit_absent": True, "dropin_absent": True, "table_absent": True}
+                intent = store.read()
+                intent["snapshot"] = snapshot
+                store.save(intent)
+                synthetic.restore = linux.restore
+                initial_restarts = synthetic.events.count("restart")
+                if not handoff:
+                    target.update(edit)
+                with patch.object(self.h.os, "fstat", return_value=SimpleNamespace(st_dev=1)):
+                    with self.assertRaisesRegex(SetupError, "recovery_required"):
+                        coordinator.rollback()
+                self.assertIs(ops.entries[1, "config"], target)
+                self.assertEqual(target["body"], b"patched")
+                for key, value in (original_meta | edit).items():
+                    self.assertEqual(target[key], value)
+                self.assertEqual(ops.renames, [])
+                self.assertEqual(ops.metadata_changes, [])
+                self.assertEqual(commands, [])
+                self.assertEqual(synthetic.events.count("restart"), initial_restarts)
+                self.assertTrue(synthetic.guard)
+                self.assertEqual(store.read()["status"], "recovery_required")
+                self.assertEqual(store.read()["snapshot"], snapshot)
+                self.assertEqual(journals, [{"status": "failed"}])
+
+    def test_patched_rollback_rejects_mode_owner_group_drift_without_repair(self):
+        self._assert_patched_rollback_preserves_metadata_edit(handoff=False)
+
+    def test_patched_rollback_rejects_metadata_change_during_publisher_handoff(self):
+        self._assert_patched_rollback_preserves_metadata_edit(handoff=True)
+
 
 if __name__ == "__main__":
     unittest.main()
