@@ -51,7 +51,11 @@ namespaces/units; live Wazuh acceptance stays separate.
 leaf_path, ca_archive, ca_member, key_member, expected_ca_file_sha256,
 expected_ca_der_sha256, expected_leaf_der_sha256` with no extra values.
 `patch_http_config(raw: bytes, p: Profile) -> bytes`,
-`archive_ca_members(raw: bytes, p: Profile) -> tuple[bytes, bytes]`;
+`archive_ca_members(raw: bytes, p: Profile) -> tuple[bytes, bytes]` is an offline
+wrapper only. Live intake uses `read_archive_ca_members(source: BinaryIO,
+p: Profile) -> tuple[bytes, bytes]` on a securely opened seekable uncompressed
+tar: inspect headers, seek over unrelated bodies, read only the two targets,
+reject compression/hidden trailers/links/duplicates/traversal and enforce bounds.
 `create_http_certificate(work: Path, p: Profile, ca_pem: bytes, ca_key: bytes,
 old_leaf: bytes) -> tuple[bytes, bytes]` returns cert/key after real verification.
 `firewall_text(p: Profile) -> str`, `verify_table(document: dict, p: Profile) -> None`,
@@ -86,7 +90,8 @@ TLS output `/etc/wazuh-indexer/aegis-http/tls/indexer-http{,-key}.pem`.
 `status, profile_sha256, check_sha256, facts`; caller freezes hashes from stdout.
 Durable state `/var/backups/aegis-wazuh-https/intent.json`, exclusive lock beside
 it; root-only exclusive backup subdirectory. A check digest covers stable host,
-config/units/firewall/cert/archive stat+hash facts but not moving time/PIDs.
+config/units/firewall/cert hashes and archive stat identity facts, excluding
+moving time/PIDs. Never read/hash the complete live CA archive during check.
 Check creates no files (including lock/intent) and never reads private CA key.
 
 - [ ] Write red tests for wrong host/version/owners/paths, writable ancestors,
@@ -100,6 +105,8 @@ Check creates no files (including lock/intent) and never reads private CA key.
   before each mutation. Copy only the kit's own manifest-pinned code into the
   fixed root-owned installed root. New file/dir metadata is explicit. Original
   files/unit/drop-in/firewall captured before change. Keep a root recovery log.
+  Keep the CA archive open by verified inode/stat, use Task1 streaming intake
+  and stage only selected CA/key bytes; never copy/hash/load unrelated bodies.
 - [ ] Arm and verify guard before HTTP changes. Install fixed profile/code,
   TLS files, guard unit/drop-in and patch; daemon-reload; restart Indexer only.
   Every Indexer start includes root `ExecStartPre=+... guard-verify` as well as

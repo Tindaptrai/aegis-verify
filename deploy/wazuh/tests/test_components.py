@@ -135,25 +135,99 @@ class Components(unittest.TestCase):
 
     def test_archive_rejects_links_duplicates_traversal_and_limits(self):
         base = [("certs/root-ca.pem", b"ca", tarfile.REGTYPE), ("certs/root-ca.key", b"key", tarfile.REGTYPE)]
+        p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(b"ca").hexdigest())).encode())
+        safe = archive(base)
+        self.assertEqual(self.c.archive_ca_members(safe, p), (b"ca", b"key"))
         for extra in [("link", b"", tarfile.SYMTYPE), ("link", b"", tarfile.LNKTYPE),
                       ("../outside", b"", tarfile.REGTYPE), ("/outside", b"", tarfile.REGTYPE),
                       ("certs/root-ca.pem", b"ca", tarfile.REGTYPE),
                       ("oversized", b"x" * (1024 * 1024 + 1), tarfile.REGTYPE)]:
             with self.subTest(extra=extra[0]), self.assertRaises(self.c.SetupError):
-                self.c.archive_ca_members(archive(base + [extra]), self.p)
+                self.c.archive_ca_members(archive(base + [extra]), p)
         with self.assertRaises(self.c.SetupError):
-            self.c.archive_ca_members(b"x" * (32 * 1024 * 1024 + 1), self.p)
+            self.c.archive_ca_members(safe + b"\0" * (32 * 1024 * 1024 + 512 - len(safe)), p)
 
     def test_archive_rejects_hidden_concatenated_duplicates_and_compression_bombs(self):
         import gzip
         ca = b"synthetic ca"
         p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(ca).hexdigest())).encode())
-        safe = archive([("certs/root-ca.pem", ca, tarfile.REGTYPE), ("certs/root-ca.key", b"key", tarfile.REGTYPE)])
+        base = [("certs/root-ca.pem", ca, tarfile.REGTYPE), ("certs/root-ca.key", b"key", tarfile.REGTYPE)]
+        safe = archive(base)
+        self.assertEqual(self.c.archive_ca_members(safe, p), (ca, b"key"))
         self.assertEqual(self.c.archive_ca_members(gzip.compress(safe), p), (ca, b"key"))
-        for bad in [safe + safe, gzip.compress(b"x" * (32 * 1024 * 1024 + 1)),
-                    archive([(f"member-{n}", b"x", tarfile.REGTYPE) for n in range(129)])]:
+        oversized = safe + b"\0" * (32 * 1024 * 1024 + 512 - len(safe))
+        for bad in [safe + safe, gzip.compress(oversized),
+                    archive(base + [(f"member-{n}", b"x", tarfile.REGTYPE) for n in range(127)])]:
             with self.subTest(size=len(bad)), self.assertRaises(self.c.SetupError):
                 self.c.archive_ca_members(bad, p)
+
+    def test_seekable_intake_never_reads_unrelated_member_bodies(self):
+        reader = getattr(self.c, "read_archive_ca_members", None)
+        self.assertIsNotNone(reader, "strict seekable archive intake is missing")
+        base = [("password.txt", b"x" * 512, tarfile.REGTYPE),
+                ("certs/root-ca.pem", b"ca", tarfile.REGTYPE),
+                ("unrelated-key.pem", b"y" * 512, tarfile.REGTYPE),
+                ("certs/root-ca.key", b"key", tarfile.REGTYPE),
+                ("trailing-password.txt", b"z" * 512, tarfile.REGTYPE)]
+        p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(b"ca").hexdigest())).encode())
+
+        class BodyGuard(io.BytesIO):
+            def read(self, size=-1):
+                start = self.tell()
+                end = len(self.getbuffer()) if size < 0 else start + size
+                for left, right in [(512, 1024), (2560, 3072), (4608, 5120)]:
+                    if start < right and end > left:
+                        raise AssertionError("read overlaps unrelated synthetic body")
+                return super().read(size)
+
+        source = BodyGuard(archive(base))
+        source.seek(5)
+        self.assertEqual(reader(source, p), (b"ca", b"key"))
+        self.assertFalse(source.closed)
+        self.assertEqual(source.tell(), 5)
+
+    def test_seekable_intake_rejects_single_defect_archives_with_valid_targets(self):
+        import gzip
+        reader = getattr(self.c, "read_archive_ca_members", None)
+        self.assertIsNotNone(reader, "strict seekable archive intake is missing")
+        base = [("certs/root-ca.pem", b"ca", tarfile.REGTYPE), ("certs/root-ca.key", b"key", tarfile.REGTYPE)]
+        p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(b"ca").hexdigest())).encode())
+        safe = archive(base)
+        self.assertEqual(reader(io.BytesIO(safe), p), (b"ca", b"key"))
+        defects = {
+            "compression": gzip.compress(safe),
+            "hidden duplicate archive": safe + safe,
+            "hidden new member": safe + archive([("hidden", b"hidden", tarfile.REGTYPE)]),
+            "nonzero trailer": safe + b"x" * 512,
+            "short trailer": safe + b"x",
+            "missing end marker": safe[:2048],
+            "symlink": archive(base + [("link", b"", tarfile.SYMTYPE)]),
+            "hardlink": archive(base + [("link", b"", tarfile.LNKTYPE)]),
+            "duplicate": archive(base + [base[0]]),
+            "parent traversal": archive(base + [("../outside", b"x", tarfile.REGTYPE)]),
+            "absolute": archive(base + [("/outside", b"x", tarfile.REGTYPE)]),
+            "member size": archive(base + [("oversized", b"x" * (1024 * 1024 + 1), tarfile.REGTYPE)]),
+            "member count": archive(base + [(f"member-{n}", b"x", tarfile.REGTYPE) for n in range(127)]),
+            "archive size": safe + b"\0" * (32 * 1024 * 1024 + 512 - len(safe)),
+            "extension record": archive(base + [("pax", b"", tarfile.XHDTYPE)]),
+        }
+        for name, raw in defects.items():
+            with self.subTest(defect=name), self.assertRaises(self.c.SetupError) as caught:
+                reader(io.BytesIO(raw), p)
+            self.assertEqual(str(caught.exception), "archive_invalid")
+
+    def test_seekable_intake_refuses_buffered_and_nonseekable_sources(self):
+        reader = getattr(self.c, "read_archive_ca_members", None)
+        self.assertIsNotNone(reader, "strict seekable archive intake is missing")
+        base = [("certs/root-ca.pem", b"ca", tarfile.REGTYPE), ("certs/root-ca.key", b"key", tarfile.REGTYPE)]
+        p = self.c.load_profile(json.dumps(dict(self.raw, expected_ca_file_sha256=hashlib.sha256(b"ca").hexdigest())).encode())
+        self.assertEqual(reader(io.BytesIO(archive(base)), p), (b"ca", b"key"))
+        class Nonseekable(io.BytesIO):
+            def seekable(self):
+                return False
+        for source in [Nonseekable(archive(base)), io.BufferedReader(io.BytesIO(archive(base)))]:
+            with source, self.assertRaises(self.c.SetupError):
+                reader(source, p)
 
     def nft_document(self):
         table = "aegis_wazuh_http_v1"
@@ -198,7 +272,8 @@ class Components(unittest.TestCase):
         dropin = self.f.indexer_dropin()
         self.assertIn("Requires=aegis-wazuh-http-guard.service", dropin)
         self.assertIn("After=aegis-wazuh-http-guard.service", dropin)
-        self.assertIn("ExecStartPre=/usr/bin/python3 /usr/local/lib/aegis-wazuh-https/Setup-Wazuh-HTTPS.py guard-verify --profile /etc/wazuh-indexer/aegis-http/profile.json", dropin)
+        self.assertIn("ExecStartPre=+/usr/bin/python3 /usr/local/lib/aegis-wazuh-https/Setup-Wazuh-HTTPS.py guard-verify --profile /etc/wazuh-indexer/aegis-http/profile.json", dropin)
+        self.assertNotIn("User=", dropin)
 
 
 class Certificates(unittest.TestCase):

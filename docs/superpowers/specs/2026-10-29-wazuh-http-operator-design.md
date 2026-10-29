@@ -27,7 +27,8 @@ CA signing key is available. Systems with usable HTTPS skip this kit entirely.
   and a frozen preflight hash, revalidates drift and takes a durable root-only
   backup/intent before changes. `status` is observational; `rollback` is explicit.
 - Read only the two exact, regular, unique, size-bounded CA members in the
-  archive; do not extract the archive or read unrelated password members. Match
+  seekable uncompressed tar archive; do not extract the archive or read unrelated
+  password members. Reject compressed archives on this strict live path. Match
   archived CA to live CA and its private key locally. Never log/export keys.
 - Create a new RSA-3072 PKCS#8 HTTP key and serverAuth / CA:FALSE certificate,
   preserving the old leaf subject with exactly loopback plus the approved
@@ -50,8 +51,9 @@ CA signing key is available. Systems with usable HTTPS skip this kit entirely.
 - Root-owned immutable code/profile and root:Indexer-group TLS directories
   (0750), key/certificate service-readable but not writable. Root-only work,
   backup and intent directories (0700/0600); no writable or linked ancestors.
-  The CA archive may be under an owner home: securely stage its open regular
-  inode into root-only storage and revalidate identity/hash before use.
+  The CA archive may be under an owner home: securely open its regular inode,
+  revalidate identity/stat, and stage only the two selected members into
+  root-only storage. Never copy/hash the whole archive on the live path.
 - Lock concurrent operators. Atomically persist and fsync intent transitions
   before side effects; handle interruption/partial changes by refusing blind
   retries and providing explicit rollback. A failure must not strand a

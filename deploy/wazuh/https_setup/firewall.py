@@ -80,5 +80,5 @@ Requires=aegis-wazuh-http-guard.service
 After=aegis-wazuh-http-guard.service
 
 [Service]
-ExecStartPre=/usr/bin/python3 {ENTRYPOINT} guard-verify --profile {PROFILE}
+ExecStartPre=+/usr/bin/python3 {ENTRYPOINT} guard-verify --profile {PROFILE}
 '''

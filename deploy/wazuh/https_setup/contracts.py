@@ -7,6 +7,7 @@ import json
 from pathlib import PurePosixPath
 import re
 import tarfile
+from typing import BinaryIO
 import zlib
 
 
@@ -213,41 +214,102 @@ def patch_http_config(raw: bytes, p: Profile) -> bytes:
 
 
 def archive_ca_members(raw: bytes, p: Profile) -> tuple[bytes, bytes]:
-    """Read two pinned members in memory; never extract or read other bodies."""
+    """Offline bytes convenience only; live callers use read_archive_ca_members.
+
+    Gzip is supported only here, where the complete archive is already in RAM.
+    Never obtain this argument by reading/copying/hashing a live CA archive.
+    """
     limit = 32 * 1024 * 1024
-    member_limit = 1024 * 1024
     try:
-        if len(raw) > limit:
+        if not isinstance(raw, bytes) or len(raw) > limit:
             raise ValueError
         if raw.startswith(b"\x1f\x8b"):
             decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
             raw = decoder.decompress(raw, limit + 1)
             if len(raw) > limit or not decoder.eof or decoder.unused_data:
                 raise ValueError
-        selected = {}
-        seen = set()
-        with tarfile.open(fileobj=io.BytesIO(raw), mode="r:", ignore_zeros=True) as tar:
-            for index, member in enumerate(tar):
+        return read_archive_ca_members(io.BytesIO(raw), p)
+    except (ValueError, OSError, zlib.error):
+        raise SetupError("archive_invalid") from None
+
+
+def read_archive_ca_members(source: BinaryIO, p: Profile) -> tuple[bytes, bytes]:
+    """Read only two bodies from a seekable, unbuffered uncompressed tar inode.
+
+    The host caller verifies ownership, modes, inode identity and stat stability
+    and supplies an unbuffered binary file (e.g. os.fdopen(fd, 'rb', buffering=0)).
+    Buffered readers are refused because their read-ahead may ingest other bodies.
+    The source remains open and its initial offset is restored, even on rejection.
+    No extraction, whole-archive copy or whole-archive hash takes place here.
+    Only ordinary regular-file/directory headers are supported; extension records
+    (including PAX, GNU long-name and sparse records) require bodies and reject.
+    """
+    limit = 32 * 1024 * 1024
+    member_limit = 1024 * 1024
+    block = 512
+    try:
+        if isinstance(source, (io.BufferedReader, io.BufferedRandom)) or not source.seekable() or not source.readable():
+            raise ValueError
+        original = source.tell()
+        try:
+            source.seek(0, io.SEEK_END)
+            size = source.tell()
+            if size < 2 * block or size > limit or size % block:
+                raise ValueError
+
+            def read_exact(length):
+                chunks = []
+                while length:
+                    chunk = source.read(length)
+                    if not isinstance(chunk, bytes) or not chunk or len(chunk) > length:
+                        raise ValueError
+                    chunks.append(chunk)
+                    length -= len(chunk)
+                return b"".join(chunks)
+
+            selected = {}
+            seen = set()
+            offset = 0
+            ended = False
+            while offset + block <= size:
+                source.seek(offset)
+                header = read_exact(block)
+                if header == b"\0" * block:
+                    # Two zero blocks end the archive. The remaining record
+                    # padding must be entirely zero; never parse hidden members.
+                    if offset + 2 * block > size or read_exact(block) != b"\0" * block:
+                        raise ValueError
+                    for _ in range((size - offset - 2 * block) // block):
+                        if read_exact(block) != b"\0" * block:
+                            raise ValueError
+                    ended = True
+                    break
+                if len(seen) >= 128:
+                    raise ValueError
+                member = tarfile.TarInfo.frombuf(header, encoding="utf-8", errors="strict")
                 name = member.name.removesuffix("/") if member.isdir() else member.name
-                if index >= 128 or not _path(name, absolute=False) or name in seen:
+                if not _path(name, absolute=False) or name in seen:
                     raise ValueError
                 seen.add(name)
-                if not (member.isfile() or member.isdir()) or member.size < 0 or member.size > member_limit:
+                if member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE, tarfile.DIRTYPE) or member.linkname:
+                    raise ValueError
+                if member.size < 0 or member.size > member_limit or member.isdir() and member.size:
+                    raise ValueError
+                next_offset = offset + block + ((member.size + block - 1) // block) * block
+                if next_offset > size:
                     raise ValueError
                 if name in (p.ca_member, p.key_member):
                     if not member.isfile() or not member.size:
                         raise ValueError
-                    body = tar.extractfile(member)
-                    if body is None:
-                        raise ValueError
-                    with body:
-                        selected[name] = body.read(member_limit + 1)
-                    if len(selected[name]) != member.size:
-                        raise ValueError
-        if set(selected) != {p.ca_member, p.key_member}:
-            raise ValueError
-        if hashlib.sha256(selected[p.ca_member]).hexdigest() != p.expected_ca_file_sha256:
-            raise ValueError
-        return selected[p.ca_member], selected[p.key_member]
-    except (ValueError, OSError, EOFError, tarfile.TarError, zlib.error):
+                    selected[name] = read_exact(member.size)
+                # Skip all unselected bodies and all body padding by seek only.
+                offset = next_offset
+            if not ended or set(selected) != {p.ca_member, p.key_member}:
+                raise ValueError
+            if hashlib.sha256(selected[p.ca_member]).hexdigest() != p.expected_ca_file_sha256:
+                raise ValueError
+            return selected[p.ca_member], selected[p.key_member]
+        finally:
+            source.seek(original)
+    except (AttributeError, ValueError, OSError, EOFError, UnicodeError, tarfile.TarError):
         raise SetupError("archive_invalid") from None
