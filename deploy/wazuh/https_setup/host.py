@@ -697,10 +697,26 @@ class LinuxHost:
         raw = self.run("systemctl", "show", "--all", "--no-pager",
                        "--property=" + ",".join(DEPENDENCIES), "--", unit)
         try:
-            pairs = [line.split("=", 1) for line in raw.decode("ascii").splitlines()]
-            props = dict(pairs)
-            if len(raw) > 65536 or len(pairs) != len(props) or set(props) != set(DEPENDENCIES):
+            if len(raw) > 65536:
                 raise ValueError
+            text = raw.decode("ascii")
+            if not re.fullmatch(r"[\x20-\x7e\n]*", text):
+                raise ValueError
+            pairs = [line.split("=", 1) for line in text.splitlines()]
+            props = dict(pairs)
+            if len(pairs) != len(props) or set(props) != set(DEPENDENCIES):
+                raise ValueError
+            for key, value in props.items():
+                names = shlex.split(value, comments=False, posix=True)
+                if (len(names) > 512 or len(names) != len(set(names)) or
+                        any(len(name) > 255 or not re.fullmatch(r"[A-Za-z0-9_.@\\:-]+\.[a-z]+", name) for name in names)):
+                    raise ValueError
+                # v255 shell_maybe_quote(str, 0): only backslash in the allowed
+                # unit alphabet needs quoting. Decode presentation, not \xNN IDs.
+                rendered = " ".join('"' + name.replace("\\", "\\\\") + '"' if "\\" in name else name for name in names)
+                if rendered != value:
+                    raise ValueError
+                props[key] = " ".join(names)
             return props
         except (ValueError, UnicodeError):
             raise SetupError("ufw_unsupported") from None

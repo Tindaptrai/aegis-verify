@@ -1301,6 +1301,82 @@ class UfwAdapterTests(unittest.TestCase):
         with self.assertRaisesRegex(SetupError, "ufw_unsupported"):
             self.host.dependency_properties("ufw.service")
 
+    def dependency_response(self, value=""):
+        return "".join(key + "=" + (value if key == "After" else "") + "\n"
+                       for key in self.a.DEPENDENCIES).encode("ascii")
+
+    def test_dependency_presentation_decodes_one_layer_preserving_unit_identity(self):
+        # Literal v255 string-array presentation, including doubled backslashes.
+        value = r'plain.service "dev-disk-by\\x2did-fixture.device" "run-fixture\\x20data.mount" instance@one.service'
+        expected = r'plain.service dev-disk-by\x2did-fixture.device run-fixture\x20data.mount instance@one.service'
+        calls = []
+        self.host.run = lambda *args: calls.append(args) or self.dependency_response(value)
+        unit = r'dev-disk-by\x2did-fixture.device'
+        observed = self.host.dependency_properties(unit)
+        self.assertEqual(observed, {key: expected if key == "After" else "" for key in self.a.DEPENDENCIES})
+        self.assertEqual(calls, [("systemctl", "show", "--all", "--no-pager",
+                                 "--property=" + ",".join(self.a.DEPENDENCIES), "--", unit)])
+
+    def test_dependency_presentation_refuses_noncanonical_or_hostile_values(self):
+        for value in ('"plain.service"', "'plain.service'", '"unterminated.service',
+                      'plain.service""', 'plain.service ', ' plain.service', 'plain.service  next.service',
+                      'plain.service\tnext.service', 'plain.service\r', 'plain.service\v',
+                      r'dev-\x2did.device', r'"dev-\x2did.device"', r'"dev-\\x2did.device"tail',
+                      'private/path.service', '$(private).service', '`private`.service', 'private;name.service',
+                      'private#name.service', 'private\x00name.service', 'private\x7fname.service',
+                      '""', ' ', 'nosuffix', '.service', 'unit.SERVICE'):
+            with self.subTest(value=value):
+                self.host.run = lambda *args: self.dependency_response(value)
+                with self.assertRaises(SetupError) as caught:
+                    self.host.dependency_properties("ufw.service")
+                self.assertEqual(str(caught.exception), "ufw_unsupported")
+
+    def test_dependency_presentation_refuses_malformed_response_envelopes(self):
+        valid = self.dependency_response()
+        for raw in (valid.replace(b"After=\n", b""), valid + b"Unknown=\n", valid + b"After=\n",
+                    valid + b"malformed\n", valid + b"\n", valid.replace(b"After=\n", b"After=unit-\xff.service\n"),
+                    valid + b" " * 65536):
+            with self.subTest(raw=raw[:32]):
+                self.host.run = lambda *args: raw
+                with self.assertRaises(SetupError) as caught:
+                    self.host.dependency_properties("ufw.service")
+                self.assertEqual(str(caught.exception), "ufw_unsupported")
+
+    def test_dependency_presentation_retains_name_count_and_duplicate_bounds(self):
+        longest = "a" * 247 + ".service"
+        maximum = " ".join(f"unit-{index}.service" for index in range(512))
+        for value in ("", "plain.service", longest, maximum):
+            self.host.run = lambda *args: self.dependency_response(value)
+            self.assertEqual(self.host.dependency_properties("ufw.service")["After"], value)
+        for value in ("a" + longest, maximum + " another.service", "plain.service plain.service",
+                      r'"dev-\\x2did.device" "dev-\\x2did.device"'):
+            with self.subTest(value=value[:32]):
+                self.host.run = lambda *args: self.dependency_response(value)
+                with self.assertRaises(SetupError) as caught:
+                    self.host.dependency_properties("ufw.service")
+                self.assertEqual(str(caught.exception), "ufw_unsupported")
+
+    def test_dependency_presentation_preserves_plain_fingerprint_and_escaped_graph_effects(self):
+        self.graph(installed=True)
+        fingerprint = self.reader.dependency_facts()
+        del self.host.dependency_properties  # exercise the real shared transport adapter
+        escaped = r'fixture-\x2drelay.service'
+        printed = r'"fixture-\\x2drelay.service"'
+        queries = []
+        def run(*args):
+            queries.append(args[-1])
+            return "".join(key + "=" + value.replace(escaped, printed) + "\n"
+                           for key, value in self.facts[args[-1]].items()).encode("ascii")
+        self.host.run = run
+        self.assertEqual(self.reader.dependency_facts(), fingerprint)
+        self.facts[escaped] = {key: "" for key in self.a.DEPENDENCIES}
+        self.facts[self.a.GUARD]["Wants"] = escaped
+        self.reader.dependency_facts()  # actual escaped identity remains a safe relay
+        self.assertIn(escaped, queries)
+        self.facts[escaped]["Conflicts"] = "ufw.service"
+        with self.assertRaisesRegex(SetupError, "^ufw_unsupported$"):
+            self.reader.dependency_facts()
+
     def test_conflict_stop_follows_every_collected_inverse_propagation(self):
         for root in (self.a.INDEXER, self.a.GUARD):
             for inverse in ("RequiredBy", "RequisiteOf", "BoundBy", "ConsistsOf", "PropagatesStopTo"):

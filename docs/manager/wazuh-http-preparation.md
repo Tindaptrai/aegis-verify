@@ -48,6 +48,10 @@ Dependency fixture chuẩn hóa song ánh toàn bộ danh tính unit đã quan s
 unit ngoài fixture trùng tên vai trò. Mọi query đảo ánh xạ về unit thực, giữ
 nguyên 18 thuộc tính và mọi edge, gồm inverse `ConflictedBy` do systemd tạo;
 thiếu thuộc tính không được coi là mảng rỗng. Proof giữ mapping và hash canonical raw facts.
+Reader dùng chung giải mã đúng một lớp quote/backslash của mảng string từ
+`systemctl show` systemd 255, giữ nguyên escape trong danh tính unit như `\x2d`.
+Chỉ nhận biểu diễn canonical, đúng 18 thuộc tính và các giới hạn hiện có;
+quote lỗi, tên trùng hoặc dữ liệu không hợp lệ đều bị từ chối, không bỏ edge.
 Cùng mapper phải admit baseline an toàn trước khi thêm dependency để thử refusal.
 Giữ sáu case cũ và thêm `conflict_indexer`, `conflict_guard`, `conflict_stop`:
 restart unit sở hữu kéo relay qua Wants; conflict của relay dừng wrapper giả
