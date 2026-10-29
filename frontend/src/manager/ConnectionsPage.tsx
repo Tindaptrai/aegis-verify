@@ -28,12 +28,13 @@ export function ConnectionsPage({ api, canManage, csrfToken, onAuthorityError, o
   const [inventory, setInventory] = useState<ConnectionList | null>(null); const [page, setPage] = useState(1); const [reload, setReload] = useState(0);
   const [open, setOpen] = useState(false); const [input, setInput] = useState<WazuhInput>(emptyInput); const [step, setStep] = useState<1 | 2 | 3>(1);
   const [draft, setDraft] = useState<ConnectionTest | null>(null); const [key, setKey] = useState(''); const [busy, setBusy] = useState(false);
+  const [saveIssued, setSaveIssued] = useState(false);
   const [error, setError] = useState(''); const [errorCode, setErrorCode] = useState<ConnectionErrorCode>(); const [saved, setSaved] = useState(false); const [denied, setDenied] = useState(false); const [now, setNow] = useState(Date.now());
   const mounted = useRef(false); const epoch = useRef(0); const active = useRef<AbortController | null>(null); const reads = useRef<AbortController | null>(null); const caRead = useRef(0);
   const authority = `${canManage}:${csrfToken}`; const currentAuthority = useRef(authority); currentAuthority.current = authority;
   const deniedRef = useRef(false);
   const addButton = useRef<HTMLButtonElement | null>(null); const nameInput = useRef<HTMLInputElement | null>(null);
-  function invalidate() { epoch.current++; caRead.current++; active.current?.abort(); active.current = null; setDraft(null); setKey(''); setBusy(false); setStep(1); }
+  function invalidate() { epoch.current++; caRead.current++; active.current?.abort(); active.current = null; setDraft(null); setKey(''); setSaveIssued(false); setBusy(false); setStep(1); }
   function close() { invalidate(); setOpen(false); setInput(emptyInput()); setError(''); setErrorCode(undefined); addButton.current?.focus(); }
   function fail(failure: unknown) {
     const code = failure instanceof ConnectionsApiError ? failure.code : undefined;
@@ -62,7 +63,9 @@ export function ConnectionsPage({ api, canManage, csrfToken, onAuthorityError, o
     return () => controller.abort();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, authority, page, reload]);
-  useEffect(() => { if (draft && Date.parse(draft.expires_at) <= now) { invalidate(); setError('Kiểm tra hết hạn. Cần kiểm tra lại trước khi lưu.'); } }, [draft, now]);
+  // An issued save can already be committed remotely. Expiry must not abort its
+  // response or discard the original pair needed for an idempotent replay.
+  useEffect(() => { if (draft && !saveIssued && Date.parse(draft.expires_at) <= now) { invalidate(); setError('Kiểm tra hết hạn. Cần kiểm tra lại trước khi lưu.'); } }, [draft, now, saveIssued]);
   function edit(field: keyof WazuhInput, value: string) {
     invalidate(); setError(''); setErrorCode(undefined); setSaved(false);
     setInput((previous) => ({ ...previous, ...(field === 'endpoint' ? { password: '' } : {}), [field]: value }));
@@ -93,6 +96,7 @@ export function ConnectionsPage({ api, canManage, csrfToken, onAuthorityError, o
     finally { if (current()) { active.current = null; setBusy(false); } }
   }
   function test() {
+    if (saveIssued) return;
     if (!validInput(input)) { setError('Kiểm tra HTTPS origin, môi trường, index và các trường bắt buộc.'); return; }
     setStep(2); setDraft(null); setKey('');
     void write((signal) => api.test(input, csrfToken, signal), (result) => {
@@ -105,8 +109,8 @@ export function ConnectionsPage({ api, canManage, csrfToken, onAuthorityError, o
     });
   }
   function save() {
-    if (!draft || Date.parse(draft.expires_at) <= Date.now() || step !== 3) return;
-    void write((signal) => api.save(draft.draft_id, key, csrfToken, signal), () => { close(); setSaved(true); setReload((n) => n + 1); });
+    if (!draft || (!saveIssued && Date.parse(draft.expires_at) <= Date.now()) || step !== 3) return;
+    void write((signal) => { setSaveIssued(true); return api.save(draft.draft_id, key, csrfToken, signal); }, () => { close(); setSaved(true); setReload((n) => n + 1); });
   }
   function prepare(source: ConnectionSource) {
     if (!inventory) return;
@@ -129,10 +133,10 @@ export function ConnectionsPage({ api, canManage, csrfToken, onAuthorityError, o
           <label>Public CA PEM<input type="file" accept=".pem,.crt,text/plain,application/x-pem-file" onChange={(event) => { void loadCA(event.target.files?.[0]); event.target.value = ''; }} /></label>
           {fields.slice(4).map(renderField)}
         </div><p>{input.ca_pem ? 'Public CA đã nạp trong bộ nhớ.' : 'Chọn public CA, tối đa 64 KiB. Không upload private key.'}</p>
-        <div className="connection-actions"><button onClick={() => onGuide('account')}>Cách tạo tài khoản đọc</button><button onClick={() => onGuide('ca')}>Cách lấy public CA</button><button disabled={busy || !validInput(input)} onClick={test}>Kiểm tra kết nối</button></div>
+        <div className="connection-actions"><button onClick={() => onGuide('account')}>Cách tạo tài khoản đọc</button><button onClick={() => onGuide('ca')}>Cách lấy public CA</button><button disabled={busy || saveIssued || !validInput(input)} onClick={test}>Kiểm tra kết nối</button></div>
         {busy && step === 2 && <p role="status">Đang kiểm tra policy, TLS, xác thực và truy vấn…</p>}
         {draft && <><h3>Truy vấn thành công</h3><ul>{Object.entries(labels).map(([check, label]) => <li key={check}>{label}: Đạt</li>)}</ul><p>Chỉ chứng minh thao tác đã test được phép; không chứng minh tài khoản không có quyền ghi. Snapshot hết hạn: {draft.expires_at}.</p>
-          {step === 2 ? <button className="primary" onClick={() => setStep(3)}>Xác nhận snapshot</button> : <><dl className="connection-summary">{Object.entries(draft.summary).filter(([field]) => !['source_id', 'version'].includes(field)).map(([field, value]) => <div key={field}><dt>{summaryLabels[field]}</dt><dd>{value}</dd></div>)}<div><dt>Thời điểm kiểm tra</dt><dd>{draft.tested_at}</dd></div></dl><p>Lưu không chuyển máy, không cấp quyền chạy, không tự bật admission.</p><button className="primary" disabled={busy || Date.parse(draft.expires_at) <= now} onClick={save}>Lưu nguồn</button></>}
+          {step === 2 ? <button className="primary" onClick={() => setStep(3)}>Xác nhận snapshot</button> : <><dl className="connection-summary">{Object.entries(draft.summary).filter(([field]) => !['source_id', 'version'].includes(field)).map(([field, value]) => <div key={field}><dt>{summaryLabels[field]}</dt><dd>{value}</dd></div>)}<div><dt>Thời điểm kiểm tra</dt><dd>{draft.tested_at}</dd></div></dl><p>Lưu không chuyển máy, không cấp quyền chạy, không tự bật admission.</p>{saveIssued && <p role="status">Yêu cầu lưu đã gửi. Nếu chưa nhận được xác nhận, bấm Lưu nguồn để kiểm tra lại cùng yêu cầu; không cần kiểm tra kết nối mới.</p>}<button className="primary" disabled={busy || (!saveIssued && Date.parse(draft.expires_at) <= now)} onClick={save}>Lưu nguồn</button></>}
         </>}
       </section>}
       <section aria-label="Nguồn đã lưu" className="connection-sources">{!inventory ? <p>Đang tải nguồn…</p> : inventory.results.length === 0 ? <p>Chưa có nguồn đã lưu.</p> : inventory.results.map((source) => <article className="panel panel-body" key={source.id}><h2>{source.name} <small>v{source.version}</small></h2>

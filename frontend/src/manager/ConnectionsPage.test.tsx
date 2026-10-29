@@ -97,6 +97,75 @@ describe('Connections workspace', () => {
     await screen.findByText('Nguồn mới đã lưu — máy vẫn dùng nguồn cũ.');
     expect(vi.mocked(api.save).mock.calls[0]?.slice(0, 3)).toEqual(vi.mocked(api.save).mock.calls[1]?.slice(0, 3));
   });
+  it('reconciles an already issued save whose committed response arrives after expiry', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    const api = connectionsFixture(); let finish!: (value: typeof syntheticSource) => void;
+    api.save = vi.fn(() => new Promise<typeof syntheticSource>((resolve) => { finish = resolve; }));
+    api.list = vi.fn().mockResolvedValueOnce({ results: [], count: 0, page: 1, page_size: 50, candidate_id: null })
+      .mockResolvedValue({ results: [syntheticSource], count: 1, page: 1, page_size: 50, candidate_id: null });
+    const view = render(<ConnectionsPage api={api} canManage csrfToken="csrf" onAuthorityError={vi.fn()} onGuide={vi.fn()} />);
+    try {
+      await fill(); await probe(); fireEvent.click(screen.getByRole('button', { name: 'Xác nhận snapshot' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Lưu nguồn' }));
+      const issued = vi.mocked(api.save).mock.calls[0]!;
+      act(() => { vi.advanceTimersByTime(301000); });
+      expect(issued[3]?.aborted).toBe(false);
+      await act(async () => { finish(syntheticSource); });
+      expect(await screen.findByText('Nguồn mới đã lưu — máy vẫn dùng nguồn cũ.')).toBeVisible();
+      expect(await screen.findByRole('heading', { name: 'Synthetic source v1' })).toBeVisible();
+      expect(api.save).toHaveBeenCalledTimes(1); expect(api.list).toHaveBeenCalledTimes(2);
+      expect(screen.queryByLabelText('Mật khẩu Indexer')).not.toBeInTheDocument();
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+  it.each(['before', 'after'] as const)('retries the original issued save pair when a response becomes ambiguous %s expiry', async (when) => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    const api = connectionsFixture(); let reject!: (failure: unknown) => void;
+    api.save = vi.fn().mockImplementationOnce(() => new Promise<typeof syntheticSource>((_, fail) => { reject = fail; })).mockResolvedValueOnce(syntheticSource);
+    const view = render(<ConnectionsPage api={api} canManage csrfToken="csrf" onAuthorityError={vi.fn()} onGuide={vi.fn()} />);
+    try {
+      await fill(); await probe(); fireEvent.click(screen.getByRole('button', { name: 'Xác nhận snapshot' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Lưu nguồn' }));
+      const issued = vi.mocked(api.save).mock.calls[0]!;
+      if (when === 'before') await act(async () => { reject(new Error('synthetic lost committed response')); });
+      act(() => { vi.advanceTimersByTime(301000); });
+      if (when === 'after') await act(async () => { reject(new Error('synthetic lost committed response')); });
+      expect(screen.getByRole('button', { name: 'Lưu nguồn' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Kiểm tra kết nối' })).toBeDisabled();
+      expect(screen.queryByText('Kiểm tra hết hạn. Cần kiểm tra lại trước khi lưu.')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Lưu nguồn' }));
+      expect(await screen.findByText('Nguồn mới đã lưu — máy vẫn dùng nguồn cũ.')).toBeVisible();
+      expect(vi.mocked(api.save).mock.calls[1]?.slice(0, 3)).toEqual(issued.slice(0, 3));
+      expect(api.save).toHaveBeenCalledTimes(2); expect(api.test).toHaveBeenCalledTimes(1);
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+  it('clears an ambiguous save only after an authoritative draft-expired replay denial', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    const api = connectionsFixture();
+    api.save = vi.fn().mockRejectedValueOnce(new Error('synthetic lost reply')).mockRejectedValueOnce(new ConnectionsApiError(409, 'draft_expired'));
+    const view = render(<ConnectionsPage api={api} canManage csrfToken="csrf" onAuthorityError={vi.fn()} onGuide={vi.fn()} />);
+    try {
+      await fill(); await probe(); fireEvent.click(screen.getByRole('button', { name: 'Xác nhận snapshot' }));
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Lưu nguồn' })); });
+      const issued = vi.mocked(api.save).mock.calls[0]!;
+      act(() => { vi.advanceTimersByTime(301000); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Lưu nguồn' })); });
+      expect(vi.mocked(api.save).mock.calls[1]?.slice(0, 3)).toEqual(issued.slice(0, 3));
+      expect(screen.getByRole('alert')).toHaveTextContent('draft_expired');
+      expect(screen.queryByRole('button', { name: 'Lưu nguồn' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Kiểm tra kết nối' })).toBeEnabled();
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
+  it('blocks an unissued confirmed draft when its fake-clock expiry passes', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+    const api = connectionsFixture();
+    const view = render(<ConnectionsPage api={api} canManage csrfToken="csrf" onAuthorityError={vi.fn()} onGuide={vi.fn()} />);
+    try {
+      await fill(); await probe(); fireEvent.click(screen.getByRole('button', { name: 'Xác nhận snapshot' }));
+      act(() => { vi.advanceTimersByTime(301000); });
+      expect(screen.queryByRole('button', { name: 'Lưu nguồn' })).not.toBeInTheDocument();
+      expect(screen.getByRole('alert')).toHaveTextContent('Kiểm tra hết hạn'); expect(api.save).not.toHaveBeenCalled();
+    } finally { view.unmount(); vi.useRealTimers(); }
+  });
   it('expires a tested snapshot and prevents saving it', async () => {
     const api = connectionsFixture(); api.test = vi.fn(async () => { const soon = tested(); soon.expires_at = new Date(Date.now() + 500).toISOString(); return soon; });
     render(<ConnectionsPage api={api} canManage csrfToken="csrf" onAuthorityError={vi.fn()} onGuide={vi.fn()} />); await fill(); await probe();
