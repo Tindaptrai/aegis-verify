@@ -173,9 +173,14 @@ def patch_http_config(raw: bytes, p: Profile) -> bytes:
                 indent, value = entry.groups()
                 if list_indent is not None and len(indent) != list_indent:
                     raise ValueError
-                # Bare indicators introduce nested collections, even without a
-                # following value. Quoted literal indicators remain scalars.
-                if value.split("#", 1)[0].strip() in {"-", ":"} or isinstance(_yaml_value(value), list):
+                # Unquoted indicators/terminal colons introduce collections,
+                # even without a value. Do not split comments inside quotes.
+                plain = value.strip()
+                if not plain.startswith(("'", '"')):
+                    plain = plain.split("#", 1)[0].rstrip()
+                    if plain == "-" or plain.endswith(":"):
+                        raise ValueError
+                if isinstance(_yaml_value(value), list):
                     raise ValueError
                 list_indent = len(indent)
                 list_count += 1

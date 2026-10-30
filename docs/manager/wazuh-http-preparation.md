@@ -166,7 +166,8 @@ sequence không thụt dưới mapping key là dạng hợp lệ của
 Giá trị scalar vẫn theo giới hạn plain/quoted hiện có. List rỗng, item rỗng,
 dash không có header, thụt lẫn mức, mapping lồng, collection lồng dạng block/flow,
 alias, anchor, tag và directive đều bị từ chối. Item chỉ có `-` hoặc `:` không
-quote cũng bị từ chối; chuỗi literal có quote `"-"` hoặc `":"` vẫn hợp lệ.
+quote hoặc mapping thiếu value như `name:` cũng bị từ chối, kể cả trước comment;
+chuỗi literal có quote `"-"`, `":"`, `"name:"` hoặc `'name:'` vẫn hợp lệ.
 HTTP target dạng block list, key trùng/prefix xung đột và network override bị cấm
 vẫn bị từ chối. Node/cluster/security list, comment, thứ tự và LF/CRLF được giữ
 nguyên byte; không tự sửa indentation hoặc điền danh tính node.

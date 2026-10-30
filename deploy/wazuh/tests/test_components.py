@@ -189,6 +189,24 @@ class Components(unittest.TestCase):
             raw = b'items:\n' + indent + b'- "-"\n' + indent + b"- ':'\n"
             self.assertTrue(self.c.patch_http_config(raw, self.p).startswith(raw))
 
+    def test_config_block_lists_refuse_unquoted_terminal_mapping_colons(self):
+        for indent in (b'', b'  '):
+            for value in (b'name:', b'name: # empty mapping value'):
+                raw = b'items:\n' + indent + b'- ' + value + b'\n'
+                with self.subTest(raw=raw), self.assertRaisesRegex(self.c.SetupError, 'config_unsupported'):
+                    self.c.patch_http_config(raw, self.p)
+
+    def test_config_block_lists_preserve_quoted_and_embedded_colons(self):
+        for indent in (b'', b'  '):
+            for value in (b'"name:"', b"'name:'", b'name:value',
+                          b'"name:#fragment"', b"'name:#fragment'"):
+                for comment in (b'', b' # retained comment'):
+                    raw = b'items:\n' + indent + b'- ' + value + comment + b'\n'
+                    with self.subTest(raw=raw):
+                        patched = self.c.patch_http_config(raw, self.p)
+                        self.assertTrue(patched.startswith(raw))
+                        self.assertEqual(self.c.patch_http_config(patched, self.p), patched)
+
     def test_config_indentless_lists_keep_target_and_network_refusals(self):
         prefix = b'cluster.initial_master_nodes:\n- synthetic-node\n'
         for bad in [b'cluster.initial_master_nodes: duplicate\n', b'cluster: collision\n',
