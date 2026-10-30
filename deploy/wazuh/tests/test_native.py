@@ -15,6 +15,7 @@ from pathlib import Path
 import secrets
 import re
 import select
+import shlex
 import shutil
 import signal
 import socket
@@ -293,6 +294,7 @@ class NetworkFixture:
         self.namespaces = []
         self.units = []
         self.unit_roles = {}
+        self.unit_bodies = {}
         self.processes = []
         self.root = Path("/run/aegis-native-" + self.token)
         self.owns_root = False
@@ -381,6 +383,7 @@ class NetworkFixture:
         private_file(path, body.encode(), 0o644)
         self.units.append((full_name, path))
         self.unit_roles[full_name] = name
+        self.unit_bodies[full_name] = body.encode()
         return full_name
 
     def systemctl(self, *args, check=True, timeout=25):
@@ -657,11 +660,14 @@ def stop_participants(fixture, mapping):
     return tuple(mapping[role] for role in ("ufw.service", uh.GUARD, uh.INDEXER))
 
 
-def make_stop_observer(fixture, mapping):
+def make_stop_observer(fixture, mapping, controller):
     participants = stop_participants(fixture, mapping)
+    if (controller != "aegis-native-"+fixture.token+"-transaction-controller.service" or
+            controller in participants or (controller,Path("/run/systemd/system")/controller) not in fixture.units):
+        raise AssertionError("owned_stop_controller_required")
     # Active After references retain stopped units' runtime timestamps in v255.
     # Null output avoids the journal socket dependency of a journal-output service.
-    return fixture.unit("stop-observer", "[Unit]\nDefaultDependencies=no\nAfter=" + " ".join(participants) + '''
+    return fixture.unit("stop-observer", "[Unit]\nDefaultDependencies=no\nAfter=" + " ".join((*participants,controller)) + '''
 [Service]
 Type=oneshot
 RemainAfterExit=yes
@@ -699,42 +705,170 @@ def stop_unit_sample(fixture, unit):
     return sample
 
 
-def measure_retained_stop(fixture, mapping, observer):
-    participants = stop_participants(fixture, mapping)
-    if (observer != "aegis-native-" + fixture.token + "-stop-observer.service" or
-            observer not in {name for name, _ in fixture.units}):
-        raise AssertionError("owned_stop_observer_required")
-    host = h.LinuxHost()
-    # Keep actual effective facts intact. A service intrinsically requires/orders
-    # after its slice even with DefaultDependencies=no; no other edge is admitted.
-    relations = host.dependency_properties(observer)
-    expected = {key: [] for key in uh.DEPENDENCIES}
-    expected.update(After=sorted([*participants, "system.slice"]), Requires=["system.slice"])
-    if (host.properties(observer, ("Slice",)) != {"Slice": "system.slice"} or
-            {key: sorted(value.split()) for key, value in relations.items()} != expected):
-        raise AssertionError("stop_observer_relations_required")
-    roles = dict(zip(("wrapper", "guard", "indexer"), participants))
-    samples = {role: stop_unit_sample(fixture, unit) for role, unit in roles.items()}
-    if any(row["LoadState"] != "loaded" or row["ActiveState"] != "active" for row in samples.values()):
-        raise AssertionError(tx.encoded(dict(stage="stop_participants_active", units=samples)).decode("ascii"))
-    fixture.systemctl("start", observer)
-    def observer_active():
-        samples["observer"] = stop_unit_sample(fixture, observer)
-        return all(samples["observer"][key] == value for key, value in
-                   (("LoadState", "loaded"), ("ActiveState", "active"), ("SubState", "exited")))
-    if not observer_active():
-        raise AssertionError(tx.encoded(dict(stage="stop_observer_active", units=samples)).decode("ascii"))
-    fixture.systemctl("stop", *participants)  # unchanged single measured transaction
-    retained = True
-    for role, unit in roles.items():
-        retained = observer_active() and retained
-        samples[role] = stop_unit_sample(fixture, unit)
-    retained = observer_active() and retained
-    values = [samples[role]["InactiveEnterTimestampMonotonic"] for role in ("indexer", "guard", "wrapper")]
-    if (not retained or any(samples[role]["LoadState"] != "loaded" or samples[role]["ActiveState"] != "inactive" for role in roles) or
-            not all(type(value) is int and value > 0 for value in values) or not values[0] <= values[1] <= values[2]):
-        raise AssertionError(tx.encoded(dict(stage="concurrent_stop_order", units=samples)).decode("ascii"))
-    fixture.systemctl("stop", observer)  # release references; tracked teardown also covers failure
+class OwnedTransactionReader:
+    """Fixed five owned identities and nine named intrinsic leaves; read-only."""
+    def __init__(self, fixture, names, gate, deadline):
+        self.fixture, self.names, self.gate, self.deadline = fixture, names, gate, deadline
+        self.host = h.LinuxHost()
+        self.host.run = lambda name, *args, **kwargs: self.query(name, *args)
+        self.files = uh.UfwHostReader(self.host)
+
+    def check(self):
+        if time.monotonic() >= self.deadline:
+            raise AssertionError("native_transaction_timeout")
+
+    def query(self, name, *args):
+        remaining = self.deadline-time.monotonic()
+        if remaining <= 0:
+            raise AssertionError("native_transaction_timeout")
+        return command(name, *args, timeout=min(1, remaining)).stdout
+
+    def properties(self, unit, keys):
+        raw = self.query("systemctl", "show", "--all", "--no-pager", "--property="+",".join(keys), "--", unit)
+        try:
+            if len(raw) > 65536:
+                raise ValueError
+            pairs = [line.split("=",1) for line in raw.decode("ascii").splitlines()]
+            values = dict(pairs)
+            if len(pairs) != len(values) or set(values) != set(keys):
+                raise ValueError
+            if any(len(v)>4096 or "\0" in v for v in values.values()):
+                raise ValueError
+            return values
+        except (ValueError, UnicodeError):
+            raise AssertionError("native_transaction_properties_invalid") from None
+
+    def job(self, unit):
+        label = "".join(c if c.isalpha() or n>0 and c.isdigit() else "_%02x"%ord(c) for n,c in enumerate(unit))
+        class Reader:
+            def run(inner, name, *args):
+                return self.query(name, *("/org/freedesktop/systemd1/unit/"+label if v=="/org/freedesktop/systemd1/unit/ufw_2eservice" else v for v in args))
+        value = {"type":"(uo)", "data":u._bus(Reader(), "Job", "(uo)")}
+        self.gate.transaction_job(value,idle=False)
+        return value
+
+    def body(self, unit):
+        value = self.files.root_file("/run/systemd/system/"+unit,65536)
+        if value.body != self.fixture.unit_bodies[unit]:
+            raise AssertionError("native_transaction_body_changed")
+        return value
+
+    def facts(self, role, target):
+        unit = self.names[role]
+        keys = [k for k in self.gate.TRANSACTION_IDENTITY if k not in {"body_sha256","body_metadata"}]
+        identity = target["identity"] = self.properties(unit,keys)
+        for key in ("Names","DropInPaths"):
+            identity[key] = shlex.split(identity[key],comments=False,posix=True)
+        self.check()
+        value = self.files.root_file("/run/systemd/system/"+unit,65536)
+        identity.update(body_sha256=hashlib.sha256(value.body).hexdigest(),
+                        body_metadata=dict(uid=value.info.st_uid,gid=value.info.st_gid,mode=stat.S_IMODE(value.info.st_mode),nlink=value.info.st_nlink,size=value.info.st_size))
+        if value.body != self.fixture.unit_bodies[unit]:
+            raise AssertionError("native_transaction_body_changed")
+        self.check()
+        target["dependencies"] = {k:sorted(v.split()) for k,v in self.host.dependency_properties(unit).items()}
+        self.check()
+
+    def external(self, target):
+        for unit in self.gate.TRANSACTION_LEAVES:
+            values = self.properties(unit,("Id","FragmentPath","DropInPaths","LoadState","ActiveState","SubState"))
+            row = target[unit] = dict(id=values["Id"],fragment_path=values["FragmentPath"],
+                drop_in_paths=shlex.split(values["DropInPaths"],comments=False,posix=True),
+                load=values["LoadState"],active=values["ActiveState"],sub=values["SubState"])
+            self.check()
+            row["job"] = self.job(unit)
+            self.check()
+
+    def sample(self, role, target):
+        keys = {"LoadState":"load","ActiveState":"active","SubState":"sub",
+                "ActiveEnterTimestampMonotonic":"active_enter_us","ExecMainStartTimestampMonotonic":"exec_start_us",
+                "InactiveEnterTimestampMonotonic":"inactive_enter_us"}
+        values = self.properties(self.names[role],tuple(keys))
+        for key, field in keys.items():
+            value = values[key]
+            if field.endswith("_us"):
+                if not re.fullmatch(r"[0-9]{1,20}",value) or int(value)>=2**64:
+                    raise AssertionError("native_transaction_timestamp_invalid")
+                value = int(value)
+            elif value not in self.gate.TRANSACTION_STATES[field]:
+                raise AssertionError("native_transaction_state_invalid")
+            target[field] = value
+        self.check()
+        target["job"] = self.job(self.names[role])
+        self.check()
+
+    def fence(self):
+        if (not self.fixture.owns_root or self.fixture.server not in self.fixture.namespaces or os.geteuid()!=0 or
+                os.stat("/run/netns/"+self.fixture.server).st_ino != self.fixture.inode):
+            raise AssertionError("native_transaction_namespace_required")
+        for unit in self.names.values():
+            if (unit,Path("/run/systemd/system")/unit) not in self.fixture.units:
+                raise AssertionError("native_transaction_owned_required")
+            self.body(unit)
+            self.check()
+
+
+def measure_owned_transaction(fixture, mapping, proof, phase, gate):
+    """One owned anchor, one deadline; an active observer retains all four units."""
+    names = gate.transaction_names(mapping)
+    expected_phases = list(gate.TRANSACTION_PHASES)
+    if phase not in expected_phases or list(proof["phases"]) != expected_phases[:expected_phases.index(phase)]:
+        raise AssertionError("native_transaction_phase_order")
+    if proof["controller"] != names["controller"] or proof["observer"] != names["observer"]:
+        raise AssertionError("native_transaction_owned_required")
+    deadline = time.monotonic()+5
+    reader = OwnedTransactionReader(fixture,names,gate,deadline)
+    record = proof["phases"][phase] = dict(facts={},external_baseline={},before={},after={},observer_facts={},observer_before={},observer_after={},
+        action={"operation":"stop" if phase=="concurrent_stop" else "start","unit":names["controller"]})
+    stage = "identity"
+    def check():
+        if time.monotonic() >= deadline:
+            raise AssertionError("native_transaction_timeout")
+    def sample(role, target):
+        reader.sample(role,target)
+        check()
+        gate.transaction_sample(target,role)
+    try:
+        for role in gate.TRANSACTION_ROLES:
+            reader.facts(role,record["facts"].setdefault(role,{})); check()
+        reader.facts("observer",record["observer_facts"]); check()
+        stage = "external"
+        reader.external(record["external_baseline"]); check()
+        stage = "before"
+        for role in gate.TRANSACTION_ROLES:
+            sample(role,record["before"].setdefault(role,{}))
+        sample("observer",record["observer_before"])
+        stage = "graph"
+        gate.validate_transaction_phase(record,phase,names,before_only=True)
+        gate.validate_transaction_continuity(proof["phases"])
+        reader.fence(); check()
+        stage = "action"
+        fixture.systemctl(record["action"]["operation"],names["controller"])
+        check()
+        stage = "after"
+        active = phase != "concurrent_stop"
+        while True:
+            complete = True
+            for role in gate.TRANSACTION_ROLES:
+                row = record["after"][role] = {}
+                sample(role,row)
+                if row["load"] != "loaded" or row["active"] in {"failed","maintenance"}:
+                    raise AssertionError("native_transaction_state_failed")
+                complete &= (row["active"] == ("active" if active else "inactive") and
+                             row["sub"] == (("running" if role=="indexer" else "exited") if active else "dead") and row["job"]["data"] == [0,"/"])
+                # Observe retention throughout participant sampling, not just at CLI return.
+                sample("observer",record["observer_after"])
+                gate.transaction_sample(record["observer_after"],"observer",True)
+            if complete:
+                break
+            time.sleep(min(0.1,max(0,deadline-time.monotonic())))
+        stage = "order"
+        gate.validate_transaction_phase(record,phase,names)
+        gate.validate_transaction_continuity(proof["phases"])
+        check()
+    except Exception:
+        proof["failure"] = {"phase":phase,"stage":stage}
+        raise AssertionError("native_transaction_failed") from None
 
 
 def wait_conflict_states(fixture, relay, wrapper):
@@ -1902,7 +2036,11 @@ TimeoutStopSec=5
 ExecStart=/usr/bin/python3 -I -B {fixture.root}/listener.py {fixture.credentials}/cert.pem {fixture.credentials}/key.pem {fixture.indexer}
 '''
             self.assertEqual(fixture.unit("ufw-indexer", listener + "\n" + render(indexer_dropin())), mapping[uh.INDEXER])
-            observer = make_stop_observer(fixture, mapping)
+            names = gate.transaction_names(mapping)
+            controller = fixture.unit("transaction-controller", gate.transaction_body("controller",names).decode("ascii"))
+            observer = make_stop_observer(fixture, mapping, controller)
+            transaction = observation.setdefault("native_adapter", {})["transaction"] = dict(
+                mechanism="owned_controller_wants_and_propagates_stop_to_v1",controller=controller,observer=observer,phases={})
             fixture.systemctl("daemon-reload")
             def props(unit, keys):
                 return h.LinuxHost().properties(unit, keys)
@@ -1927,14 +2065,12 @@ ExecStart=/usr/bin/python3 -I -B {fixture.root}/listener.py {fixture.credentials
             checks["cold_guard_verified"] = True
             fixture.systemctl("stop", mapping[uh.INDEXER], mapping[uh.GUARD])
             fixture.verify_table()
-            # One transaction, all participants queued together; real timestamps prove order.
-            fixture.systemctl("start", wrapper, mapping[uh.GUARD], mapping[uh.INDEXER])
+            fixture.systemctl("start", observer)  # retention setup, outside all three measured phases
+            measure_owned_transaction(fixture,mapping,transaction,"concurrent_start",gate)
             def timestamp(unit, key):
                 value = int(fixture.systemctl("show", unit, "--property=" + key, "--value").stdout)
                 self.assertGreater(value, 0)
                 return value
-            self.assertLessEqual(timestamp(wrapper, "ActiveEnterTimestampMonotonic"), timestamp(mapping[uh.GUARD], "ExecMainStartTimestampMonotonic"))
-            self.assertLessEqual(timestamp(mapping[uh.GUARD], "ActiveEnterTimestampMonotonic"), timestamp(mapping[uh.INDEXER], "ExecMainStartTimestampMonotonic"))
             checks["concurrent_start_order_verified"] = True
             packets("concurrent_start")
             state_before = props(wrapper, ("ActiveState", "SubState", "UnitFileState"))
@@ -1990,10 +2126,11 @@ ExecStart=/usr/bin/python3 -I -B {fixture.root}/listener.py {fixture.credentials
             self.assertEqual(timestamp(mapping[uh.GUARD], "ActiveEnterTimestampMonotonic"), guard_started)
             packets("active_guard_restart")
             checks["active_guard_verified"] = True
-            measure_retained_stop(fixture, mapping, observer)
+            measure_owned_transaction(fixture,mapping,transaction,"concurrent_stop",gate)
             fixture.verify_table()
             checks.update(concurrent_stop_order_verified=True, guard_stop_retained_table=True)
-            fixture.systemctl("start", wrapper, mapping[uh.GUARD], mapping[uh.INDEXER])
+            measure_owned_transaction(fixture,mapping,transaction,"concurrent_stop_start",gate)
+            fixture.systemctl("stop", observer)  # release only after all retained samples qualify
             packets("concurrent_stop_start")
             # Refusals alter fixture data only; do not execute enabled vendor branches.
             fixture.systemctl("stop", mapping[uh.INDEXER])
@@ -2054,7 +2191,7 @@ ExecStart=/usr/bin/python3 -I -B {fixture.root}/listener.py {fixture.credentials
                 relocations=gate.UFW_RELOCATIONS, checks=checks, operations=operations, unit_mapping=mapping,
                 dependency_cases=cases,
                 nft_observations=nft_observations,
-                native_adapter={"unit_properties": {**observed_props, "RootDirectory": "<owned_vendor_root>"},
+                native_adapter={"transaction": transaction, "unit_properties": {**observed_props, "RootDirectory": "<owned_vendor_root>"},
                                 "typed_bus": native_bus,
                                 "backend_sha256": hashlib.sha256(identities[0]["file"].body).hexdigest()},
                 preservation_hashes={"vendor": {"before": vendor_before, "after": vendor_after},

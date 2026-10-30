@@ -102,6 +102,37 @@ and Indexer start, cold/active guard, deleted/modified table, fingerprint drift,
 no unintended UFW start, unchanged foreign rules and verified cleanup. Never
 mutate the CI host's default firewall or real UFW/Wazuh unit/configuration.
 
+One multi-name `systemctl start/stop` command sends separate unit requests and
+does not establish atomic concurrent submission. The native ordering fixture
+therefore uses a separate owned oneshot controller with `Wants=` and
+`PropagatesStopTo=` for exactly the three owned participants. It adds no ordering
+between participants and leaves their authored units unchanged. Wants avoids
+the reverse stop effect that Requires would introduce during individual controls.
+This is a declared CI relocation, not production or stock-wrapper admission.
+The cold Indexer-only control precedes controller activation. The separate
+After-only observer names wrapper, guard, Indexer and then controller, and stays
+active with no job across measured controller start/stop/start,
+then releases its timestamp-retention references after all three phases qualify.
+Its controller reference retains inactive controller timestamps and relations;
+the controller's outgoing dependencies alone do not establish this retention.
+The resulting controller Before=observer adds no controller-to-participant or
+participant-to-participant order while the observer has no job. This explicit
+retention correction does not claim GC occurred in the earlier failed run.
+Each phase has one controller action and one five-second budget starting before
+preflight, covering actual identity/body checks, all eighteen relations, typed
+no-job baselines, action time and final observations. Controller return alone
+does not qualify: every participant must complete with fresh timestamps and the
+original startup/shutdown order comparisons. Mandatory adapter transaction proof
+also binds observer activation across all phases and controller activation
+across intervening direct controls. Old, partial, failed or late proof rejects.
+Reject unreviewed direct owned-unit effects. The fixed named slice, sysinit,
+shutdown, journal, basic, network-pre, nftables and root/run-mount leaves form an
+explicit trusted CI-OS frontier, checked for admitted states and no jobs without
+mutating them. This is neither recursive manager quiescence nor proof of no
+external state changes at arbitrary depth. Sequential preflight cannot lock out
+another privileged writer. Preserve the earlier failed ordering evidence; the
+historical job interleaving was not recorded. Production policy is unchanged.
+
 The mixed dependency case remains conservatively refused with its complete
 actual graph and both inverse relations. Correct the former native claim that
 an ordinary guard stop necessarily composes through bridge's `PropagatesStopTo`

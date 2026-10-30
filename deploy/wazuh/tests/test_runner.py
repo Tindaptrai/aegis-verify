@@ -238,7 +238,7 @@ class RunnerTests(unittest.TestCase):
                     operations={name: dict(allowed=True, denied=True, table=True, foreign=True) for name in gate.UFW_OPERATIONS},
                     preservation_hashes={name: dict(before="b" * 64, after="b" * 64) for name in ("vendor", "foreign", "real_ufw", "fresh_nft")},
                     unit_mapping=mapping, dependency_cases=cases, nft_observations=nft,
-                    native_adapter={"unit_properties": {**ufw.STATIC_PROPERTIES, **ufw.RUNTIME_PROPERTIES,
+                    native_adapter={"transaction": self.transaction_fixture(mapping), "unit_properties": {**ufw.STATIC_PROPERTIES, **ufw.RUNTIME_PROPERTIES,
                                     "RootDirectory": "<owned_vendor_root>", "FragmentPath": "/run/systemd/system/" + mapping["ufw.service"], "UnitFileState": "disabled"},
                                     "typed_bus": bus, "backend_sha256": "c" * 64},
                     scope={"native": "vendor_lifecycle_packets_order_and_adapter_refusal", "positive_admission": "synthetic_reader",
@@ -370,6 +370,116 @@ class RunnerTests(unittest.TestCase):
                 module.source_snapshot(commit)
 
     @staticmethod
+    def transaction_fixture(mapping):
+        from deploy.wazuh.https_setup.ufw_host import DEPENDENCIES
+        token = mapping["ufw.service"].split("-")[2]
+        names = dict(wrapper=mapping["ufw.service"], guard=mapping["aegis-wazuh-http-guard.service"],
+                     indexer=mapping["wazuh-indexer.service"], controller=f"aegis-native-{token}-transaction-controller.service",
+                     observer=f"aegis-native-{token}-stop-observer.service")
+        w, g, i, c, o = (names[r] for r in ("wrapper", "guard", "indexer", "controller", "observer"))
+        s, j, y, b, h = "system.slice", "systemd-journald.socket", "sysinit.target", "basic.target", "shutdown.target"
+        relations = {
+            "controller": dict(Before=[o], After=[s], Requires=[s], Wants=[w,g,i], PropagatesStopTo=[w,g,i]),
+            "observer": dict(After=[s,w,g,i,c], Requires=[s]),
+            "wrapper": dict(Before=[g,i,o], After=[s,j,"-.mount","run.mount"], Requires=[s], StopPropagatedFrom=[c]),
+            "guard": dict(Before=[i,o,h], After=[w,s,j,y,b,"network-pre.target","nftables.service"], Requires=[s,y], Conflicts=[h], RequiredBy=[i], StopPropagatedFrom=[c]),
+            "indexer": dict(Before=[o,h], After=[w,g,s,j,y,b], Requires=[g,s,y], Conflicts=[h], StopPropagatedFrom=[c])}
+        bodies = {}
+        tail = "[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/true\nStandardOutput=null\nStandardError=null\nTimeoutStartSec=10\nTimeoutStopSec=5\n"
+        bodies["controller"] = f"[Unit]\nDefaultDependencies=no\nWants={w} {g} {i}\nPropagatesStopTo={w} {g} {i}\n" + tail
+        bodies["observer"] = f"[Unit]\nDefaultDependencies=no\nAfter={w} {g} {i} {c}\n" + tail
+        facts = {}
+        for role, name in names.items():
+            special = role in {"controller", "observer"}
+            body = bodies.get(role, "synthetic-authored-participant\n").encode()
+            identity = dict(Id=name, Names=[name], FragmentPath="/run/systemd/system/"+name, DropInPaths=[],
+                SourcePath="", Transient="no", NeedDaemonReload="no", UnitFileState="static" if special or role=="indexer" else "disabled",
+                Type="simple" if role=="indexer" else "oneshot", RemainAfterExit="no" if role=="indexer" else "yes",
+                DefaultDependencies="yes" if role in {"guard","indexer"} else "no", Slice=s,
+                User="root" if role=="guard" else "nobody" if role=="indexer" else "",
+                Group="root" if role=="guard" else "nogroup" if role=="indexer" else "",
+                RootDirectory=f"/run/aegis-native-{token}/vendor-root" if role=="wrapper" else "", RootImage="",
+                StandardOutput="null" if special else "journal", StandardError="null" if special else "inherit", Restart="no",
+                body_sha256=hashlib.sha256(body).hexdigest(), body_metadata=dict(uid=0,gid=0,mode=0o644,nlink=1,size=len(body)))
+            facts[role] = dict(identity=identity, dependencies={k:sorted(relations[role].get(k,[])) for k in DEPENDENCIES})
+        job = dict(type="(uo)",data=[0,"/"])
+        external = {}
+        for name, active, sub in ((s,"active","active"),(y,"active","active"),(b,"active","active"),
+                (h,"inactive","dead"),(j,"active","running"),("network-pre.target","inactive","dead"),
+                ("nftables.service","inactive","dead"),("-.mount","active","mounted"),("run.mount","active","mounted")):
+            external[name] = dict(id=name,fragment_path="",drop_in_paths=[],load="loaded",active=active,sub=sub,job=copy.deepcopy(job))
+        def sample(role, active, stamp, inactive):
+            return dict(load="loaded",active="active" if active else "inactive",
+                sub=("running" if role=="indexer" else "exited") if active else "dead",
+                active_enter_us=stamp,exec_start_us=stamp,inactive_enter_us=inactive,job=copy.deepcopy(job))
+        observer = sample("observer",True,5,0)
+        phases = {}
+        for phase, before_active, after_active, old, new in (
+                ("concurrent_start",False,True,0,10),("concurrent_stop",True,False,10,20),
+                ("concurrent_stop_start",False,True,0,30)):
+            before = {r:sample(r,before_active,old,0 if before_active else 1) for r in names if r!="observer"}
+            after = {r:sample(r,after_active,new if after_active else old,0 if after_active else new) for r in before}
+            phases[phase] = dict(facts=copy.deepcopy({r:facts[r] for r in before}),external_baseline=copy.deepcopy(external),
+                before=before,action=dict(operation="start" if after_active else "stop",unit=c),after=after,
+                observer_facts=copy.deepcopy(facts["observer"]),observer_before=copy.deepcopy(observer),observer_after=copy.deepcopy(observer))
+        return dict(mechanism="owned_controller_wants_and_propagates_stop_to_v1",controller=c,observer=o,phases=phases)
+
+    def test_owned_transaction_proof_is_closed_fresh_and_scope_checked(self):
+        gate = self.runner()
+        self.assertTrue(hasattr(gate,"validate_owned_transaction"), "transaction proof validator missing")
+        proof = self.observation_fixture(gate)
+        item = proof[gate.NATIVE_MODULE+".NativeTests.test_ufw_disabled_wrapper_preserved"]
+        gate.validate_native_observations(proof)
+        original = item["native_adapter"]["transaction"]
+        mutations = [lambda t:t.__setitem__("failure",{}),lambda t:t.__setitem__("controller","ufw.service"),
+                     lambda t:t.__setitem__("mechanism","multiple_roots")]
+        for phase in original["phases"]:
+            mutations.append(lambda t,p=phase:t["phases"].pop(p))
+            for key in original["phases"][phase]:
+                mutations.append(lambda t,p=phase,k=key:t["phases"][p].pop(k))
+            for role in original["phases"][phase]["facts"]:
+                for key in original["phases"][phase]["facts"][role]["identity"]:
+                    mutations.append(lambda t,p=phase,r=role,k=key:t["phases"][p]["facts"][r]["identity"].pop(k))
+                for key in original["phases"][phase]["facts"][role]["dependencies"]:
+                    mutations.append(lambda t,p=phase,r=role,k=key:t["phases"][p]["facts"][r]["dependencies"][k].append("unreviewed.service"))
+                for point in ("before","after"):
+                    for key,value in (("active_enter_us",True),("exec_start_us",-1),("inactive_enter_us",2**64),
+                                      ("load","not-found"),("active","failed"),("sub","unknown"),("job",dict(type="(uo)",data=[1,"/job/1"]))):
+                        mutations.append(lambda t,p=phase,r=role,q=point,k=key,v=value:t["phases"][p][q][r].__setitem__(k,v))
+            for leaf in original["phases"][phase]["external_baseline"]:
+                mutations.append(lambda t,p=phase,l=leaf:t["phases"][p]["external_baseline"][l].__setitem__("job",dict(type="(uo)",data=[True,"/"])))
+            mutations.extend([
+                lambda t,p=phase:t["phases"][p]["observer_facts"]["dependencies"]["After"].remove(t["controller"]),
+                lambda t,p=phase:t["phases"][p]["facts"]["controller"]["dependencies"].__setitem__("Before",[]),
+                lambda t,p=phase:t["phases"][p]["observer_facts"]["dependencies"]["Wants"].append(t["controller"]),
+                lambda t,p=phase:t["phases"][p]["observer_after"].__setitem__("active","inactive"),
+                lambda t,p=phase:t["phases"][p]["observer_after"].__setitem__("active_enter_us",6),
+                lambda t,p=phase:t["phases"][p]["action"].__setitem__("unit",item["unit_mapping"]["ufw.service"]),
+                lambda t,p=phase:t["phases"][p]["facts"]["controller"]["identity"].__setitem__("body_sha256","0"*64),
+                lambda t,p=phase:t["phases"][p]["facts"]["wrapper"]["identity"].__setitem__("Names",["ufw.service"]),
+                lambda t,p=phase:t["phases"][p]["external_baseline"]["sysinit.target"].__setitem__("active","inactive"),
+                lambda t,p=phase:t["phases"][p]["external_baseline"]["shutdown.target"].__setitem__("active","active"),
+                lambda t,p=phase:t["phases"][p]["external_baseline"]["run.mount"].__setitem__("fragment_path","/run/systemd/generator/run.mount")])
+        names=gate.transaction_names(item["unit_mapping"])
+        old_observer=gate.transaction_body("observer",names).replace((" "+names["controller"]).encode(),b"")
+        changed=copy.deepcopy(original)
+        for phase in changed["phases"].values():
+            identity=phase["observer_facts"]["identity"]
+            identity["body_sha256"]=hashlib.sha256(old_observer).hexdigest()
+            identity["body_metadata"]["size"]=len(old_observer)
+        with self.assertRaises(ValueError): gate.validate_owned_transaction(changed,item["unit_mapping"])
+        mutations += [lambda t:t["phases"]["concurrent_start"]["after"]["wrapper"].__setitem__("active_enter_us",11),
+                      lambda t:t["phases"]["concurrent_stop"]["after"]["guard"].__setitem__("inactive_enter_us",21),
+                      lambda t:t["phases"]["concurrent_stop"]["before"]["controller"].__setitem__("active_enter_us",9),
+                      lambda t:t["phases"]["concurrent_stop_start"]["before"]["wrapper"].__setitem__("exec_start_us",30)]
+        for n,mutate in enumerate(mutations):
+            changed=copy.deepcopy(original); mutate(changed)
+            with self.subTest(mutation=n), self.assertRaises(ValueError):
+                gate.validate_owned_transaction(changed,item["unit_mapping"])
+        del item["native_adapter"]["transaction"]
+        with self.assertRaises(ValueError): gate.validate_native_observations(proof)
+
+    @staticmethod
     def mixed_runtime_fixture():
         result = {"scope": "conservative_refusal_and_direct_edges"}
         outcomes = {
@@ -461,6 +571,8 @@ class RunnerTests(unittest.TestCase):
         native = module.proof_scope(native=True)
         self.assertFalse(native["vendor_lab_acceptance"])
         self.assertEqual(native["systemd_fixture_relocations"], module.UFW_RELOCATIONS)
+        self.assertIn("owned_controller:wants_and_propagates_stop_to",native["systemd_fixture_relocations"])
+        self.assertIn("owned_stop_observer:after_only_controller_retention",native["systemd_fixture_relocations"])
         self.assertEqual(module.proof_scope(native=False)["systemd_fixture_relocations"], [])
 
 
@@ -482,72 +594,179 @@ class NativeFixtureSafety(unittest.TestCase):
         from deploy.wazuh.tests import test_native as native
         self.assertTrue(hasattr(native, "make_stop_observer"), "retained stop observer missing")
         fixture, mapping = self.stop_fixture()
-        observer = native.make_stop_observer(fixture, mapping)
+        controller = fixture.unit("transaction-controller", "")
+        observer = native.make_stop_observer(fixture, mapping, controller)
         lines = fixture.bodies[observer].splitlines()
-        self.assertIn("After=" + " ".join(mapping.values()), lines)
+        self.assertIn("After=" + " ".join([*mapping.values(),controller]), lines)
         for line in ("DefaultDependencies=no", "Type=oneshot", "RemainAfterExit=yes", "ExecStart=/usr/bin/true",
                      "StandardOutput=null", "StandardError=null", "TimeoutStartSec=10", "TimeoutStopSec=5"):
             self.assertIn(line, lines)
         self.assertFalse(any(line.startswith(key + "=") for line in lines for key in native.uh.DEPENDENCIES if key != "After"))
-        self.assertEqual(len(fixture.units), 4)
+        self.assertEqual(len(fixture.units), 5)
         broken = dict(mapping, **{"ufw.service": "ufw.service"})
         with self.assertRaisesRegex(AssertionError, "owned_stop_participants_required"):
-            native.make_stop_observer(fixture, broken)
+            native.make_stop_observer(fixture, broken, controller)
+        for bad in (mapping["ufw.service"], "ufw.service", controller.replace("transaction-controller", "other")):
+            with self.assertRaisesRegex(AssertionError, "owned_stop_controller_required"):
+                native.make_stop_observer(fixture, mapping, bad)
 
-    def test_retained_stop_keeps_one_transaction_and_rejects_bad_evidence(self):
+    def test_owned_transaction_phase_has_one_anchor_and_bounded_fresh_observations(self):
         from deploy.wazuh.tests import test_native as native
-        self.assertTrue(hasattr(native, "measure_retained_stop"), "retained stop measurement missing")
-        for fault in (None, "zero", "missing", "reverse", "private", "observer_stopped", "external", "participant_inactive",
-                      "After", "Requires", "Slice", *[key for key in native.uh.DEPENDENCIES if key not in {"After", "Requires"}]):
-            fixture, mapping = self.stop_fixture()
-            observer = native.make_stop_observer(fixture, mapping)
-            actions, phase = [], {"stopped": False}
-            def systemctl(*args, **kwargs):
-                if args[0] != "show":
-                    actions.append(args)
-                    if args == ("stop", *mapping.values()): phase["stopped"] = True
-                    return SimpleNamespace(stdout=b"", returncode=0)
-                unit = args[1]
-                active = unit == observer or not phase["stopped"]
-                row = dict(LoadState="loaded", ActiveState="active" if active else "inactive",
-                           SubState="exited" if active else "dead", ActiveEnterTimestampMonotonic="5",
-                           ExecMainStartTimestampMonotonic="4", InactiveEnterTimestampMonotonic=str(
-                               10 if unit == mapping[native.uh.INDEXER] else 20 if unit == mapping[native.uh.GUARD] else 30))
-                if phase["stopped"] and unit == mapping[native.uh.INDEXER]:
-                    if fault == "zero": row["InactiveEnterTimestampMonotonic"] = "0"
-                    if fault == "missing": del row["InactiveEnterTimestampMonotonic"]
-                    if fault == "reverse": row["InactiveEnterTimestampMonotonic"] = "99"
-                    if fault == "private": row.update(ActiveState="/root/DO_NOT_EXPORT", InactiveEnterTimestampMonotonic="secret")
-                if fault == "observer_stopped" and phase["stopped"] and unit == observer:
-                    row.update(ActiveState="inactive", SubState="dead")
-                if fault == "participant_inactive" and unit == mapping[native.uh.INDEXER]:
-                    row.update(ActiveState="inactive", SubState="dead")
-                return SimpleNamespace(stdout="".join(k + "=" + v + "\n" for k, v in row.items()).encode(), returncode=0)
-            fixture.systemctl = systemctl
-            relations = {key: "" for key in native.uh.DEPENDENCIES}
-            relations.update(After=" ".join([*mapping.values(), "system.slice"]), Requires="system.slice")
-            if fault in relations: relations[fault] += " unexpected.service"
-            host = SimpleNamespace(dependency_properties=lambda unit: dict(relations),
-                                   properties=lambda *args: {"Slice": "unexpected.slice" if fault == "Slice" else "system.slice"})
-            if fault == "external": observer = "ufw.service"
-            with self.subTest(fault=fault), patch.object(native.h, "LinuxHost", return_value=host):
-                if fault:
-                    with self.assertRaises(AssertionError) as caught:
-                        native.measure_retained_stop(fixture, mapping, observer)
-                    self.assertNotIn("DO_NOT_EXPORT", str(caught.exception))
-                    if fault in {"zero", "missing", "reverse", "private", "observer_stopped"}:
-                        payload = json.loads(str(caught.exception))
-                        self.assertEqual(set(payload), {"stage", "units"})
-                        self.assertEqual(set(payload["units"]), {"wrapper", "guard", "indexer", "observer"})
-                        expected = 0 if fault == "zero" else "unavailable" if fault in {"missing", "private"} else 99 if fault == "reverse" else 10
-                        self.assertEqual(payload["units"]["indexer"]["InactiveEnterTimestampMonotonic"], expected)
-                        self.assertEqual(actions, [("start", observer), ("stop", *mapping.values())])
-                    else:
-                        self.assertEqual(actions, [])
+        self.assertTrue(hasattr(native,"measure_owned_transaction"), "one-anchor helper missing")
+        gate=RunnerTests().runner()
+        mapping={"ufw.service":"aegis-native-0123456789ab-wrapper.service",
+                 native.uh.GUARD:"aegis-native-0123456789ab-ufw-guard.service",
+                 native.uh.INDEXER:"aegis-native-0123456789ab-ufw-indexer.service"}
+        expected=RunnerTests.transaction_fixture(mapping)
+        for fault in (None,"pending","effect","identity","leaf","transition","transition_job","late_before","late_action","late_final","reverse","stale"):
+            clock={"now":0}; calls=[]; proof={k:copy.deepcopy(v) for k,v in expected.items() if k!="phases"}; proof["phases"]={}
+            fixture=SimpleNamespace(token="0123456789ab",units=[(n,Path("/run/systemd/system")/n) for n in [*mapping.values(),expected["controller"],expected["observer"]]])
+            for phase in expected["phases"]:
+                data=copy.deepcopy(expected["phases"][phase]); action_done={"value":False}; counts={}
+                class Reader:
+                    def __init__(self,*args): pass
+                    def facts(self,role,target):
+                        target.update(copy.deepcopy(data["observer_facts"] if role=="observer" else data["facts"][role]))
+                        if fault=="effect" and role=="wrapper": target["dependencies"]["OnSuccess"]=["unreviewed.service"]
+                        if fault=="identity" and role=="controller": target["identity"]["Names"]=["alias.service"]
+                    def external(self,target):
+                        target.update(copy.deepcopy(data["external_baseline"]))
+                        if fault=="leaf": target["sysinit.target"]["active"]="inactive"
+                    def sample(self,role,target):
+                        clock["now"]+=0.02
+                        point="after" if action_done["value"] else "before"
+                        target.update(copy.deepcopy(data["observer_"+point] if role=="observer" else data[point][role]))
+                        counts[(point,role)]=counts.get((point,role),0)+1
+                        if fault=="late_before" and not action_done["value"]: clock["now"]+=6
+                        if fault=="transition_job" and point=="after" and role=="indexer" and counts[(point,role)]==1: target["job"]["data"]=[1,"/job/1"]
+                        if fault=="pending" and not action_done["value"]: target["job"]["data"]=[1,"/job/1"]
+                        if fault=="transition" and point=="after" and role=="indexer" and counts[(point,role)]==1: target["active"]="activating"; target["sub"]="start"
+                        if fault=="late_final" and point=="after" and role=="observer": clock["now"]+=6
+                        if fault=="reverse" and phase=="concurrent_stop" and point=="after" and role=="guard": target["inactive_enter_us"]=21
+                        if fault=="stale" and point=="after" and role=="wrapper": target["active_enter_us"]=0
+                    def fence(self): pass
+                def systemctl(*args,**kwargs):
+                    calls.append(args); action_done["value"]=True
+                    if fault=="late_action": clock["now"]+=6
+                fixture.systemctl=systemctl
+                def sleep(delay): clock["now"]+=delay
+                with self.subTest(fault=fault,phase=phase), patch.object(native,"OwnedTransactionReader",Reader), patch.object(native.time,"monotonic",side_effect=lambda:clock["now"]), patch.object(native.time,"sleep",side_effect=sleep):
+                    should_fail=fault not in {None,"transition","transition_job"} and (fault!="reverse" or phase=="concurrent_stop")
+                    if should_fail:
+                        with self.assertRaises((AssertionError,ValueError)):
+                            native.measure_owned_transaction(fixture,mapping,proof,phase,gate)
+                        self.assertIn("failure",proof)
+                        self.assertIn(phase,proof["phases"])
+                        if fault in {"pending","effect","identity","leaf","late_before"}: self.assertEqual(calls,[])
+                        break
+                    native.measure_owned_transaction(fixture,mapping,proof,phase,gate)
+                    self.assertEqual(proof["phases"][phase],expected["phases"][phase])
+            if fault in {None,"transition","transition_job"}:
+                self.assertEqual(calls,[("start",expected["controller"]),("stop",expected["controller"]),("start",expected["controller"])])
+                gate.validate_owned_transaction(proof,mapping)
+
+    def test_owned_transaction_reader_uses_actual_bounded_properties_and_body(self):
+        from deploy.wazuh.tests import test_native as native
+        gate=RunnerTests().runner()
+        mapping={"ufw.service":"aegis-native-0123456789ab-wrapper.service",native.uh.GUARD:"aegis-native-0123456789ab-ufw-guard.service",native.uh.INDEXER:"aegis-native-0123456789ab-ufw-indexer.service"}
+        names=gate.transaction_names(mapping)
+        phase=RunnerTests.transaction_fixture(mapping)["phases"]["concurrent_start"]
+        facts={**phase["facts"],"observer":phase["observer_facts"]}
+        for fault in (None,"body","pending","malformed_job","private_job","malformed_state","malformed_timestamp","late","late_job","expired"):
+            clock={"now":0.0}; calls=[]; target={}
+            fixture=SimpleNamespace(unit_bodies={n:(gate.transaction_body(r,names) if r in {"controller","observer"} else b"synthetic-authored-participant\n") for r,n in names.items()})
+            def run(name,*args,**kwargs):
+                self.assertGreater(kwargs["timeout"],0)
+                self.assertLessEqual(kwargs["timeout"],min(1,5-clock["now"]))
+                calls.append((name,args)); clock["now"]+=0.03
+                if fault=="late": clock["now"]=5.01
+                if name=="busctl":
+                    if fault=="late_job": clock["now"]=5.01
+                    data=[1,"/job/1"] if fault=="pending" else [True,"/"] if fault=="malformed_job" else [0,"/"]
+                    if fault=="private_job": data=[0,"private-secret"]
+                    self.assertEqual(args[-2:],("org.freedesktop.systemd1.Unit","Job"))
+                    return SimpleNamespace(stdout=json.dumps(dict(type="(uo)",data=data)).encode())
+                self.assertEqual(name,"systemctl")
+                unit=args[-1]; role=next((r for r,n in names.items() if n==unit),None)
+                keys=next(v for v in args if v.startswith("--property=")).split("=",1)[1].split(",")
+                if role and set(keys)==set(native.uh.DEPENDENCIES): row=facts[role]["dependencies"]
+                elif role and "Id" in keys: row=facts[role]["identity"]
+                elif role:
+                    sample=phase["observer_before"] if role=="observer" else phase["before"][role]
+                    row=dict(zip(("LoadState","ActiveState","SubState","ActiveEnterTimestampMonotonic","ExecMainStartTimestampMonotonic","InactiveEnterTimestampMonotonic"),
+                        (sample["load"],sample["active"],sample["sub"],sample["active_enter_us"],sample["exec_start_us"],sample["inactive_enter_us"])))
+                    if fault=="malformed_timestamp": row["ActiveEnterTimestampMonotonic"]="private-secret"
+                    if fault=="malformed_state": row["ActiveState"]="private-secret"
                 else:
-                    native.measure_retained_stop(fixture, mapping, observer)
-                    self.assertEqual(actions, [("start", observer), ("stop", *mapping.values()), ("stop", observer)])
-                self.assertEqual(relations.get("Requires"), "system.slice unexpected.service" if fault == "Requires" else "system.slice")
+                    leaf=phase["external_baseline"][unit]
+                    row=dict(zip(("Id","FragmentPath","DropInPaths","LoadState","ActiveState","SubState"),
+                                 (leaf["id"],leaf["fragment_path"],leaf["drop_in_paths"],leaf["load"],leaf["active"],leaf["sub"])))
+                return SimpleNamespace(stdout=("\n".join(k+"="+(" ".join(row[k]) if type(row[k]) is list else str(row[k])) for k in keys)+"\n").encode())
+            def root_file(path,limit):
+                self.assertEqual(limit,65536)
+                body=fixture.unit_bodies[Path(path).name]
+                if fault=="body": body+=b"ExecStop=/private-command\n"
+                info=SimpleNamespace(st_uid=0,st_gid=0,st_mode=0o100644,st_nlink=1,st_size=len(body))
+                return native.u.RootFile(path,body,info)
+            with self.subTest(fault=fault),patch.object(native.time,"monotonic",side_effect=lambda:clock["now"]),patch.object(native,"command",side_effect=run):
+                reader=native.OwnedTransactionReader(fixture,names,gate,5)
+                reader.files=SimpleNamespace(root_file=root_file)
+                if fault=="expired": clock["now"]=5
+                if fault in {"body","late","expired"}:
+                    with self.assertRaises(AssertionError): reader.facts("controller",target)
+                    if fault=="body": self.assertNotEqual(target["identity"]["body_sha256"],facts["controller"]["identity"]["body_sha256"])
+                    if fault=="expired": self.assertEqual(calls,[])
+                elif fault in {"pending","malformed_job","private_job","malformed_state","malformed_timestamp","late_job"}:
+                    with self.assertRaises((AssertionError,ValueError)):
+                        reader.sample("controller",target)
+                        gate.transaction_sample(target,"controller",False)
+                    self.assertNotIn("private-secret",json.dumps(target))
+                else:
+                    reader.facts("controller",target)
+                    self.assertEqual(target,facts["controller"])
+                    external={}; reader.external(external)
+                    self.assertEqual(external,phase["external_baseline"])
+                    sample={}; reader.sample("observer",sample)
+                    self.assertEqual(sample,phase["observer_before"])
+
+    def test_owned_transaction_fence_and_authored_buffers(self):
+        from deploy.wazuh.tests import test_native as native
+        fixture=native.NetworkFixture.__new__(native.NetworkFixture)
+        fixture.test=self; fixture.token="0123456789ab"; fixture.units=[]; fixture.unit_roles={}; fixture.unit_bodies={}
+        with patch.object(native,"private_file") as write:
+            name=fixture.unit("transaction-controller","authored\n")
+        self.assertEqual(fixture.unit_bodies[name],b"authored\n")
+        write.assert_called_once()
+        gate=RunnerTests().runner()
+        mapping={"ufw.service":"aegis-native-0123456789ab-wrapper.service",native.uh.GUARD:"aegis-native-0123456789ab-ufw-guard.service",native.uh.INDEXER:"aegis-native-0123456789ab-ufw-indexer.service"}
+        names=gate.transaction_names(mapping)
+        for fault in (None,"namespace","ownership","body","deadline"):
+            fixture.owns_root=True; fixture.server="avn-s-0123456789ab"; fixture.namespaces=[fixture.server]; fixture.inode=123
+            fixture.units=[(n,Path("/run/systemd/system")/n) for n in names.values()]
+            fixture.unit_bodies={n:b"authored\n" for n in names.values()}
+            if fault=="ownership": fixture.units.pop()
+            reader=native.OwnedTransactionReader(fixture,names,gate,5)
+            reader.files=SimpleNamespace(root_file=lambda path,limit: SimpleNamespace(body=b"changed\n" if fault=="body" else b"authored\n"))
+            with self.subTest(fault=fault),patch.object(native.os,"geteuid",return_value=0,create=True),patch.object(native.os,"stat",return_value=SimpleNamespace(st_ino=124 if fault=="namespace" else 123)),patch.object(native.time,"monotonic",return_value=6 if fault=="deadline" else 1):
+                if fault:
+                    with self.assertRaises(AssertionError): reader.fence()
+                else: reader.fence()
+
+    def test_owned_controller_is_separate_and_cold_direct_controls_stay_unmodified(self):
+        from deploy.wazuh.tests import test_native as native
+        gate=RunnerTests().runner()
+        mapping={"ufw.service":"aegis-native-0123456789ab-wrapper.service",native.uh.GUARD:"aegis-native-0123456789ab-ufw-guard.service",native.uh.INDEXER:"aegis-native-0123456789ab-ufw-indexer.service"}
+        body=gate.transaction_body("controller",gate.transaction_names(mapping)).decode()
+        self.assertIn("Wants="+" ".join(mapping.values())+"\n",body)
+        self.assertIn("PropagatesStopTo="+" ".join(mapping.values())+"\n",body)
+        self.assertFalse(any(line.startswith(k+"=") for line in body.splitlines() for k in native.uh.DEPENDENCIES if k not in {"Wants","PropagatesStopTo"}))
+        text=Path(native.__file__).read_text()
+        method=text[text.index('    def test_ufw_disabled_wrapper_preserved'):]
+        self.assertLess(method.index('fixture.systemctl("start", mapping[uh.INDEXER])'),method.index('measure_owned_transaction('))
+        self.assertIn('fixture.systemctl("stop", wrapper)',method)
+        self.assertIn('fixture.systemctl("restart", mapping[uh.INDEXER])',method)
+        self.assertNotIn('fixture.systemctl("restart", controller)',method)
+        self.assertEqual(method.count('measure_owned_transaction('),3)
 
     def test_conflict_final_state_poll_is_bounded_and_read_only(self):
         from deploy.wazuh.tests import test_native as native

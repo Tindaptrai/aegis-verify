@@ -66,16 +66,40 @@ disposable `/usr/bin/true`, không thao tác vendor wrapper hoặc UFW thật.
 Unit ngoài fixture chỉ được đọc; start/stop/restart/reload chỉ chấp nhận danh sách
 unit fixture đã sở hữu, không dùng alias để gửi action tới UFW thật.
 
-Đo stop order dùng một observer oneshot `/usr/bin/true` sở hữu, active/exited,
-`DefaultDependencies=no`, chỉ khai báo `After=` ba unit được đo. Output null tránh
-dependency journal socket. Effective graph phải đúng ba After cộng `system.slice`,
+Đo order dùng một observer oneshot `/usr/bin/true` sở hữu, active/exited,
+`DefaultDependencies=no`, chỉ khai báo `After=` wrapper, guard, Indexer và controller
+theo đúng thứ tự đó. Output null tránh dependency journal socket. Effective graph
+phải đúng bốn After cộng `system.slice`,
 Requires chỉ `system.slice` do systemd tự thêm cho service; mọi dependency khác
 phải rỗng. Không gửi action tới slice. Observer giữ runtime timestamp khỏi GC,
-không kích hoạt/dừng ba unit và không thêm thứ tự giữa chúng; giữ nguyên một stop
-transaction và so sánh timestamp dương Indexer <= guard <= wrapper. GC của lần CI
+không kích hoạt/dừng bốn unit và không thêm thứ tự giữa chúng; so sánh timestamp
+dương Indexer <= guard <= wrapper khi stop. GC của lần CI
 thất bại trước vẫn là giả thuyết, không phải quan sát. JSON assertion khi đo lỗi
 chỉ giữ role/state/timestamp đã lọc. Resource/check/operation đã hoàn thành được
 giữ ngay trong proof hiện có nếu bước sau lỗi; partial proof vẫn không qualify.
+Một lệnh `systemctl start/stop` với nhiều tên gửi request riêng cho từng unit,
+không bảo đảm một transaction atomic. Fixture sửa cả hai phép concurrent start và
+phép stop bằng controller oneshot sở hữu riêng: `Wants=` và `PropagatesStopTo=`
+đúng ba participant, không thêm ordering giữa chúng. Dùng Wants, không Requires,
+để control stop/restart từng participant không kéo controller dừng theo. Controller
+chỉ là relocation của CI, không phải dependency production hay stock admission.
+Observer cũng giữ controller inactive khỏi GC; dependency outgoing của controller
+không tự chứng minh retention ngược. Controller chỉ thêm `Before=observer` tự sinh,
+không có ordering với participant; observer luôn active/no-job trong phép đo.
+Cold Indexer-only test chạy trước controller; observer được start sau cold control,
+giữ active qua start/stop/start, rồi release sau khi cả ba phép đo đạt yêu cầu.
+Mỗi phép đo có đúng một action controller và một budget 5 giây từ trước preflight:
+identity/body hash, toàn bộ 18 relation, trạng thái và typed no-job đều được kiểm tra.
+Controller hoàn tất sớm không đủ; poll read-only đợi cả participant rồi kiểm tra
+timestamp mới và các bất đẳng thức order cũ. Proof bắt buộc có
+`native_adapter.transaction`, observer ổn định và controller không đổi activation
+qua các direct control xen giữa; lỗi/partial/late result không được qualify.
+Chỉ chấp nhận direct effect theo matrix cố định. Các intrinsic OS leaf được nêu tên
+(slice, sysinit, shutdown, journal, basic, network-pre, nftables và root/run mount)
+là trust frontier của CI: kiểm tra state/no-job mà không mutate chúng. Đây không
+phải recursive/global quiescence hay bảo đảm không có external state change ở mọi
+độ sâu. Các lần đọc tuần tự không khóa được privileged writer; giữ nguyên evidence
+lần lỗi trước, không suy ra historical job timeline từ timestamp cuối.
 Case conflict chỉ restart source một lần rồi poll read-only có deadline để đợi
 relay active và wrapper inactive; timeout phải fail, không dùng sleep làm bằng chứng order.
 Case direct/transitive chỉ stop/restart source một lần: poll read-only tối đa 5 giây

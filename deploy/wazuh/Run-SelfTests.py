@@ -119,7 +119,9 @@ UFW_RELOCATIONS = ["owned_root:vendor_paths", "owned_units:wrapper_guard_indexer
                    "dependency_roles:bijective_all_observed_units_readonly_external", "positive_reader:synthetic_package_unit_backend_dependencies",
                    "fixture.Commands:root_netns_before_each_execute",
                    "probe_root/dev/null:real_device_bind_in_child_private_mount_namespace",
-                   "owned_stop_observer:after_only_retention_with_verified_system_slice"]
+                   "owned_stop_observer:after_only_retention_with_verified_system_slice",
+                   "owned_controller:wants_and_propagates_stop_to",
+                   "owned_stop_observer:after_only_controller_retention"]
 UFW_CHECKS = ("vendor_bytes_preserved", "vendor_state_preserved", "real_ufw_baseline_preserved",
               "namespace_assertion_before_mutations", "no_unintended_wrapper_start", "cold_guard_verified",
               "active_guard_verified", "concurrent_start_order_verified", "concurrent_stop_order_verified",
@@ -131,6 +133,189 @@ UFW_CHECKS = ("vendor_bytes_preserved", "vendor_state_preserved", "real_ufw_base
 UFW_OPERATIONS = ("cold_guard", "concurrent_start", "normal_stop", "normal_restart",
                   "systemd_reload_refused", "direct_restart", "direct_force_reload", "active_guard_restart",
                   "concurrent_stop_start")
+
+
+TRANSACTION_PHASES = ("concurrent_start", "concurrent_stop", "concurrent_stop_start")
+TRANSACTION_ROLES = ("controller", "wrapper", "guard", "indexer")
+TRANSACTION_LEAVES = ("system.slice", "sysinit.target", "shutdown.target", "systemd-journald.socket",
+                      "basic.target", "network-pre.target", "nftables.service", "-.mount", "run.mount")
+TRANSACTION_IDENTITY = ("Id", "Names", "FragmentPath", "DropInPaths", "SourcePath", "Transient", "NeedDaemonReload",
+                        "UnitFileState", "Type", "RemainAfterExit", "DefaultDependencies", "Slice", "User", "Group",
+                        "RootDirectory", "RootImage", "StandardOutput", "StandardError", "Restart", "body_sha256", "body_metadata")
+
+
+def transaction_require(ok):
+    if not ok:
+        raise ValueError("native_transaction_invalid")
+
+
+def transaction_names(mapping):
+    transaction_require(type(mapping) is dict and set(mapping) == {"ufw.service", "aegis-wazuh-http-guard.service", "wazuh-indexer.service"})
+    value = mapping["ufw.service"]
+    transaction_require(type(value) is str)
+    match = re.fullmatch(r"aegis-native-([0-9a-f]{12})-wrapper\.service", value)
+    transaction_require(match is not None)
+    prefix = "aegis-native-" + match[1] + "-"
+    names = {role: prefix + suffix + ".service" for role, suffix in
+             (("controller", "transaction-controller"), ("wrapper", "wrapper"), ("guard", "ufw-guard"),
+              ("indexer", "ufw-indexer"), ("observer", "stop-observer"))}
+    transaction_require(mapping == {"ufw.service": names["wrapper"], "aegis-wazuh-http-guard.service": names["guard"], "wazuh-indexer.service": names["indexer"]})
+    return names
+
+
+def transaction_body(role, names):
+    participants = " ".join(names[r] for r in ("wrapper", "guard", "indexer"))
+    transaction_require(role in {"controller", "observer"})
+    header = "Wants=" + participants + "\nPropagatesStopTo=" + participants if role == "controller" else "After=" + participants + " " + names["controller"]
+    return ("[Unit]\nDefaultDependencies=no\n" + header + "\n[Service]\nType=oneshot\nRemainAfterExit=yes\n"
+            "ExecStart=/usr/bin/true\nStandardOutput=null\nStandardError=null\nTimeoutStartSec=10\nTimeoutStopSec=5\n").encode()
+
+
+def transaction_job(job, *, idle=True):
+    transaction_require(type(job) is dict and set(job) == {"type", "data"} and job["type"] == "(uo)")
+    data = job["data"]
+    transaction_require(type(data) is list and len(data) == 2 and type(data[0]) is int and 0 <= data[0] < 2**32)
+    transaction_require(type(data[1]) is str and len(data[1]) <= 255 and re.fullmatch(r"/(?:[A-Za-z0-9_]+(?:/[A-Za-z0-9_]+)*)?", data[1]) is not None)
+    if idle:
+        transaction_require(data == [0, "/"])
+
+
+TRANSACTION_STATES = {
+    "load": {"loaded", "not-found", "masked", "error", "stub", "bad-setting", "merged"},
+    "active": {"active", "inactive", "activating", "deactivating", "reloading", "failed", "maintenance"},
+    "sub": {"running", "exited", "dead", "failed", "start", "start-pre", "start-post", "stop", "stop-post", "stop-sigterm", "stop-sigkill", "reload", "auto-restart"}}
+
+
+def transaction_sample(sample, role, active=None):
+    transaction_require(type(sample) is dict and set(sample) == {"load", "active", "sub", "active_enter_us", "exec_start_us", "inactive_enter_us", "job"})
+    for field, admitted in TRANSACTION_STATES.items():
+        transaction_require(type(sample[field]) is str and sample[field] in admitted)
+    for key in ("active_enter_us", "exec_start_us", "inactive_enter_us"):
+        transaction_require(type(sample[key]) is int and 0 <= sample[key] < 2**64)
+    transaction_job(sample["job"], idle=active is not None)
+    if active is not None:
+        transaction_require(sample["load"] == "loaded" and sample["active"] == ("active" if active else "inactive"))
+        transaction_require(sample["sub"] == (("running" if role == "indexer" else "exited") if active else "dead"))
+        if active:
+            transaction_require(sample["active_enter_us"] > 0 and sample["exec_start_us"] > 0)
+
+
+def validate_transaction_facts(record, names):
+    """Fixed direct owned graph; named CI intrinsic leaves are a trust frontier."""
+    from deploy.wazuh.https_setup.ufw_host import DEPENDENCIES
+    require = transaction_require
+    external = record["external_baseline"]
+    require(type(external) is dict and set(external) == set(TRANSACTION_LEAVES))
+    states = {
+        "system.slice": {("loaded", "active", "active")}, "sysinit.target": {("loaded", "active", "active")},
+        "basic.target": {("loaded", "active", "active")}, "shutdown.target": {("loaded", "inactive", "dead")},
+        "systemd-journald.socket": {("loaded", "active", "listening"), ("loaded", "active", "running")},
+        "network-pre.target": {("loaded", "active", "active"), ("loaded", "inactive", "dead")},
+        "nftables.service": {("loaded", "active", "exited"), ("loaded", "inactive", "dead"), ("not-found", "inactive", "dead"), ("masked", "inactive", "dead")},
+        "-.mount": {("loaded", "active", "mounted")},
+        "run.mount": {("loaded", "active", "mounted"), ("not-found", "inactive", "dead")}}
+    for leaf, row in external.items():
+        require(type(row) is dict and set(row) == {"id", "fragment_path", "drop_in_paths", "load", "active", "sub", "job"})
+        require(row["id"] == leaf and all(type(row[k]) is str and len(row[k]) <= 4096 and "\0" not in row[k]
+                for k in ("id", "fragment_path", "load", "active", "sub")))
+        require(type(row["drop_in_paths"]) is list and len(row["drop_in_paths"]) <= 512 and
+                all(type(v) is str and len(v) <= 4096 and "\0" not in v for v in row["drop_in_paths"]))
+        require((row["load"], row["active"], row["sub"]) in states[leaf])
+        transaction_job(row["job"])
+        if leaf in {"-.mount", "run.mount"}:
+            require(row["drop_in_paths"] == [])
+    mounts = [leaf for leaf in ("-.mount", "run.mount") if external[leaf]["load"] == "loaded"]
+    mount_requires = [leaf for leaf in mounts if external[leaf]["fragment_path"]]
+    w, g, i, c, o = (names[r] for r in ("wrapper", "guard", "indexer", "controller", "observer"))
+    s, j, y, b, shut = "system.slice", "systemd-journald.socket", "sysinit.target", "basic.target", "shutdown.target"
+    matrix = {
+        "controller": dict(Before=[o], After=[s], Requires=[s], Wants=[w,g,i], PropagatesStopTo=[w,g,i]),
+        "observer": dict(After=[s,w,g,i,c], Requires=[s]),
+        "wrapper": dict(Before=[g,i,o], After=[s,j,*mounts], Requires=[s,*mount_requires], StopPropagatedFrom=[c]),
+        "guard": dict(Before=[i,o,shut], After=[w,s,j,y,b,"network-pre.target","nftables.service"], Requires=[s,y], Conflicts=[shut], RequiredBy=[i], StopPropagatedFrom=[c]),
+        "indexer": dict(Before=[o,shut], After=[w,g,s,j,y,b], Requires=[g,s,y], Conflicts=[shut], StopPropagatedFrom=[c])}
+    require(type(record["facts"]) is dict and set(record["facts"]) == set(TRANSACTION_ROLES))
+    facts = {**record["facts"], "observer": record["observer_facts"]}
+    for role, fact in facts.items():
+        require(type(fact) is dict and set(fact) == {"identity", "dependencies"})
+        identity, deps = fact["identity"], fact["dependencies"]
+        require(type(identity) is dict and set(identity) == set(TRANSACTION_IDENTITY))
+        special = role in {"controller", "observer"}
+        token = w.split("-")[2]
+        expected = dict(Id=names[role], Names=[names[role]], FragmentPath="/run/systemd/system/"+names[role], DropInPaths=[],
+            SourcePath="", Transient="no", NeedDaemonReload="no", UnitFileState="static" if special or role=="indexer" else "disabled",
+            Type="simple" if role=="indexer" else "oneshot", RemainAfterExit="no" if role=="indexer" else "yes",
+            DefaultDependencies="yes" if role in {"guard","indexer"} else "no", Slice=s,
+            User="root" if role=="guard" else "nobody" if role=="indexer" else "",
+            Group="root" if role=="guard" else "nogroup" if role=="indexer" else "",
+            RootDirectory=f"/run/aegis-native-{token}/vendor-root" if role=="wrapper" else "", RootImage="",
+            StandardOutput="null" if special else "journal", StandardError="null" if special else "inherit", Restart="no")
+        require(all(type(identity[k]) is type(v) and identity[k] == v for k,v in expected.items()))
+        digest, meta = identity["body_sha256"], identity["body_metadata"]
+        require(type(digest) is str and re.fullmatch(r"[0-9a-f]{64}", digest) is not None)
+        require(type(meta) is dict and set(meta) == {"uid","gid","mode","nlink","size"} and all(type(v) is int for v in meta.values()))
+        require(meta["uid"] == meta["gid"] == 0 and meta["mode"] == 0o644 and meta["nlink"] == 1 and 0 < meta["size"] <= 65536)
+        if special:
+            body = transaction_body(role,names)
+            require(digest == hashlib.sha256(body).hexdigest() and meta["size"] == len(body))
+        require(type(deps) is dict and set(deps) == set(DEPENDENCIES))
+        for key, values in deps.items():
+            require(type(values) is list and len(values) <= 512 and all(type(v) is str and len(v) <= 255 and re.fullmatch(r"[A-Za-z0-9_.@\\:-]+\.[a-z]+",v) for v in values))
+            require(values == sorted(set(values)) and values == sorted(matrix[role].get(key,[])))
+
+
+def validate_transaction_phase(record, phase, names, *, before_only=False):
+    require = transaction_require
+    require(type(record) is dict and set(record) == {"facts","external_baseline","before","action","after","observer_facts","observer_before","observer_after"})
+    validate_transaction_facts(record,names)
+    stop = phase == "concurrent_stop"
+    require(record["action"] == {"operation":"stop" if stop else "start","unit":names["controller"]})
+    for point in (("before",) if before_only else ("before","after")):
+        require(type(record[point]) is dict and set(record[point]) == set(TRANSACTION_ROLES))
+        for role, sample in record[point].items():
+            transaction_sample(sample,role,active=stop if point=="before" else not stop)
+        transaction_sample(record["observer_"+point],"observer",active=True)
+    if before_only:
+        return
+    for key in ("active_enter_us","exec_start_us"):
+        require(record["observer_before"][key] == record["observer_after"][key])
+    before, after = record["before"], record["after"]
+    for role in TRANSACTION_ROLES:
+        if stop:
+            require(after[role]["inactive_enter_us"] > before[role]["active_enter_us"])
+        else:
+            require(all(after[role][key] > before[role][key] for key in ("active_enter_us","exec_start_us")))
+    if stop:
+        require(after["indexer"]["inactive_enter_us"] <= after["guard"]["inactive_enter_us"] <= after["wrapper"]["inactive_enter_us"])
+    else:
+        require(after["wrapper"]["active_enter_us"] <= after["guard"]["exec_start_us"] and after["guard"]["active_enter_us"] <= after["indexer"]["exec_start_us"])
+
+
+def validate_transaction_continuity(phases):
+    rows = list(phases.values())
+    for record in rows[1:]:
+        transaction_require(record["observer_facts"]["identity"] == rows[0]["observer_facts"]["identity"])
+        for role in TRANSACTION_ROLES:
+            transaction_require(record["facts"][role]["identity"] == rows[0]["facts"][role]["identity"])
+        for key in ("active_enter_us","exec_start_us"):
+            transaction_require(record["observer_before"][key] == rows[0]["observer_before"][key])
+    if "concurrent_stop" in phases:
+        for key in ("active_enter_us","exec_start_us"):
+            transaction_require(phases["concurrent_start"]["after"]["controller"][key] == phases["concurrent_stop"]["before"]["controller"][key])
+
+
+def validate_owned_transaction(value, mapping):
+    try:
+        names = transaction_names(mapping)
+        transaction_require(type(value) is dict and set(value) == {"mechanism","controller","observer","phases"})
+        transaction_require(value["mechanism"] == "owned_controller_wants_and_propagates_stop_to_v1" and value["controller"] == names["controller"] and value["observer"] == names["observer"])
+        phases = value["phases"]
+        transaction_require(type(phases) is dict and set(phases) == set(TRANSACTION_PHASES))
+        for phase in TRANSACTION_PHASES:
+            validate_transaction_phase(phases[phase],phase,names)
+        validate_transaction_continuity({phase:phases[phase] for phase in TRANSACTION_PHASES})
+    except (KeyError, TypeError, AttributeError):
+        raise ValueError("native_transaction_invalid") from None
 
 
 def validate_native_observations(observations):
@@ -186,8 +371,9 @@ def validate_native_observations(observations):
     require(len(set(mapping.values())) == 3 and all(re.fullmatch(r"aegis-native-[0-9a-f]{12}-(wrapper|ufw-indexer|ufw-guard)\.service", v) for v in mapping.values()))
     adapter = item["native_adapter"]
     from deploy.wazuh.https_setup import ufw
-    require(type(adapter) is dict and set(adapter) == {"unit_properties", "typed_bus", "backend_sha256"})
+    require(type(adapter) is dict and set(adapter) == {"unit_properties", "typed_bus", "backend_sha256", "transaction"})
     require(sha(adapter["backend_sha256"]))
+    validate_owned_transaction(adapter["transaction"], mapping)
     properties = adapter["unit_properties"]
     expected = {**ufw.STATIC_PROPERTIES, **ufw.RUNTIME_PROPERTIES,
                 "FragmentPath": "/run/systemd/system/" + mapping["ufw.service"],
