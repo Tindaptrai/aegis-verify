@@ -15,6 +15,32 @@ import tempfile
 import unittest
 
 
+# Synthetic public shapes only; no owner configuration or index pattern names.
+LITERAL_CONFIG_SETTINGS = (
+    '# synthetic configuration; literal markers * & ! | > { } ` %\n'
+    'network.host: "127.0.0.1"\nnode.name: "synthetic-literal-node"\n'
+    'cluster.name: synthetic-literal-cluster\nnode.max_local_storage_nodes: 1\n'
+    'plugins.security.ssl.http.enabled: true\n'
+    'plugins.security.system_indices.enabled: true\n'
+    'plugins.security.system_indices.indices: [".synthetic-amber*", ".synthetic-birch*", '
+    '".synthetic-coral*", ".synthetic-delta*", ".synthetic-elm*", ".synthetic-fern*", '
+    '".synthetic-grove*", ".synthetic-hazel*", ".synthetic-iris*", ".synthetic-jade*", '
+    '".synthetic-kite*", ".synthetic-larch*"] # retained patterns * & ! | > { } ` %\n'
+    'cluster.initial_master_nodes: # literal marker * is comment text\n'
+    '- "synthetic-literal-node"\n'
+    'plugins.security.authcz.admin_dn:\n- \'CN=synthetic-reviewer,OU=Example,O=Test\'\n'
+    'plugins.security.nodes_dn:\n- "CN=synthetic-literal-node,OU=Example,O=Test"\n'
+    'plugins.security.restapi.roles_enabled:\n- synthetic_role_one\n- synthetic_role_two\n'
+    'plugins.security.ssl.http.pemtrustedcas_filepath: "certs/root-ca.pem"\n'
+    'plugins.security.ssl.transport.pemcert_filepath: certs/indexer.pem\n'
+    'plugins.security.ssl.transport.pemkey_filepath: "certs/indexer-key.pem"\n'
+    'plugins.security.ssl.transport.pemtrustedcas_filepath: certs/root-ca.pem\n')
+LITERAL_CONFIG_TARGETS = (
+    'http.bind_host: "127.0.0.1"\nhttp.port: 9200\nhttp.publish_host: 127.0.0.1\n'
+    'plugins.security.ssl.http.pemcert_filepath: certs/indexer.pem\n'
+    'plugins.security.ssl.http.pemkey_filepath: "certs/indexer-key.pem"\n')
+
+
 def profile_dict():
     return dict(schema_version=1, hostname="indexer.example.test",
                 indexer_ip="192.0.2.10", manager_ip="198.51.100.20",
@@ -116,6 +142,79 @@ class Components(unittest.TestCase):
                     b"http.host: |\n  x\n", b"plugins:\n  security: x\n"]:
             with self.subTest(raw=raw), self.assertRaises(self.c.SetupError):
                 self.c.patch_http_config(raw, self.p)
+
+    def test_config_preserves_quoted_wildcard_lists_with_public_scalar_shapes(self):
+        patched_targets = (
+            'http.bind_host: ["127.0.0.1", "10.23.45.10"]\nhttp.port: 9200\n'
+            'http.publish_host: "127.0.0.1"\n'
+            'plugins.security.ssl.http.pemcert_filepath: "/etc/wazuh-indexer/aegis-http/tls/indexer-http.pem"\n'
+            'plugins.security.ssl.http.pemkey_filepath: "/etc/wazuh-indexer/aegis-http/tls/indexer-http-key.pem"\n')
+        for newline in ('\n', '\r\n'):
+            for final_newline in (True, False):
+                with self.subTest(newline=newline, final_newline=final_newline):
+                    raw = (LITERAL_CONFIG_SETTINGS + LITERAL_CONFIG_TARGETS).replace('\n', newline).encode()
+                    expected = (LITERAL_CONFIG_SETTINGS + patched_targets).replace('\n', newline).encode()
+                    if not final_newline:
+                        raw = raw.removesuffix(newline.encode())
+                        expected = expected.removesuffix(newline.encode())
+                    patched = self.c.patch_http_config(raw, self.p)
+                    self.assertEqual(patched, expected)
+                    self.assertEqual(self.c.patch_http_config(patched, self.p), patched)
+
+    def test_config_preserves_literal_markers_and_comments_after_complete_values(self):
+        values = (
+            b'"* & ! | > { } ` % : # literal"',
+            b"'* & ! | > { } ` % : # it''s literal'",
+            b'["*", "&", "!", "|", ">", "{", "}", "`", "%", "name:#fragment"]',
+            b'["escaped \\\"quote\\\"", "slash\\\\path", 7, true, false]',
+            b'plain', b'"quoted"', b"'quoted'", b'["flat", 1, true]',
+        )
+        comment = b' # retained * & ! | > { } ` % : # comment'
+        for value in values:
+            for trailing in (b'', comment):
+                raw = b'unknown.literal: ' + value + trailing + b'\n'
+                with self.subTest(raw=raw):
+                    patched = self.c.patch_http_config(raw, self.p)
+                    self.assertTrue(patched.startswith(raw))
+                    self.assertEqual(self.c.patch_http_config(patched, self.p), patched)
+        raw = b'items:' + comment + b'\n- "literal*"\nnext: plain' + comment + b'\n'
+        self.assertTrue(self.c.patch_http_config(raw, self.p).startswith(raw))
+        for raw in (b'items:' + comment + b'\n', b'items:' + comment + b'\nnext: plain\n',
+                    b'http.port:' + comment + b'\n- 9200\n'):
+            with self.subTest(raw=raw), self.assertRaisesRegex(self.c.SetupError, 'config_unsupported'):
+                self.c.patch_http_config(raw, self.p)
+
+    def test_config_refuses_active_yaml_syntax_and_partially_consumed_literals(self):
+        values = (
+            b'*alias', b'&anchor scalar', b'!tag scalar', b'!!str scalar', b'|', b'>',
+            b'{"nested": "map"}', b'[["nested"]]', b'[{"nested": "map"}]',
+            b'[*alias]', b'["literal*", *alias]', b'[&anchor "scalar"]', b'[!tag "scalar"]',
+            b'"literal*" *alias', b'"literal*" &anchor', b'"literal*" !tag',
+            b'["literal*"] *alias', b'["literal*"] &anchor', b'["literal*"] !tag',
+            b"'literal*' *alias", b'"literal*" trailing', b'["literal*"] trailing',
+            b'"unclosed*', b"'unclosed*", b'["unclosed*"', b'["x",]', b'"bad\\q*"',
+            b'[null]', b'[1.5]', b'[NaN]', b'[Infinity]', b'[true, {"x": 1}]',
+            b'plain*', b'plain&', b'plain!', b'plain|', b'plain>', b'plain{',
+            b'plain}', b'plain`', b'plain%', b'%YAML 1.2',
+        )
+        for value in values:
+            raw = b'unknown.literal: ' + value + b'\n'
+            with self.subTest(raw=raw), self.assertRaisesRegex(self.c.SetupError, 'config_unsupported'):
+                self.c.patch_http_config(raw, self.p)
+        for raw in (b'%YAML 1.2\nnode.name: "literal*"\n', b'---\nnode.name: "literal*"\n',
+                    b'"node.name": "literal*"\n', b"'node.name': 'literal*'\n",
+                    b'node.name: "literal*"\nnode.name: "again*"\n',
+                    b'node.name: "literal*"\nnode: "collision*"\n',
+                    b'node: "literal*"\nnode.name: "collision*"\n'):
+            with self.subTest(raw=raw), self.assertRaisesRegex(self.c.SetupError, 'config_unsupported'):
+                self.c.patch_http_config(raw, self.p)
+
+    def test_config_quoted_wildcards_do_not_bypass_http_target_admission(self):
+        for key, value in ((b'http.bind_host', b'"*"'), (b'http.bind_host', b'["127.0.0.1", "*"]'),
+                           (b'http.publish_host', b"'*'"), (b'http.publish_host', b'["*"]'),
+                           (b'http.port', b'"*"'), (b'http.port', b'["*"]')):
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(self.c.SetupError, 'config_unsupported'):
+                self.c.patch_http_config(key + b': ' + value + b'\n', self.p)
 
     def test_config_preserves_public_scalar_block_lists_in_both_indentation_styles(self):
         original_targets = (

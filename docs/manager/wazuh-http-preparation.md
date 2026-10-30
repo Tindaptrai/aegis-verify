@@ -163,7 +163,15 @@ hai list liên tiếp có thể dùng mức thụt khác nhau. Dạng này bao g
 [cấu hình công khai Wazuh](https://documentation.wazuh.com/current/user-manual/indexer-api/configuration.html);
 sequence không thụt dưới mapping key là dạng hợp lệ của
 [YAML block collections](https://yaml.org/spec/1.2.2/#block-collection-styles).
-Giá trị scalar vẫn theo giới hạn plain/quoted hiện có. List rỗng, item rỗng,
+Giá trị scalar vẫn theo giới hạn plain/quoted hiện có. Literal quoted và list
+scalar phẳng JSON-compatible được kiểm tra toàn bộ cùng trailing comment;
+`*`, `&`, `!`, `|`, `>`, `{`, `}`, backtick và `%` bên trong chuỗi quoted hoặc
+comment được giữ nguyên như dữ liệu (ví dụ wildcard pattern của index), không
+phải alias/anchor/tag hay directive. Alias/anchor/tag active không quote, block/
+folded value, mapping, nested collection và token active sau literal vẫn bị từ
+chối; đây không phải hỗ trợ YAML tổng quát. Patcher vẫn chỉ sửa năm HTTP target
+đã duyệt; wildcard quoted không vượt qua kiểm tra bind/publish/port.
+List rỗng, item rỗng,
 dash không có header, thụt lẫn mức, mapping lồng, collection lồng dạng block/flow,
 alias, anchor, tag và directive đều bị từ chối. Item chỉ có `-` hoặc `:` không
 quote hoặc mapping thiếu value như `name:` cũng bị từ chối, kể cả trước comment;

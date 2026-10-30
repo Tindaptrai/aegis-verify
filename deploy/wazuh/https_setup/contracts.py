@@ -200,14 +200,13 @@ def patch_http_config(raw: bytes, p: Profile) -> bytes:
             if any(key.startswith(other + ".") or other.startswith(key + ".") for other in seen):
                 raise ValueError
             seen.add(key)
-            # This is a conservative syntax boundary, not a general YAML parser.
-            if any(c in value for c in "&*!|>{}`%") or value.startswith("{"):
-                raise ValueError
             if not value or value.startswith("#"):
                 if key in targets:
                     raise ValueError
                 list_key = key
             else:
+                # Validate the entire literal and trailing comment; indicators
+                # inside quoted data or comments are not active YAML syntax.
                 parsed = _yaml_value(value)
                 if key == "http.bind_host" and parsed not in ("127.0.0.1", ["127.0.0.1"], ["127.0.0.1", p.indexer_ip]):
                     raise ValueError

@@ -18,7 +18,7 @@ from contextlib import contextmanager, ExitStack
 import unittest
 
 from deploy.wazuh.https_setup.contracts import Profile, SetupError
-from deploy.wazuh.tests.test_components import profile_dict
+from deploy.wazuh.tests.test_components import LITERAL_CONFIG_SETTINGS, LITERAL_CONFIG_TARGETS, profile_dict
 
 
 def nft_observation(objects=()):
@@ -421,17 +421,7 @@ class TransactionTests(unittest.TestCase):
               "expected_leaf_der_sha256": hashlib.sha256(b"leaf").hexdigest()}
         files = {"profile": json.dumps(raw).encode(), raw["ca_path"]: b"-----BEGIN CERTIFICATE-----\nY2E=\n-----END CERTIFICATE-----\n",
                  raw["leaf_path"]: b"-----BEGIN CERTIFICATE-----\nbGVhZg==\n-----END CERTIFICATE-----\n"}
-        config = ("network.host: 127.0.0.1\nplugins.security.ssl.http.enabled: true\n"
-                  "cluster.initial_master_nodes:\n- synthetic-node\n"
-                  "plugins.security.authcz.admin_dn:\n- 'CN=synthetic-admin,OU=Example,O=Test'\n"
-                  "plugins.security.nodes_dn:\n- 'CN=synthetic-node,OU=Example,O=Test'\n"
-                  "plugins.security.restapi.roles_enabled:\n- synthetic_role_one\n- synthetic_role_two\n"
-                  "plugins.security.ssl.http.pemcert_filepath: certs/indexer.pem\n"
-                  "plugins.security.ssl.http.pemkey_filepath: certs/indexer-key.pem\n"
-                  "plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem\n"
-                  "plugins.security.ssl.transport.pemcert_filepath: certs/indexer.pem\n"
-                  "plugins.security.ssl.transport.pemkey_filepath: certs/indexer-key.pem\n"
-                  "plugins.security.ssl.transport.pemtrustedcas_filepath: certs/root-ca.pem\n").encode()
+        config = (LITERAL_CONFIG_SETTINGS + LITERAL_CONFIG_TARGETS).encode()
         files[raw["config_path"]] = config
         props = {k: "" for k in self.h.UNIT_EMPTY} | {k: "no" for k in self.h.UNIT_NO} | {
             "User": "wazuh-indexer", "Group": "wazuh-indexer", "ActiveState": "active", "LoadState": "loaded",
@@ -442,6 +432,7 @@ class TransactionTests(unittest.TestCase):
         with zipfile.ZipFile(jar, "w") as zipped:
             zipped.writestr("META-INF/MANIFEST.MF", "Implementation-Version: 2.19.4\n")
         files["/usr/share/wazuh-indexer/lib/opensearch-2.19.4.jar"] = jar.getvalue()
+        retained_inputs = dict(files)
         calls = []
         class Files:
             def read(_, path, **kwargs):
@@ -492,7 +483,15 @@ class TransactionTests(unittest.TestCase):
             self.assertEqual(facts["archive"], {"ino": 77, "size": 1234})
             self.assertEqual(facts["opensearch_jar"], hashlib.sha256(jar.getvalue()).hexdigest())
             self.assertEqual(facts["config"], hashlib.sha256(config).hexdigest())
+            self.assertEqual(set(facts["retained"]), {raw["ca_path"], raw["leaf_path"],
+                             "/etc/wazuh-indexer/certs/indexer-key.pem"})
+            for path in (raw["ca_path"], raw["leaf_path"]):
+                self.assertEqual(facts["retained"][path]["sha256"], hashlib.sha256(retained_inputs[path]).hexdigest())
+            self.assertEqual(set(facts["retained"]["/etc/wazuh-indexer/certs/indexer-key.pem"]),
+                             {"metadata", "private"})
+            self.assertTrue(facts["retained"]["/etc/wazuh-indexer/certs/indexer-key.pem"]["private"])
             self.assertEqual(files[raw["config_path"]], config)
+            self.assertEqual(files, retained_inputs)
             self.assertNotIn(("read", raw["ca_archive"]), calls)
             self.assertFalse(any("key.pem" in path for action, path in calls if action == "read"))
             version = "4.14.3-1"
