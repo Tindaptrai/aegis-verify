@@ -117,6 +117,91 @@ class Components(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(self.c.SetupError):
                 self.c.patch_http_config(raw, self.p)
 
+    def test_config_preserves_public_scalar_block_lists_in_both_indentation_styles(self):
+        original_targets = (
+            'http.bind_host: 127.0.0.1\nhttp.port: 9200\nhttp.publish_host: 127.0.0.1\n'
+            'plugins.security.ssl.http.pemcert_filepath: old.pem\n'
+            'plugins.security.ssl.http.pemkey_filepath: old-key.pem\n')
+        patched_targets = (
+            'http.bind_host: ["127.0.0.1", "10.23.45.10"]\nhttp.port: 9200\n'
+            'http.publish_host: "127.0.0.1"\n'
+            'plugins.security.ssl.http.pemcert_filepath: "/etc/wazuh-indexer/aegis-http/tls/indexer-http.pem"\n'
+            'plugins.security.ssl.http.pemkey_filepath: "/etc/wazuh-indexer/aegis-http/tls/indexer-http-key.pem"\n')
+        for indents in ((0, 0, 0, 0), (2, 2, 2, 2), (0, 2, 4, 0), (3, 0, 1, 4)):
+            a, b, c, d = (" " * width for width in indents)
+            lists = (
+                'cluster.initial_master_nodes: # synthetic list\n'
+                f'# before first item\n{a}- "synthetic-node" # unchanged\n\n'
+                'plugins.security.authcz.admin_dn:\n'
+                f"{b}- 'CN=synthetic-admin,OU=Example,O=Test'\n"
+                'plugins.security.nodes_dn:\n'
+                f'{c}- "CN=synthetic-node,OU=Example,O=Test"\n'
+                'plugins.security.restapi.roles_enabled:\n'
+                f'{d}- synthetic_role_one\n  # between items\n\n{d}- "synthetic_role_two"\n')
+            prefix = '# synthetic configuration\nnode.name: synthetic-node\ncluster.name: synthetic-cluster\n'
+            for newline in ('\n', '\r\n'):
+                for final_newline in (True, False):
+                    with self.subTest(indents=indents, newline=newline, final_newline=final_newline):
+                        raw = (prefix + original_targets + lists).replace('\n', newline).encode()
+                        expected = (prefix + patched_targets + lists).replace('\n', newline).encode()
+                        untouched_lists = lists.replace('\n', newline).encode()
+                        if not final_newline:
+                            raw = raw.removesuffix(newline.encode())
+                            expected = expected.removesuffix(newline.encode())
+                            untouched_lists = untouched_lists.removesuffix(newline.encode())
+                        patched = self.c.patch_http_config(raw, self.p)
+                        self.assertEqual(patched, expected)
+                        self.assertTrue(patched.endswith(untouched_lists))
+                        self.assertEqual(self.c.patch_http_config(patched, self.p), patched)
+
+    def test_config_indentless_list_without_final_newline_adds_missing_targets(self):
+        raw = b'cluster.initial_master_nodes:\n- synthetic-node'
+        expected = raw + (
+            b'\nhttp.bind_host: ["127.0.0.1", "10.23.45.10"]\nhttp.port: 9200\n'
+            b'http.publish_host: "127.0.0.1"\n'
+            b'plugins.security.ssl.http.pemcert_filepath: "/etc/wazuh-indexer/aegis-http/tls/indexer-http.pem"\n'
+            b'plugins.security.ssl.http.pemkey_filepath: "/etc/wazuh-indexer/aegis-http/tls/indexer-http-key.pem"\n')
+        self.assertEqual(self.c.patch_http_config(raw, self.p), expected)
+        self.assertEqual(self.c.patch_http_config(expected, self.p), expected)
+
+    def test_config_block_lists_refuse_empty_orphan_mixed_and_nested_entries(self):
+        cases = [
+            b'items:\n', b'items:\n# empty\n\n', b'items:\nnext: scalar\n',
+            b'items:\n- first\nempty:\n', b'items:\n- first\nempty:\nnext: scalar\n',
+            b'- orphan\n', b'node.name: synthetic\n- orphan\n', b'items: ["inline"]\n- orphan\n',
+            b'items:\n- first\n  - second\n', b'items:\n  - first\n- second\n',
+            b'items:\n  - first\n    - second\n', b'items:\n    - first\n  - second\n',
+            b'items:\n  mapping: scalar\n', b'items:\n- name: scalar\n',
+            b'items:\n-\n', b'items:\n- \n', b'items:\n- # empty\n',
+            b'items:\n- -\n', b'items:\n- :\n', b'items:\n- - nested\n',
+            b'items:\n  - -\n', b'items:\n  - :\n',
+            b'items:\n  - - # empty sequence\n', b'items:\n  - : # empty mapping\n',
+            b'items:\n- ["nested"]\n', b'items:\n- {"nested": "map"}\n',
+            b'items:\n- *alias\n', b'items:\n- &anchor scalar\n', b'items:\n- !!str scalar\n',
+            b'items:\n- %YAML 1.2\n', b'items:\n- |\n  folded\n',
+        ]
+        for raw in cases:
+            with self.subTest(raw=raw), self.assertRaisesRegex(self.c.SetupError, 'config_unsupported'):
+                self.c.patch_http_config(raw, self.p)
+
+    def test_config_block_lists_preserve_quoted_collection_indicator_scalars(self):
+        for indent in (b'', b'  '):
+            raw = b'items:\n' + indent + b'- "-"\n' + indent + b"- ':'\n"
+            self.assertTrue(self.c.patch_http_config(raw, self.p).startswith(raw))
+
+    def test_config_indentless_lists_keep_target_and_network_refusals(self):
+        prefix = b'cluster.initial_master_nodes:\n- synthetic-node\n'
+        for bad in [b'cluster.initial_master_nodes: duplicate\n', b'cluster: collision\n',
+                    b'cluster.initial_master_nodes.child: collision\n', b'http.bind_host:\n- 127.0.0.1\n',
+                    b'http.port:\n- 9200\n', b'http.publish_host:\n- 127.0.0.1\n',
+                    b'plugins.security.ssl.http.pemcert_filepath:\n- old.pem\n',
+                    b'plugins.security.ssl.http.pemkey_filepath:\n- old-key.pem\n',
+                    b'http.host: 127.0.0.1\n', b'http.bind_host: 0.0.0.0\n',
+                    b'http.port: 9201\n', b'http.publish_host: 0.0.0.0\n',
+                    b'http.publish_port: 9201\n', b'http.bind_host.name: collision\n']:
+            with self.subTest(bad=bad), self.assertRaisesRegex(self.c.SetupError, 'config_unsupported'):
+                self.c.patch_http_config(prefix + bad, self.p)
+
     def test_config_refuses_conflicting_network_overrides_and_invalid_scalars(self):
         for raw in [b"http.host: 127.0.0.1\n", b"http.bind_host: 0.0.0.0\n", b"http.port: 9201\n",
                     b"http.publish_port: 9201\n", b"http.publish_host: 0.0.0.0\n",

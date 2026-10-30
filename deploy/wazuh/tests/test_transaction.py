@@ -422,6 +422,10 @@ class TransactionTests(unittest.TestCase):
         files = {"profile": json.dumps(raw).encode(), raw["ca_path"]: b"-----BEGIN CERTIFICATE-----\nY2E=\n-----END CERTIFICATE-----\n",
                  raw["leaf_path"]: b"-----BEGIN CERTIFICATE-----\nbGVhZg==\n-----END CERTIFICATE-----\n"}
         config = ("network.host: 127.0.0.1\nplugins.security.ssl.http.enabled: true\n"
+                  "cluster.initial_master_nodes:\n- synthetic-node\n"
+                  "plugins.security.authcz.admin_dn:\n- 'CN=synthetic-admin,OU=Example,O=Test'\n"
+                  "plugins.security.nodes_dn:\n- 'CN=synthetic-node,OU=Example,O=Test'\n"
+                  "plugins.security.restapi.roles_enabled:\n- synthetic_role_one\n- synthetic_role_two\n"
                   "plugins.security.ssl.http.pemcert_filepath: certs/indexer.pem\n"
                   "plugins.security.ssl.http.pemkey_filepath: certs/indexer-key.pem\n"
                   "plugins.security.ssl.http.pemtrustedcas_filepath: certs/root-ca.pem\n"
@@ -487,6 +491,8 @@ class TransactionTests(unittest.TestCase):
             self.assertEqual(pin, hashlib.sha256(files["profile"]).hexdigest())
             self.assertEqual(facts["archive"], {"ino": 77, "size": 1234})
             self.assertEqual(facts["opensearch_jar"], hashlib.sha256(jar.getvalue()).hexdigest())
+            self.assertEqual(facts["config"], hashlib.sha256(config).hexdigest())
+            self.assertEqual(files[raw["config_path"]], config)
             self.assertNotIn(("read", raw["ca_archive"]), calls)
             self.assertFalse(any("key.pem" in path for action, path in calls if action == "read"))
             version = "4.14.3-1"

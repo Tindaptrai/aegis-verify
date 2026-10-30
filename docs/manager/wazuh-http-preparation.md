@@ -153,6 +153,24 @@ hoặc một native gate bị skip phải làm native qualification thất bại
 native suite trên máy lab đang cài Wazuh: fence từ chối footprint/unit/package
 Wazuh. Chỉ dùng VM dùng một lần, không có dữ liệu thật.
 
+Patcher cấu hình chỉ nhận subset YAML phẳng, không phải parser YAML tổng quát.
+List scalar dạng block của key không phải HTTP target phải có ít nhất một item;
+dấu `-` có thể ở cột đầu hoặc thụt bằng space, nhưng mọi item trong cùng list
+phải có đúng cùng mức thụt. Key top-level tiếp theo bắt đầu trạng thái mới, nên
+hai list liên tiếp có thể dùng mức thụt khác nhau. Dạng này bao gồm bốn header
+`cluster.initial_master_nodes`, `plugins.security.authcz.admin_dn`,
+`plugins.security.nodes_dn`, `plugins.security.restapi.roles_enabled` trong
+[cấu hình công khai Wazuh](https://documentation.wazuh.com/current/user-manual/indexer-api/configuration.html);
+sequence không thụt dưới mapping key là dạng hợp lệ của
+[YAML block collections](https://yaml.org/spec/1.2.2/#block-collection-styles).
+Giá trị scalar vẫn theo giới hạn plain/quoted hiện có. List rỗng, item rỗng,
+dash không có header, thụt lẫn mức, mapping lồng, collection lồng dạng block/flow,
+alias, anchor, tag và directive đều bị từ chối. Item chỉ có `-` hoặc `:` không
+quote cũng bị từ chối; chuỗi literal có quote `"-"` hoặc `":"` vẫn hợp lệ.
+HTTP target dạng block list, key trùng/prefix xung đột và network override bị cấm
+vẫn bị từ chối. Node/cluster/security list, comment, thứ tự và LF/CRLF được giữ
+nguyên byte; không tự sửa indentation hoặc điền danh tính node.
+
 Preflight chỉ đọc dữ liệu tại đường cố định
 `/usr/share/wazuh-indexer/lib/opensearch-2.19.4.jar`, không chạy/import Java hay
 code vendor. Riêng hai thư mục `wazuh-indexer`, `lib` và JAR này được phép có

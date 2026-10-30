@@ -136,7 +136,8 @@ def _yaml_value(value: str):
 def patch_http_config(raw: bytes, p: Profile) -> bytes:
     """Patch a deliberately small flat YAML subset without reserializing it.
 
-    Unknown flat scalars and simple block lists retain their exact bytes.
+    Unknown flat scalars and simple block lists retain their exact bytes. Each
+    block list uses one item indentation level, including zero (indentless).
     YAML aliases, mappings, tags, folded values and quoted keys are unsupported.
     """
     try:
@@ -159,21 +160,30 @@ def patch_http_config(raw: bytes, p: Profile) -> bytes:
         output = []
         list_key = None
         list_count = 0
+        list_indent = None
         for line in text.splitlines(keepends=True):
             body = line.removesuffix(newline)
             if not body.strip() or body.lstrip().startswith("#"):
                 output.append(line)
                 continue
-            if body.startswith(" "):
-                entry = re.fullmatch(r" +-[ ]+(.+)", body)
-                if not list_key or not entry or isinstance(_yaml_value(entry[1]), list):
+            if body.startswith((" ", "-")):
+                entry = re.fullmatch(r"( *)-[ ]+(.+)", body)
+                if not list_key or not entry:
                     raise ValueError
+                indent, value = entry.groups()
+                if list_indent is not None and len(indent) != list_indent:
+                    raise ValueError
+                # Bare indicators introduce nested collections, even without a
+                # following value. Quoted literal indicators remain scalars.
+                if value.split("#", 1)[0].strip() in {"-", ":"} or isinstance(_yaml_value(value), list):
+                    raise ValueError
+                list_indent = len(indent)
                 list_count += 1
                 output.append(line)
                 continue
             if list_key and not list_count:
                 raise ValueError
-            list_key, list_count = None, 0
+            list_key, list_count, list_indent = None, 0, None
             match = re.fullmatch(r"([A-Za-z_][A-Za-z0-9_.-]*):[ ]*(.*)", body)
             if not match:
                 raise ValueError
