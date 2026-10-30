@@ -14,7 +14,7 @@ import sys
 import gzip
 import tarfile
 import errno
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import unittest
 
 from deploy.wazuh.https_setup.contracts import Profile, SetupError
@@ -442,8 +442,14 @@ class TransactionTests(unittest.TestCase):
         class Files:
             def read(_, path, **kwargs):
                 name = str(path).replace("\\", "/")
+                if name.endswith(".jar"):
+                    self.fail("preflight must use the fixed read-only JAR boundary")
                 calls.append(("read", name))
                 return files[name]
+            def read_indexer_jar(_, uid, gid):
+                if (uid, gid) != (123, 123):
+                    self.fail("JAR identity must come from the service account")
+                return files["/usr/share/wazuh-indexer/lib/opensearch-2.19.4.jar"]
             def vendor_read(_, path, uid, gid):
                 return _.read(path)
             def trusted(_, path, **kwargs):
@@ -480,6 +486,7 @@ class TransactionTests(unittest.TestCase):
             p, pin, facts = host.preflight("profile")
             self.assertEqual(pin, hashlib.sha256(files["profile"]).hexdigest())
             self.assertEqual(facts["archive"], {"ino": 77, "size": 1234})
+            self.assertEqual(facts["opensearch_jar"], hashlib.sha256(jar.getvalue()).hexdigest())
             self.assertNotIn(("read", raw["ca_archive"]), calls)
             self.assertFalse(any("key.pem" in path for action, path in calls if action == "read"))
             version = "4.14.3-1"
@@ -1989,6 +1996,181 @@ class PublicationTests(unittest.TestCase):
 
     def test_patched_rollback_rejects_metadata_change_during_publisher_handoff(self):
         self._assert_patched_rollback_preserves_metadata_edit(handoff=True)
+
+
+class JarReadFixture:
+    """Controlled POSIX fd boundary; never touches the host vendor tree."""
+    names = ("/", "usr", "share", "wazuh-indexer", "lib", "opensearch-2.19.4.jar")
+
+    def __init__(self, module, *, service=True):
+        self.h = module
+        self.nodes = []
+        for index in range(6):
+            directory = index < 5
+            owner = 123 if service and index >= 3 else 0
+            self.nodes.append(dict(dev=1, ino=index + 10,
+                mode=(stat.S_IFDIR | (0o750 if index >= 3 else 0o755)) if directory else stat.S_IFREG | 0o640,
+                uid=owner, gid=owner, nlink=2 if directory else 1,
+                size=0 if directory else 7, mtime_ns=1, ctime_ns=1))
+        self.named = list(self.nodes)
+        self.fds, self.held_metadata, self.flags, self.named_checks = {}, {}, [], []
+        self.next_fd, self.offset, self.reads = 10, 0, 0
+        self.hook = lambda: None
+
+    def info(self, node):
+        return SimpleNamespace(**{"st_" + key: value for key, value in node.items()})
+
+    def open(self, name, flags, *, dir_fd=None):
+        index = self.names.index(name)
+        if index and self.fds[dir_fd] is not self.nodes[index - 1]:
+            raise AssertionError("open escaped its held parent")
+        if stat.S_ISLNK(self.named[index]["mode"]):
+            raise OSError(errno.ELOOP, "synthetic no-follow refusal")
+        self.flags.append((index, flags))
+        fd = self.next_fd
+        self.next_fd += 1
+        self.fds[fd] = self.named[index]
+        return fd
+
+    def stat(self, name, *, dir_fd, follow_symlinks):
+        if follow_symlinks is not False:
+            raise AssertionError("named entries must never follow links")
+        index = self.names.index(name)
+        if self.fds[dir_fd] is not self.nodes[max(index - 1, 0)]:
+            raise AssertionError("stat escaped its held parent")
+        self.named_checks.append(index)
+        return self.info(self.named[index])
+
+    def read(self, fd, size):
+        if self.fds[fd] is not self.nodes[-1]:
+            raise AssertionError("only JAR data may be read")
+        self.reads += 1
+        body = b"fixture"[self.offset:self.offset + size]
+        self.offset += len(body)
+        self.hook()
+        return body
+
+    def close(self, fd):
+        self.fds.pop(fd)
+
+    @contextmanager
+    def installed(self):
+        with ExitStack() as stack:
+            for name, value in (("O_NOFOLLOW", 0x20000), ("O_DIRECTORY", 0x10000), ("O_NONBLOCK", 0x800)):
+                stack.enter_context(patch.object(self.h.os, name, value, create=True))
+            for name, value in (("open", self.open), ("fstat", lambda fd: self.info(self.held_metadata.get(fd, self.fds[fd]))),
+                                ("stat", self.stat), ("read", self.read), ("close", self.close)):
+                stack.enter_context(patch.object(self.h.os, name, value))
+            yield
+
+
+class IndexerJarReadTests(unittest.TestCase):
+    def setUp(self):
+        self.h = importlib.import_module("deploy.wazuh.https_setup.host")
+
+    def reader(self):
+        method = getattr(self.h.SecureFS(), "read_indexer_jar", None)
+        self.assertTrue(callable(method), "fixed read-only JAR reader is required")
+        return method
+
+    def test_stock_service_and_root_owned_jar_are_read_only_and_close_all_fds(self):
+        reader = self.reader()
+        for owner, group in ((123, 123), (0, 0), (0, 123), (123, 0)):
+            fixture = JarReadFixture(self.h)
+            for node in fixture.nodes[3:]:
+                node.update(uid=owner, gid=group)
+            before = copy.deepcopy(fixture.nodes)
+            with self.subTest(owner=owner, group=group), fixture.installed():
+                self.assertEqual(reader(123, 123), b"fixture")
+                self.assertFalse(fixture.fds)
+                self.assertEqual(fixture.nodes, before)
+                self.assertEqual(set(fixture.named_checks), set(range(6)))
+                for index, flags in fixture.flags:
+                    self.assertFalse(flags & (self.h.os.O_WRONLY | self.h.os.O_RDWR | self.h.os.O_CREAT |
+                                              self.h.os.O_TRUNC | self.h.os.O_APPEND))
+                    self.assertTrue(flags & self.h.os.O_NOFOLLOW)
+                    self.assertTrue(flags & (self.h.os.O_DIRECTORY if index < 5 else self.h.os.O_NONBLOCK))
+
+    def test_generic_root_trust_still_rejects_service_owned_ancestor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "vendor" / "jar"
+            def metadata(parent):
+                owner = 123 if parent.name == "vendor" else 0
+                return SimpleNamespace(st_mode=stat.S_IFDIR | 0o750, st_uid=owner)
+            with patch.object(Path, "lstat", metadata), self.assertRaisesRegex(SetupError, "path_untrusted"):
+                self.h.SecureFS().trusted(path, owners={0, 123})
+
+    def test_untrusted_entries_and_invalid_size_are_rejected_before_payload_read(self):
+        reader = self.reader()
+        cases = [(index, change) for index in range(6) for change in (
+            {"uid": 456}, {"mode": (stat.S_IFDIR if index < 5 else stat.S_IFREG) | 0o772},
+            {"mode": (stat.S_IFDIR if index < 5 else stat.S_IFREG) | 0o760},
+            {"mode": stat.S_IFLNK | 0o777},
+            {"mode": stat.S_IFIFO | 0o640})]
+        cases += [(index, {"gid": 456}) for index in (3, 4, 5)]
+        cases += [(index, {"uid": 123}) for index in (0, 1, 2)]
+        cases += [(5, change) for change in ({"nlink": 2}, {"size": 0}, {"size": 32 * 1024 * 1024 + 1},
+                                           {"mode": stat.S_IFDIR | 0o750})]
+        for index, change in cases:
+            fixture = JarReadFixture(self.h)
+            fixture.nodes[index].update(change)
+            with self.subTest(index=index, change=change), fixture.installed():
+                with self.assertRaises((SetupError, OSError)):
+                    reader(123, 123)
+                self.assertEqual(fixture.reads, 0)
+                self.assertFalse(fixture.fds)
+
+    def test_file_and_every_directory_held_or_named_drift_fail_closed(self):
+        reader = self.reader()
+        for index in range(6):
+            for kind in ("replacement", "permissions", "identity", "held"):
+                fixture = JarReadFixture(self.h)
+                def drift():
+                    if kind == "replacement":
+                        fixture.named[index] = fixture.nodes[index] | {"ino": 900}
+                    elif kind == "permissions":
+                        fixture.nodes[index]["mode"] |= 0o020
+                    elif kind == "identity":
+                        fixture.nodes[index]["ctime_ns"] = 2
+                    else:
+                        fixture.held_metadata[10 + index] = fixture.nodes[index] | {"ino": 900}
+                fixture.hook = drift
+                with self.subTest(index=index, kind=kind), fixture.installed():
+                    with self.assertRaisesRegex(SetupError, "state_changed"):
+                        reader(123, 123)
+                    self.assertFalse(fixture.fds)
+
+    def test_io_failure_closes_partial_walk_and_payload_descriptors(self):
+        reader = self.reader()
+        for failure in ("open", "read"):
+            fixture = JarReadFixture(self.h)
+            if failure == "open":
+                original = fixture.open
+                def failing_open(name, flags, **kwargs):
+                    if name == "lib":
+                        raise OSError("synthetic open failure")
+                    return original(name, flags, **kwargs)
+                fixture.open = failing_open
+            else:
+                fixture.hook = lambda: (_ for _ in ()).throw(OSError("synthetic read failure"))
+            with self.subTest(failure=failure), fixture.installed():
+                with self.assertRaises(OSError):
+                    reader(123, 123)
+                self.assertFalse(fixture.fds)
+
+    def test_cleanup_attempts_every_close_even_when_one_close_raises(self):
+        reader = self.reader()
+        fixture = JarReadFixture(self.h)
+        original = fixture.close
+        def failing_close(fd):
+            original(fd)
+            if fd == 15:
+                raise OSError("synthetic close failure")
+        fixture.close = failing_close
+        with fixture.installed():
+            with self.assertRaises(OSError):
+                reader(123, 123)
+            self.assertFalse(fixture.fds)
 
 
 if __name__ == "__main__":

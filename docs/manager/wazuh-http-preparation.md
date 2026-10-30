@@ -153,6 +153,19 @@ hoặc một native gate bị skip phải làm native qualification thất bại
 native suite trên máy lab đang cài Wazuh: fence từ chối footprint/unit/package
 Wazuh. Chỉ dùng VM dùng một lần, không có dữ liệu thật.
 
+Preflight chỉ đọc dữ liệu tại đường cố định
+`/usr/share/wazuh-indexer/lib/opensearch-2.19.4.jar`, không chạy/import Java hay
+code vendor. Riêng hai thư mục `wazuh-indexer`, `lib` và JAR này được phép có
+owner root hoặc UID service, group root hoặc GID service lấy từ account hệ thống;
+mọi entry vẫn phải không group/world writable. `/`, `/usr`, `/usr/share` vẫn
+phải là directory root-owned. Reader giữ no-follow directory fd xuyên suốt,
+chỉ nhận regular JAR một hard link, kích thước 1 byte đến 32 MiB và kiểm tra lại
+identity của fd lẫn named entry sau khi đọc. Không chmod/chown cây vendor.
+Ngoại lệ chỉ đọc này không đổi trust của code/profile/policy, đường privileged
+chung hay chính sách ghi `/etc`. Manifest version và hash đúng byte JAR là facts
+tương thích, không phải chứng thực chữ ký/nguồn gốc vendor hay snapshot atomic;
+service có quyền sở hữu vẫn có thể thay đổi dữ liệu ngoài các lần quan sát.
+
 ## Ngoại lệ duy nhất: wrapper UFW với policy disabled
 
 Ngoài đường strict inactive/disabled, chỉ nhận Ubuntu UFW 0.36.2-6 đã qualify:

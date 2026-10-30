@@ -3,7 +3,7 @@
 All host commands are fixed argv, have bounded output/time and omit diagnostics
 at the public boundary. No Manager, account, source or scenario operations exist.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 import hashlib
 import ipaddress
 import json
@@ -383,6 +383,46 @@ class SecureFS:
             if len(body) > limit or identity(before) != identity(os.fstat(stream.fileno())):
                 raise SetupError("state_changed")
         return body
+
+    def read_indexer_jar(self, uid, gid):
+        """Read only the fixed compatibility artifact; never execute vendor code.
+
+        Service ownership is allowed only below /usr/share. Held descriptors and
+        named entries are rechecked, but these observations are not an atomic
+        snapshot or a vendor-signature attestation.
+        """
+        names = ("/", "usr", "share", "wazuh-indexer", "lib", "opensearch-2.19.4.jar")
+        limit = 32 * 1024 * 1024
+        held = []
+        with ExitStack() as descriptors:
+            for index, name in enumerate(names):
+                directory = index < len(names) - 1
+                flags = os.O_RDONLY | os.O_NOFOLLOW | (os.O_DIRECTORY if directory else os.O_NONBLOCK)
+                fd = os.open(name, flags, **({"dir_fd": held[-1][0]} if held else {}))
+                # Register immediately so metadata/validation failures also close it.
+                descriptors.callback(os.close, fd)
+                held.append((fd, None))
+                info = os.fstat(fd)
+                held[-1] = (fd, identity(info))
+                validate_metadata(info, owners={0, uid} if index >= 3 else {0}, directory=directory)
+                if index >= 3 and info.st_gid not in {0, gid}:
+                    raise SetupError("path_untrusted")
+                if not directory and not 0 < info.st_size <= limit:
+                    raise SetupError("path_untrusted")
+            body = bytearray()
+            while len(body) <= limit:
+                chunk = os.read(held[-1][0], min(65536, limit + 1 - len(body)))
+                if not chunk:
+                    break
+                body.extend(chunk)
+            if len(body) > limit or len(body) != held[-1][1]["size"]:
+                raise SetupError("state_changed")
+            for index, (fd, frozen) in enumerate(held):
+                parent = held[max(0, index - 1)][0]
+                named = os.stat(names[index], dir_fd=parent, follow_symlinks=False)
+                if identity(os.fstat(fd)) != frozen or identity(named) != frozen:
+                    raise SetupError("state_changed")
+            return bytes(body)
 
     def archive_stat(self, path):
         # Writable home ancestors are allowed, links are not. Only the root-owned
@@ -862,8 +902,7 @@ class LinuxHost:
         environment = self.startup_environment(unit, p)
         # Package metadata, never executing vendor Java or Manager processes.
         version = self.run("dpkg-query", "-W", "-f=${Version}", "wazuh-indexer").decode().strip()
-        jar = Path("/usr/share/wazuh-indexer/lib/opensearch-2.19.4.jar")
-        jar_bytes = self.fs.read(jar, owners=owners, limit=32 * 1024 * 1024)
+        jar_bytes = self.fs.read_indexer_jar(self.uid, self.gid)
         try:
             with zipfile.ZipFile(io.BytesIO(jar_bytes)) as zipped:
                 info = zipped.getinfo("META-INF/MANIFEST.MF")

@@ -1450,6 +1450,96 @@ class NativeTests(unittest.TestCase):
             self.assertEqual((vendor / "held/leaf").read_bytes(), b"held inode")
             with self.assertRaises((SetupError, OSError)):
                 fs.vendor_read(vendor / "child/leaf", 65534, 65534)
+
+            # Fixed read-only compatibility artifact in this child's chroot;
+            # no host /usr tree or installed service identity is touched.
+            jar = Path("/usr/share/wazuh-indexer/lib/opensearch-2.19.4.jar")
+            for directory in (Path("/usr"), Path("/usr/share"), jar.parent.parent, jar.parent):
+                directory.mkdir(mode=0o755)
+                os.chmod(directory, 0o755)
+            for directory in (jar.parent.parent, jar.parent):
+                os.chown(directory, 65534, 65534)
+                os.chmod(directory, 0o750)
+            private_file(jar, b"synthetic JAR bytes", 0o640, 65534)
+            os.chown(jar, 65534, 65534)
+            before = {path: h.identity(path.stat()) for path in (Path("/"), *reversed(jar.parents[:-1]), jar)}
+            self.assertEqual(fs.read_indexer_jar(65534, 65534), b"synthetic JAR bytes")
+            self.assertEqual({path: h.identity(path.stat()) for path in before}, before)
+            with self.assertRaises(SetupError):
+                fs.read(jar, owners={0, 65534})
+
+            for path in (jar.parent.parent, jar.parent, jar):
+                os.chown(path, 0, 0)
+            self.assertEqual(fs.read_indexer_jar(65534, 65534), b"synthetic JAR bytes")
+            for path in (jar.parent.parent, jar.parent, jar):
+                os.chown(path, 65534, 65534)
+
+            for path in (Path("/usr"), Path("/usr/share"), jar.parent.parent, jar.parent, jar):
+                original = path.stat()
+                for owner, group in ((65533, original.st_gid), (original.st_uid, 65533)):
+                    # Upper ancestors require root ownership; group identities
+                    # are constrained only at the fixed vendor-data boundary.
+                    if path in (Path("/usr"), Path("/usr/share")) and owner == 0:
+                        continue
+                    os.chown(path, owner, group)
+                    with self.assertRaises(SetupError):
+                        fs.read_indexer_jar(65534, 65534)
+                    os.chown(path, original.st_uid, original.st_gid)
+                for bit in (0o020, 0o002):
+                    os.chmod(path, stat.S_IMODE(original.st_mode) | bit)
+                    with self.assertRaises(SetupError):
+                        fs.read_indexer_jar(65534, 65534)
+                    os.chmod(path, stat.S_IMODE(original.st_mode))
+
+            saved = jar.with_name("saved.jar")
+            jar.rename(saved)
+            jar.symlink_to(saved.name)
+            with self.assertRaises((SetupError, OSError)):
+                fs.read_indexer_jar(65534, 65534)
+            jar.unlink()
+            saved.rename(jar)
+            os.link(jar, saved)
+            with self.assertRaises(SetupError):
+                fs.read_indexer_jar(65534, 65534)
+            saved.unlink()
+            jar.rename(saved)
+            os.mkfifo(jar, 0o640)
+            os.chown(jar, 65534, 65534)
+            with self.assertRaises(SetupError):
+                fs.read_indexer_jar(65534, 65534)
+            jar.unlink()
+            saved.rename(jar)
+            jar.parent.rename(jar.parent.with_name("held-lib"))
+            jar.parent.symlink_to("held-lib", target_is_directory=True)
+            with self.assertRaises((SetupError, OSError)):
+                fs.read_indexer_jar(65534, 65534)
+            jar.parent.unlink()
+            jar.parent.with_name("held-lib").rename(jar.parent)
+
+            original_read = os.read
+            for replacement in ("file", "directory"):
+                changed = False
+                def racing_read(fd, size):
+                    nonlocal changed
+                    body = original_read(fd, size)
+                    if not changed:
+                        changed = True
+                        if replacement == "file":
+                            private_file(saved, b"replacement JAR", 0o640, 65534)
+                            os.chown(saved, 65534, 65534)
+                            os.replace(saved, jar)
+                        else:
+                            jar.parent.rename(jar.parent.with_name("held-lib"))
+                            jar.parent.mkdir(mode=0o750)
+                            os.chown(jar.parent, 65534, 65534)
+                    return body
+                os.read = racing_read
+                try:
+                    with self.assertRaisesRegex(SetupError, "state_changed"):
+                        fs.read_indexer_jar(65534, 65534)
+                finally:
+                    os.read = original_read
+                self.assertTrue(changed)
         isolated_filesystem(self, exercise)
 
     def test_journal_fsync_and_process_lock(self):
