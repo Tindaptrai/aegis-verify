@@ -266,17 +266,39 @@ def validate_native_observations(observations):
     from deploy.wazuh.https_setup.ufw_host import DEPENDENCIES
     for name, case in cases.items():
         require(set(case) == {"mapping", "facts", "refused", "propagation_verified", "baseline", "identity_mapping", "raw_facts_sha256"} |
-                ({"lifecycle"} if name.startswith("conflict_") else {"mixed_context"} if name == "mixed" else set()) and case["refused"] is True)
+                ({"lifecycle"} if name.startswith("conflict_") else {"mixed_context", "mixed_runtime"} if name == "mixed" else set()) and case["refused"] is True)
         if name == "mixed":
             context = case["mixed_context"]
             require(type(context) is dict and set(context) == {"bridge_active_baseline", "bridge_active_hostile",
                 "bridge_requires_guard", "bridge_propagates_stop_to_wrapper", "guard_required_by_bridge", "wrapper_stop_propagated_from_bridge"})
             require(all(value is True for value in context.values()))
+            runtime = case["mixed_runtime"]
+            require(type(runtime) is dict and set(runtime) == {"scope", "guard_stop", "guard_restart", "bridge_stop", "bridge_restart"})
+            require(runtime["scope"] == "conservative_refusal_and_direct_edges")
+            for phase, states in (("guard_stop", ("inactive", "inactive", "active")),
+                                  ("guard_restart", ("active", "active", "active")),
+                                  ("bridge_stop", ("active", "inactive", "inactive")),
+                                  ("bridge_restart", ("active", "active", "inactive"))):
+                record = runtime[phase]
+                require(type(record) is dict and set(record) == {"before", "after"})
+                for point in ("before", "after"):
+                    rows = record[point]
+                    require(type(rows) is dict and set(rows) == {"guard", "bridge", "wrapper"})
+                    for role, state in zip(("guard", "bridge", "wrapper"), states):
+                        row = rows[role]
+                        require(type(row) is dict and set(row) == {"state", "active_enter_us"})
+                        require(row["state"] == ("active" if point == "before" else state))
+                        stamp = row["active_enter_us"]
+                        require(type(stamp) is int and 0 <= stamp < 2**64 and (row["state"] != "active" or stamp > 0))
+                restarted = ("guard", "bridge") if phase == "guard_restart" else ("bridge",) if phase == "bridge_restart" else ()
+                require(all(record["after"][role]["active_enter_us"] > record["before"][role]["active_enter_us"] for role in restarted))
+                unchanged = "wrapper" if phase.startswith("guard_") else "guard"
+                require(record["after"][unchanged] == record["before"][unchanged])
         if name.startswith("conflict_"):
             require(type(case["lifecycle"]) is dict and set(case["lifecycle"]) == {
                 "source_active_before", "wrapper_active_before", "relay_inactive_before", "relay_active_after", "wrapper_inactive_after"})
             require(all(value is True for value in case["lifecycle"].values()))
-        require(case["propagation_verified"] is (name not in {"activation", "ordering"}))
+        require(case["propagation_verified"] is (name not in {"activation", "ordering", "mixed"}))
         roles = case["mapping"]
         require(set(roles) == {"ufw.service", "wazuh-indexer.service", "aegis-wazuh-http-guard.service", "bridge.service"})
         require(len(set(roles.values())) == 4 and set(case["facts"]) == set(roles.values()))

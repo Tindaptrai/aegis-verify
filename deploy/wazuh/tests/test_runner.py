@@ -194,13 +194,14 @@ class RunnerTests(unittest.TestCase):
                 edge(target, "Conflicts" if name == "conflict_guard" else "ConflictedBy", "bridge.service")
                 if name == "conflict_stop": edge("ufw.service", "PartOf", ufw_host.GUARD)
             else: edge(ufw_host.GUARD, "Before", "ufw.service")
-            cases[name] = dict(mapping=roles, facts=facts, refused=True, propagation_verified=name not in {"activation", "ordering"},
+            cases[name] = dict(mapping=roles, facts=facts, refused=True, propagation_verified=name not in {"activation", "ordering", "mixed"},
                                baseline={"identity_mapping": dict(roles), "raw_facts_sha256": "e" * 64, "admitted": True},
                                identity_mapping=dict(roles), raw_facts_sha256="f" * 64)
             if name.startswith("conflict_"):
                 cases[name]["lifecycle"] = dict(source_active_before=True, wrapper_active_before=True,
                     relay_inactive_before=True, relay_active_after=True, wrapper_inactive_after=True)
             if name == "mixed":
+                cases[name]["mixed_runtime"] = self.mixed_runtime_fixture()
                 cases[name]["mixed_context"] = dict(bridge_active_baseline=True, bridge_active_hostile=True,
                     bridge_requires_guard=True, bridge_propagates_stop_to_wrapper=True,
                     guard_required_by_bridge=True, wrapper_stop_propagated_from_bridge=True)
@@ -273,7 +274,7 @@ class RunnerTests(unittest.TestCase):
                     lambda item: item["relocations"].pop(),
                     lambda item: item["native_adapter"]["unit_properties"].__setitem__("RootDirectory", ""),
                     lambda item: item["native_adapter"]["typed_bus"]["ExecReload"].__setitem__("data", [["injected"]]),
-                    lambda item: item["dependency_cases"]["mixed"].__setitem__("propagation_verified", False),
+                    lambda item: item["dependency_cases"]["mixed"].__setitem__("propagation_verified", True),
                     lambda item: item["dependency_cases"]["mixed"]["baseline"].__setitem__("admitted", False),
                     lambda item: item["dependency_cases"]["direct_guard"]["identity_mapping"].__setitem__("ufw.service", "ufw.service"),
                     lambda item: item["nft_observations"]["empty"].__setitem__("absent_lock_preserved", False),
@@ -339,6 +340,69 @@ class RunnerTests(unittest.TestCase):
         for commit in (None, "HEAD", "a" * 39, "A" * 40, "a" * 41):
             with self.subTest(commit=commit), self.assertRaisesRegex(ValueError, "source_commit_required"):
                 module.source_snapshot(commit)
+
+    @staticmethod
+    def mixed_runtime_fixture():
+        result = {"scope": "conservative_refusal_and_direct_edges"}
+        outcomes = {
+            "guard_stop": (("inactive", 0), ("inactive", 0), ("active", 50)),
+            "guard_restart": (("active", 51), ("active", 52), ("active", 50)),
+            "bridge_stop": (("active", 50), ("inactive", 0), ("inactive", 0)),
+            "bridge_restart": (("active", 50), ("active", 51), ("inactive", 0)),
+        }
+        for phase, rows in outcomes.items():
+            result[phase] = {
+                "before": {role: dict(state="active", active_enter_us=50) for role in ("guard", "bridge", "wrapper")},
+                "after": {role: dict(state=state, active_enter_us=stamp)
+                          for role, (state, stamp) in zip(("guard", "bridge", "wrapper"), rows)}}
+        return result
+
+    def test_mixed_runtime_schema_requires_every_measured_phase(self):
+        gate = self.runner()
+        proof = self.observation_fixture(gate)
+        identity = gate.NATIVE_MODULE + ".NativeTests.test_ufw_disabled_wrapper_preserved"
+        gate.validate_native_observations(proof)
+        original = proof[identity]["dependency_cases"]["mixed"]
+        mutations = [lambda c: c.pop("mixed_runtime"),
+                     lambda c: c.__setitem__("propagation_verified", True),
+                     lambda c: c.__setitem__("failure", {"phase": "guard_stop"}),
+                     lambda c: c["mixed_runtime"].pop("scope"),
+                     lambda c: c["mixed_runtime"].__setitem__("scope", "unverified"),
+                     lambda c: c["mixed_runtime"].__setitem__("extra", {})]
+        for value in (None, [], "complete"):
+            mutations.append(lambda c, v=value: c.__setitem__("mixed_runtime", v))
+        for phase in ("guard_stop", "guard_restart", "bridge_stop", "bridge_restart"):
+            mutations.append(lambda c, p=phase: c["mixed_runtime"].__setitem__(p, []))
+            mutations.append(lambda c, p=phase: c["mixed_runtime"].pop(p))
+            mutations.append(lambda c, p=phase: c["mixed_runtime"][p].__setitem__("extra", {}))
+            for point in ("before", "after"):
+                mutations.append(lambda c, p=phase, t=point: c["mixed_runtime"][p].__setitem__(t, []))
+                mutations.append(lambda c, p=phase, t=point: c["mixed_runtime"][p].pop(t))
+                mutations.append(lambda c, p=phase, t=point: c["mixed_runtime"][p][t].__setitem__("extra", {}))
+                for role in ("guard", "bridge", "wrapper"):
+                    mutations.append(lambda c, p=phase, t=point, r=role: c["mixed_runtime"][p][t].__setitem__(r, []))
+                    mutations.append(lambda c, p=phase, t=point, r=role: c["mixed_runtime"][p][t].pop(r))
+                    for key in ("state", "active_enter_us"):
+                        mutations.append(lambda c, p=phase, t=point, r=role, k=key: c["mixed_runtime"][p][t][r].pop(k))
+                    for key, value in (("extra", 1), ("state", "failed"), ("state", "activating"),
+                                       ("active_enter_us", True), ("active_enter_us", "50"),
+                                       ("active_enter_us", -1), ("active_enter_us", 2**64)):
+                        mutations.append(lambda c, p=phase, t=point, r=role, k=key, v=value: c["mixed_runtime"][p][t][r].__setitem__(k, v))
+                    row = original["mixed_runtime"][phase][point][role]
+                    mutations.append(lambda c, p=phase, t=point, r=role, v="inactive" if row["state"] == "active" else "active": c["mixed_runtime"][p][t][r].__setitem__("state", v))
+                    if row["state"] == "active":
+                        mutations.append(lambda c, p=phase, t=point, r=role: c["mixed_runtime"][p][t][r].__setitem__("active_enter_us", 0))
+            restarted = ("guard", "bridge") if phase == "guard_restart" else ("bridge",) if phase == "bridge_restart" else ()
+            for role in restarted:
+                for stamp in (0, 49, 50):
+                    mutations.append(lambda c, p=phase, r=role, v=stamp: c["mixed_runtime"][p]["after"][r].__setitem__("active_enter_us", v))
+            unchanged = "wrapper" if phase.startswith("guard_") else "guard"
+            mutations.append(lambda c, p=phase, r=unchanged: c["mixed_runtime"][p]["after"][r].__setitem__("active_enter_us", 51))
+        for index, mutate in enumerate(mutations):
+            changed = copy.deepcopy(proof)
+            mutate(changed[identity]["dependency_cases"]["mixed"])
+            with self.subTest(mutation=index), self.assertRaises(ValueError):
+                gate.validate_native_observations(changed)
 
     def test_mixed_context_is_required_exact_and_backed_by_actual_facts(self):
         gate = self.runner()
@@ -527,7 +591,7 @@ class NativeFixtureSafety(unittest.TestCase):
         function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "dependency_observations")
         branch = next(n for n in ast.walk(function) if isinstance(n, ast.If) and isinstance(n.test, ast.Name) and n.test.id == "propagated")
         code = compile(ast.Module(body=branch.body, type_ignores=[]), "propagated-lifecycle", "exec")
-        for case in ("direct_indexer", "direct_guard", "transitive", "mixed"):
+        for case in ("direct_indexer", "direct_guard", "transitive"):
             actions, waits = [], []
             def systemctl(*args, **kwargs):
                 actions.append(args)
@@ -552,73 +616,101 @@ class NativeFixtureSafety(unittest.TestCase):
                 exec(code, env)
             self.assertNotIn("restart", [a[0] for a in actions])
 
-    def test_mixed_first_stop_failure_preserves_error_and_closed_snapshot(self):
+    def test_mixed_runtime_actions_endpoints_and_shared_deadline(self):
         from deploy.wazuh.tests import test_native as native
-        tree = ast.parse(Path(native.__file__).read_text(encoding="utf-8"))
-        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "dependency_observations")
-        branch = next(n for n in ast.walk(function) if isinstance(n, ast.If) and isinstance(n.test, ast.Name) and n.test.id == "propagated")
-        code = compile(ast.Module(body=branch.body, type_ignores=[]), "mixed-stop-failure", "exec")
-        fields = ("LoadState", "ActiveState", "SubState", "ActiveEnterTimestampMonotonic",
-                  "ExecMainStartTimestampMonotonic", "InactiveEnterTimestampMonotonic")
-        raw = b"LoadState=loaded\nActiveState=active\nSubState=exited\nActiveEnterTimestampMonotonic=50\nExecMainStartTimestampMonotonic=40\nInactiveEnterTimestampMonotonic=30\n"
-        for fault in ("none", "unsafe", "query", "unexpected", "nonmixed", "second_wait", "success"):
-            actions, queries, waits, item = [], [], [], {"refused": True}
-            original = AssertionError("propagation_observation_timeout")
+        self.assertTrue(hasattr(native, "observe_mixed_runtime"), "four-phase mixed observation missing")
+        expected = RunnerTests.mixed_runtime_fixture()
+        phases = list(expected)[1:]
+        mapping = {native.uh.GUARD: "owned-guard", "bridge.service": "owned-bridge",
+                   "ufw.service": "owned-wrapper", native.uh.INDEXER: "owned-indexer"}
+        for fault in (None, "transition", "timeout", "late", "late_endpoint", "malformed", "query", "unchanged", "baseline"):
+            actions, queries, item, tick = [], [], {}, {"now": 0.0}
+            state = {"phase": -1, "point": "before", "transitioned": set(), "deadline": 0}
+            original = AssertionError("synthetic_query_failure")
             def systemctl(*args, **kwargs):
-                if args[0] in {"start", "stop", "restart"}:
+                if args[0] == "start":
                     actions.append(args)
-                if args[0] == "show" and "--all" in args:
-                    queries.append((args, kwargs))
-                    if fault == "query": raise OSError("private-query-error")
-                    if fault == "unexpected": raise RuntimeError("private-unexpected-error")
-                    return SimpleNamespace(stdout=raw if fault != "unsafe" else b"LoadState=private-state\nActiveEnterTimestampMonotonic=private-timestamp\nUnit=private-unit\n")
-                return SimpleNamespace(stdout=b"active" if args[0] == "is-active" else b"50")
-            def wait(*args, **kwargs):
-                waits.append((args, kwargs))
-                if fault != "success" and (fault != "second_wait" or len(waits) == 2):
-                    raise original
-            fixture = SimpleNamespace(test=self, systemctl=systemctl)
-            env = dict(vars(native), fixture=fixture, case="direct_guard" if fault == "nonmixed" else "mixed",
-                       ufw="private-wrapper", indexer="private-indexer", guard="private-guard", bridge="private-bridge",
-                       mapping=dict(ufw="private-wrapper", indexer="private-indexer", guard="private-guard", bridge="private-bridge"),
-                       item=item, wait_propagated_state=wait)
-            with self.subTest(fault=fault):
-                if fault == "success":
-                    exec(code, env)
+                    state.update(phase=state["phase"] + 1, point="before", transitioned=set(), deadline=tick["now"] + 5)
+                    return SimpleNamespace(stdout=b"")
+                if args[0] in {"stop", "restart"}:
+                    actions.append(args)
+                    state["point"] = "after"
+                    return SimpleNamespace(stdout=b"")
+                self.assertEqual(args[0], "show")
+                self.assertEqual(args[2:], ("--all", "--property=ActiveState,ActiveEnterTimestampMonotonic"))
+                self.assertGreater(kwargs["timeout"], 0)
+                self.assertLessEqual(kwargs["timeout"], min(1, state["deadline"] - tick["now"]))
+                phase, point, role = phases[state["phase"]], state["point"], args[1].removeprefix("owned-")
+                queries.append((phase, point, role))
+                tick["now"] += 0.05
+                row = dict(expected[phase][point][role])
+                if phase == "guard_restart" and point == "after":
+                    if fault == "query": raise original
+                    if fault == "malformed": return SimpleNamespace(stdout=b"ActiveState=private-secret\n")
+                    if fault == "late" or (fault == "late_endpoint" and role == "wrapper"):
+                        tick["now"] = state["deadline"] + 0.01
+                    if fault == "timeout" and role == "bridge": row = dict(state="activating", active_enter_us=0)
+                    if fault == "unchanged" and role == "wrapper": row["active_enter_us"] += 1
+                if fault == "baseline" and point == "before": row["active_enter_us"] = 0
+                if fault == "transition" and point == "after" and role != ("wrapper" if phase.startswith("guard_") else "guard") and role not in state["transitioned"]:
+                    state["transitioned"].add(role)
+                    row = dict(state="deactivating", active_enter_us=50)
+                return SimpleNamespace(stdout=f"ActiveState={row['state']}\nActiveEnterTimestampMonotonic={row['active_enter_us']}\n".encode())
+            def sleep(delay):
+                self.assertLessEqual(delay, max(0, state["deadline"] - tick["now"]))
+                tick["now"] += delay
+            fixture = SimpleNamespace(systemctl=systemctl)
+            with self.subTest(fault=fault), patch.object(native.time, "monotonic", side_effect=lambda: tick["now"]), patch.object(native.time, "sleep", side_effect=sleep):
+                if fault in {None, "transition"}:
+                    native.observe_mixed_runtime(fixture, mapping, item)
+                    self.assertEqual(item["mixed_runtime"], expected)
+                    self.assertNotIn("failure", item)
+                    self.assertEqual([a for a in actions if a[0] != "start"],
+                                     [("stop", "owned-guard"), ("restart", "owned-guard"),
+                                      ("stop", "owned-bridge"), ("restart", "owned-bridge")])
+                    self.assertEqual([a for a in actions if a[0] == "start"], [("start", *mapping.values())] * 4)
+                    for phase in phases:
+                        self.assertEqual([role for p, point, role in queries if p == phase and point == "before"], ["guard", "bridge", "wrapper"])
+                        after = [role for p, point, role in queries if p == phase and point == "after"]
+                        unchanged = "wrapper" if phase.startswith("guard_") else "guard"
+                        self.assertEqual(after[-1], unchanged)
+                        self.assertEqual(after.count(unchanged), 1)
                 else:
                     with self.assertRaises(AssertionError) as caught:
-                        exec(code, env)
-                    self.assertIs(caught.exception, original)
-                if fault in {"nonmixed", "second_wait", "success"}:
-                    self.assertNotIn("failure", item)
-                    self.assertEqual(queries, [])
-                    continue
-                self.assertEqual([a[0] for a in actions], ["start", "stop"])
-                self.assertEqual(actions[-1], ("stop", "private-guard"))
-                self.assertEqual(len(waits), 1)
-                self.assertNotIn("propagation_verified", item)
-                failure = item["failure"]
-                self.assertEqual(set(failure), {"phase", "units"})
-                self.assertEqual(failure["phase"], "source_stop")
-                self.assertEqual(set(failure["units"]), {"wrapper", "guard", "indexer", "bridge"})
-                self.assertEqual([q[0][1] for q in queries], ["private-" + role for role in failure["units"]])
-                for args, kwargs in queries:
-                    self.assertEqual(args[0], "show")
-                    self.assertEqual(args[2:], ("--all", "--property=" + ",".join(fields)))
-                    self.assertEqual(kwargs, {"timeout": 2})
-                expected = dict(zip(fields, ("loaded", "active", "exited", 50, 40, 30))) if fault == "none" else dict.fromkeys(fields, "unavailable")
-                self.assertEqual(failure["units"], dict.fromkeys(("wrapper", "guard", "indexer", "bridge"), expected))
-                self.assertNotIn("private", json.dumps(failure))
-                gate = RunnerTests().runner()
-                proof = RunnerTests().observation_fixture(gate)
-                identity = gate.NATIVE_MODULE + ".NativeTests.test_ufw_disabled_wrapper_preserved"
-                mixed = proof[identity]["dependency_cases"]["mixed"]
-                mixed["failure"] = failure
-                with self.assertRaises(ValueError):
-                    gate.validate_native_observations(proof)
-                mixed.pop("propagation_verified")
-                with self.assertRaises(ValueError):
-                    gate.validate_native_observations(proof)
+                        native.observe_mixed_runtime(fixture, mapping, item)
+                    if fault == "query": self.assertIs(caught.exception, original)
+                    self.assertNotIn("private", str(caught.exception))
+                    self.assertNotIn("propagation_verified", item)
+                    phase = "guard_stop" if fault == "baseline" else "guard_restart"
+                    self.assertEqual(item["failure"], {"phase": phase, "stage": "mixed_runtime_failed"})
+                    if fault != "baseline": self.assertEqual(item["mixed_runtime"]["guard_stop"], expected["guard_stop"])
+                    self.assertNotIn("bridge_stop", item["mixed_runtime"])
+                    self.assertEqual(len([a for a in actions if a[0] != "start"]), 0 if fault == "baseline" else 2)
+                    if fault in {"timeout", "late"}:
+                        self.assertLessEqual(tick["now"], state["deadline"] + 0.1)
+                        self.assertNotIn("wrapper", item["mixed_runtime"]["guard_restart"]["after"])
+                    if fault == "late_endpoint":
+                        self.assertEqual(item["mixed_runtime"]["guard_restart"]["after"], expected["guard_restart"]["after"])
+                    if fault == "unchanged":
+                        self.assertEqual(item["mixed_runtime"]["guard_restart"]["after"]["wrapper"]["active_enter_us"], 51)
+
+    def test_mixed_runtime_malformed_reads_fail_immediately_without_raw_data(self):
+        from deploy.wazuh.tests import test_native as native
+        mapping = {native.uh.GUARD: "guard", "bridge.service": "bridge", "ufw.service": "wrapper"}
+        for raw in (b"", b"\xff", b"x" * 257, b"ActiveState=active\n",
+                    b"ActiveState=private-secret\nActiveEnterTimestampMonotonic=50\n",
+                    b"ActiveState=active\nActiveState=active\n",
+                    *[f"ActiveState=active\nActiveEnterTimestampMonotonic={stamp}\n".encode()
+                      for stamp in ("private-secret", "-1", "1.5", "18446744073709551616", "0")]):
+            calls, item = [], {}
+            def systemctl(*args, **kwargs):
+                calls.append(args)
+                return SimpleNamespace(stdout=raw)
+            with self.subTest(raw=raw[:25]), self.assertRaisesRegex(AssertionError, "^mixed_runtime_invalid$"):
+                native.observe_mixed_runtime(SimpleNamespace(systemctl=systemctl), mapping, item)
+            self.assertEqual([c[0] for c in calls], ["start", "show"])
+            self.assertNotIn("private", json.dumps(item))
+            self.assertNotIn("propagation_verified", item)
 
     def test_mixed_probe_keeps_active_context_and_partial_actual_evidence(self):
         from deploy.wazuh.tests import test_native as native
@@ -628,7 +720,7 @@ class NativeFixtureSafety(unittest.TestCase):
         loop.iter = ast.Tuple(elts=[ast.Constant("mixed")], ctx=ast.Load())
         code = compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])), "mixed-probe", "exec")
         for fault in (None, "baseline_inactive", "hostile_inactive", "Requires", "PropagatesStopTo",
-                      "RequiredBy", "StopPropagatedFrom", "admitted"):
+                      "RequiredBy", "StopPropagatedFrom", "admitted", "runtime"):
             records, actions, probes, observation = {}, [], [], {}
             state = dict(bridge=False, wrapper="inactive")
             fixture = SimpleNamespace(test=self, token="0123456789ab", units=[])
@@ -691,28 +783,40 @@ class NativeFixtureSafety(unittest.TestCase):
                         return {}
                     return actual_reader.dependency_facts()
                 return SimpleNamespace(dependency_facts=read)
+            def runtime(fixture, mapping, item):
+                if fault == "runtime":
+                    item["mixed_runtime"] = {"scope": "conservative_refusal_and_direct_edges", "guard_stop": {"before": {}, "after": {}}}
+                    raise AssertionError("mixed_runtime_timeout")
+                item["mixed_runtime"] = RunnerTests.mixed_runtime_fixture()
             env = dict(vars(native), OBSERVATIONS=observation, h=SimpleNamespace(LinuxHost=lambda: actual),
                        uh=SimpleNamespace(GUARD=native.uh.GUARD, INDEXER=native.uh.INDEXER,
                                           DEPENDENCIES=native.uh.DEPENDENCIES, UfwHostReader=reader),
-                       replace_fixture_file=rewrite)
+                       replace_fixture_file=rewrite,
+                       observe_mixed_runtime=runtime)
             exec(code, env)
             with self.subTest(fault=fault):
                 if fault is None: env["dependency_observations"](fixture)
                 else:
-                    with self.assertRaisesRegex(AssertionError, "SetupError not raised" if fault == "admitted" else "mixed_context_required"):
+                    with self.assertRaisesRegex(AssertionError, "SetupError not raised" if fault == "admitted" else "mixed_runtime_timeout" if fault == "runtime" else "mixed_context_required"):
                         env["dependency_observations"](fixture)
                 item = observation[self.id()]["dependency_cases"]["mixed"]
                 bridge = item["mapping"]["bridge.service"]
                 self.assertEqual(actions[0], ("start", bridge))
                 if fault is None:
                     self.assertEqual(probes, ["baseline", "hostile"])
-                    self.assertTrue(item["refused"] and item["propagation_verified"])
+                    self.assertIs(item["refused"], True)
+                    self.assertIs(item["propagation_verified"], False)
+                    self.assertEqual(item["mixed_runtime"], RunnerTests.mixed_runtime_fixture())
                     self.assertTrue(all(v is True for v in item["mixed_context"].values()))
                 else:
-                    self.assertNotIn("refused", item)
+                    if fault == "runtime":
+                        self.assertIs(item["refused"], True)
+                        self.assertIn("guard_stop", item["mixed_runtime"])
+                    else:
+                        self.assertNotIn("refused", item)
                     self.assertNotIn("propagation_verified", item)
-                    self.assertEqual(probes, [] if fault == "baseline_inactive" else ["baseline", "hostile"] if fault == "admitted" else ["baseline"])
-                    if fault == "admitted":
+                    self.assertEqual(probes, [] if fault == "baseline_inactive" else ["baseline", "hostile"] if fault in {"admitted", "runtime"} else ["baseline"])
+                    if fault in {"admitted", "runtime"}:
                         self.assertEqual(set(item["facts"]), set(item["mapping"].values()))
                         self.assertEqual(item["raw_facts_sha256"], native.tx.digest({name: {key: sorted(value.split()) for key, value in properties(name).items()} for name in records}))
                         gate = RunnerTests().runner()

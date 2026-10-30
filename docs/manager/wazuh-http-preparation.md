@@ -78,9 +78,24 @@ chỉ giữ role/state/timestamp đã lọc. Resource/check/operation đã hoàn
 giữ ngay trong proof hiện có nếu bước sau lỗi; partial proof vẫn không qualify.
 Case conflict chỉ restart source một lần rồi poll read-only có deadline để đợi
 relay active và wrapper inactive; timeout phải fail, không dùng sleep làm bằng chứng order.
-Case propagation cũng chỉ stop/restart source một lần: poll read-only tối đa 5 giây
+Case direct/transitive chỉ stop/restart source một lần: poll read-only tối đa 5 giây
 đợi inactive khi stop, hoặc active với timestamp mới lớn hơn baseline dương khi restart.
-Mixed PropagatesStopTo vẫn phải về inactive; dữ liệu lỗi hoặc timeout đều fail.
+Mixed vẫn bị graph production từ chối bảo thủ; claim cũ rằng guard luôn truyền stop
+qua bridge đến wrapper đã được sửa, không coi refusal là bằng chứng runtime.
+`propagation_verified` của mixed phải là `false`, kèm `mixed_runtime` đầy đủ với scope
+`conservative_refusal_and_direct_edges`; false hoặc partial proof riêng lẻ đều fail.
+Bốn phép đo riêng dùng cùng unit/edge sở hữu: guard stop làm guard/bridge inactive;
+guard restart làm cả hai active với timestamp mới; wrapper ở hai endpoint này phải
+active và giữ nguyên timestamp baseline. Bridge stop trực tiếp làm bridge/wrapper
+inactive; bridge restart trực tiếp làm bridge active với timestamp mới và wrapper
+inactive; guard ở cả hai endpoint phải active và giữ nguyên timestamp baseline.
+Mỗi phép đo có start-all setup và baseline dương mới, đúng một action đo, rồi đọc
+state/timestamp thực với một deadline 5 giây dùng chung; đọc endpoint không đổi sau
+khi hai role thay đổi đã đạt trạng thái yêu cầu. Dữ liệu lỗi, endpoint khác, timeout
+hoặc kết quả trễ đều fail; không retry action. Inactive timestamp có thể bằng zero.
+Các lần đọc tuần tự không atomic; endpoint không đổi không chứng minh vĩnh viễn
+không có side effect. Giữ evidence lỗi trước đây; production acceptance và scenario
+ground truth không thay đổi.
 
 Proof tách hành vi vendor/packet/order thực; file/backend/typed D-Bus thực; và
 admission dương qua reader tổng hợp. RootDirectory/FragmentPath khác stock phải

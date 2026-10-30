@@ -776,6 +776,68 @@ def wait_propagated_state(fixture, wrapper, *, after=None):
     raise AssertionError("propagation_observation_timeout")
 
 
+def observe_mixed_runtime(fixture, mapping, item):
+    """Measure ordinary and explicit graceful anchors; endpoints are not atomic."""
+    units = {"guard": mapping[uh.GUARD], "bridge": mapping["bridge.service"], "wrapper": mapping["ufw.service"]}
+    runtime = item["mixed_runtime"] = {"scope": "conservative_refusal_and_direct_edges"}
+    for phase, action, source, changed in (
+            ("guard_stop", "stop", "guard", {"guard": "inactive", "bridge": "inactive"}),
+            ("guard_restart", "restart", "guard", {"guard": "active", "bridge": "active"}),
+            ("bridge_stop", "stop", "bridge", {"bridge": "inactive", "wrapper": "inactive"}),
+            ("bridge_restart", "restart", "bridge", {"bridge": "active", "wrapper": "inactive"})):
+        record = runtime[phase] = {"before": {}, "after": {}}
+        try:
+            fixture.systemctl("start", *mapping.values())
+            deadline = time.monotonic() + 5
+
+            def read(role, target):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise AssertionError("mixed_runtime_timeout")
+                raw = fixture.systemctl("show", units[role], "--all",
+                    "--property=ActiveState,ActiveEnterTimestampMonotonic", timeout=min(1, remaining)).stdout
+                try:
+                    if len(raw) > 256:
+                        raise ValueError
+                    pairs = [line.split("=", 1) for line in raw.decode("ascii").splitlines()]
+                    values = dict(pairs)
+                    if len(pairs) != 2 or set(values) != {"ActiveState", "ActiveEnterTimestampMonotonic"}:
+                        raise ValueError
+                    state, stamp = values["ActiveState"], values["ActiveEnterTimestampMonotonic"]
+                    if (state not in {"active", "inactive", "activating", "deactivating", "reloading", "failed", "maintenance"} or
+                            not re.fullmatch(r"[0-9]{1,20}", stamp) or int(stamp) >= 2**64):
+                        raise ValueError
+                except (ValueError, UnicodeError):
+                    raise AssertionError("mixed_runtime_invalid") from None
+                sample = target[role] = dict(state=state, active_enter_us=int(stamp))
+                if time.monotonic() >= deadline:
+                    raise AssertionError("mixed_runtime_timeout")
+                if state in {"failed", "maintenance"} or (state == "active" and int(stamp) == 0):
+                    raise AssertionError("mixed_runtime_invalid")
+                return sample
+
+            for role in units:
+                if read(role, record["before"])["state"] != "active":
+                    raise AssertionError("mixed_runtime_baseline")
+            fixture.systemctl(action, units[source])
+            while True:
+                complete = True
+                for role, expected in changed.items():
+                    sample = read(role, record["after"])
+                    complete &= sample["state"] == expected and (expected == "inactive" or
+                        sample["active_enter_us"] > record["before"][role]["active_enter_us"])
+                if complete:
+                    break
+                time.sleep(min(0.1, max(0, deadline - time.monotonic())))
+            # Read the unchanged endpoint only after both changed roles complete.
+            unchanged = "wrapper" if source == "guard" else "guard"
+            if read(unchanged, record["after"]) != record["before"][unchanged]:
+                raise AssertionError("mixed_runtime_endpoint")
+        except Exception:
+            item["failure"] = dict(phase=phase, stage="mixed_runtime_failed")
+            raise
+
+
 def dependency_observations(fixture):
     """Actual D-Bus/systemctl graph and propagation; only disposable true units."""
     observations = OBSERVATIONS.setdefault(fixture.test.id(), {}).setdefault("dependency_cases", {})
@@ -865,7 +927,7 @@ TimeoutStopSec=5
             item["refused"] = True
         finally:
             item.update(identity_mapping=hostile.mapping.queries, raw_facts_sha256=tx.digest(hostile.raw))
-        propagated = case not in {"activation", "ordering"}
+        propagated = case not in {"activation", "ordering", "mixed"}
         lifecycle = {}
         if case.startswith("conflict_"):
             def state(unit):
@@ -877,26 +939,15 @@ TimeoutStopSec=5
             wait_conflict_states(fixture, bridge, ufw)
             lifecycle = dict(source_active_before=True, wrapper_active_before=True, relay_inactive_before=True,
                              relay_active_after=True, wrapper_inactive_after=True)
+        elif case == "mixed":
+            observe_mixed_runtime(fixture, mapping, item)
         elif propagated:
             # One transaction establishes actual running units before stopping the source.
             fixture.systemctl("start", *mapping.values())
             fixture.test.assertEqual(fixture.systemctl("is-active", ufw).stdout.strip(), b"active")
             source = indexer if case == "direct_indexer" else guard
             fixture.systemctl("stop", source)
-            try:
-                wait_propagated_state(fixture, ufw)
-            except AssertionError:
-                if case == "mixed":
-                    failure = item["failure"] = dict(phase="source_stop", units={})
-                    for role, unit in (("wrapper", ufw), ("guard", guard), ("indexer", indexer), ("bridge", bridge)):
-                        try:
-                            failure["units"][role] = stop_unit_sample(fixture, unit)
-                        except Exception:
-                            # Diagnostic failure must never replace the original assertion.
-                            failure["units"][role] = dict.fromkeys(("LoadState", "ActiveState", "SubState",
-                                "ActiveEnterTimestampMonotonic", "ExecMainStartTimestampMonotonic",
-                                "InactiveEnterTimestampMonotonic"), "unavailable")
-                raise
+            wait_propagated_state(fixture, ufw)
             # Restart propagation gets separate evidence with both units active.
             fixture.systemctl("start", *mapping.values())
             before_raw = fixture.systemctl("show", ufw, "--property=ActiveEnterTimestampMonotonic", "--value", timeout=1).stdout.strip()
@@ -904,11 +955,7 @@ TimeoutStopSec=5
                 raise AssertionError("propagation_observation_invalid")
             before = int(before_raw)
             fixture.systemctl("restart", source)
-            if case == "mixed":
-                # PropagatesStopTo propagates stop, not automatic reactivation.
-                wait_propagated_state(fixture, ufw)
-            else:
-                wait_propagated_state(fixture, ufw, after=before)
+            wait_propagated_state(fixture, ufw, after=before)
         item["propagation_verified"] = propagated
         if lifecycle:
             item["lifecycle"] = lifecycle

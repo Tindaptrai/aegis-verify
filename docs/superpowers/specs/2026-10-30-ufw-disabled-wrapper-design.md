@@ -102,6 +102,28 @@ and Indexer start, cold/active guard, deleted/modified table, fingerprint drift,
 no unintended UFW start, unchanged foreign rules and verified cleanup. Never
 mutate the CI host's default firewall or real UFW/Wazuh unit/configuration.
 
+The mixed dependency case remains conservatively refused with its complete
+actual graph and both inverse relations. Correct the former native claim that
+an ordinary guard stop necessarily composes through bridge's `PropagatesStopTo`
+to stop wrapper: composed guard-to-wrapper propagation is not verified.
+Mixed `propagation_verified` must be false together with complete, strictly
+validated `mixed_runtime` evidence scoped `conservative_refusal_and_direct_edges`;
+false alone, old proof, partial records or a failure entry cannot qualify.
+Measure four separate one-action experiments on the same owned units and edges:
+ordinary guard stop/restart affects bridge while wrapper remains active with
+unchanged activation timestamp; explicit bridge stop/restart stops wrapper,
+with bridge inactive after stop or active with a strictly newer timestamp after
+restart, while guard retains its active activation. Guard restart requires both
+guard and bridge activation timestamps strictly newer than their own baselines.
+Each experiment has a fresh active positive baseline after fixture setup and
+one shared five-second observation deadline across all role reads. Read the
+unchanged endpoint only after the changed roles complete. Actual inactive
+timestamps may be zero; malformed, late or disagreeing observations fail.
+These sequential observations are not atomic or permanent non-propagation
+guarantees. Preserve earlier failed evidence. This corrects a validation claim;
+production acceptance, conservative graph bounds and scenario ground truth
+remain unchanged.
+
 Qualified source requires all old and new native IDs, no skips/errors/failures,
 canonical byte hashes and unchanged host-firewall evidence. Real vendor,
 Manager/denied-source/Dashboard/readiness acceptance remains separate; reboot
