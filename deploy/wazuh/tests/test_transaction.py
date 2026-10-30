@@ -1505,31 +1505,120 @@ class PropertiesTests(unittest.TestCase):
                           CapabilityBoundingSet="cap_net_admin cap_dac_override")
         self.calls = []
 
-    def reader(self, *, omitted=(), response=b"a(sasbttttuii) 0\n", failed=False):
+    def reader(self, *, omitted=(), response=b"a(sasbttttuii) 0\n", failed=False,
+               filter_responses=None):
         def run(name, *args, **kwargs):
             self.calls.append((name, args))
             if name == "systemctl":
-                return "".join(key + "=" + value + "\n" for key, value in self.props.items() if key not in omitted).encode()
+                keys = args[-1].removeprefix("--property=").split(",")
+                return "".join(key + "=" + value + "\n" for key, value in self.props.items()
+                               if key not in omitted and (key in keys or key == "UnexpectedProperty")).encode()
             self.assertEqual(name, "busctl")
             if failed:
                 raise SetupError("command_failed")
+            if args[-1] in {"RestrictAddressFamilies", "SystemCallFilter"}:
+                return (filter_responses or {}).get(args[-1], b"(bas) false 0\n")
             return response
         self.host.run = run
         return self.host
 
-    def test_complete_output_does_not_query_dbus(self):
+    def test_complete_output_confirms_only_empty_filters(self):
         actual = self.reader().properties("synthetic-unit.service", self.h.UNIT_PROPERTIES)
         self.assertEqual(actual, self.props)
-        self.assertEqual([name for name, _ in self.calls], ["systemctl"])
+        self.assertEqual([name for name, _ in self.calls], ["systemctl", "busctl", "busctl"])
+        self.assertEqual({args[-1] for name, args in self.calls if name == "busctl"},
+                         {"RestrictAddressFamilies", "SystemCallFilter"})
         self.h.validate_unit(actual)
+
+    def test_empty_deny_lists_require_typed_confirmation_and_admit_stock_props(self):
+        self.props.update(RestrictAddressFamilies="~", SystemCallFilter="~")
+        actual = self.reader().properties("synthetic-unit.service", self.h.UNIT_PROPERTIES)
+        self.assertEqual(actual["RestrictAddressFamilies"], "")
+        self.assertEqual(actual["SystemCallFilter"], "")
+        self.h.validate_unit(actual)
+
+    def test_each_requested_filter_uses_same_validated_unit_and_exact_typed_empty(self):
+        for key in ("RestrictAddressFamilies", "SystemCallFilter"):
+            for display in ("", "~"):
+                for response in (b"(bas) false 0", b"(bas) false 0\n"):
+                    with self.subTest(key=key, display=display, response=response):
+                        self.calls.clear()
+                        self.props[key] = display
+                        actual = self.reader(filter_responses={key: response}).properties(
+                            "1-fixture_name@demo.service", (key, "LoadState"))
+                        self.assertEqual(actual, {key: "", "LoadState": "loaded"})
+                        self.assertEqual(self.calls, [
+                            ("systemctl", ("show", "1-fixture_name@demo.service", "--no-pager",
+                                           "--property=" + key + ",LoadState")),
+                            ("busctl", ("--system", "get-property", "org.freedesktop.systemd1",
+                                        "/org/freedesktop/systemd1/unit/_31_2dfixture_5fname_40demo_2eservice",
+                                        "org.freedesktop.systemd1.Service", key))])
+
+    def test_empty_or_tilde_filters_refuse_unproven_or_contradictory_typed_values(self):
+        for key in ("RestrictAddressFamilies", "SystemCallFilter"):
+            for display in ("", "~"):
+                self.props[key] = display
+                for response in (b"as 0", b"(bas) true 0", b'(bas) false 1 "getppid"',
+                                 b'(bas) true 1 "AF_UNIX"', b"garbage", b"", b"(bas) false 00",
+                                 b" (bas) false 0", b"(bas)  false 0", b"(bas) false 0 ",
+                                 b"(bas) false 0\n\n", b"(bas) false 0\nextra", b"(bas) false 0\r\n"):
+                    with self.subTest(key=key, display=display, response=response):
+                        with self.assertRaisesRegex(SetupError, "host_unsupported"):
+                            self.reader(filter_responses={key: response}).properties("synthetic.service", (key,))
+                with self.subTest(key=key, display=display, failed=True), self.assertRaises(SetupError):
+                    self.reader(failed=True).properties("synthetic.service", (key,))
+                with self.subTest(key=key, display=display, missing=True):
+                    self.calls.clear()
+                    with self.assertRaisesRegex(SetupError, "host_unsupported"):
+                        self.reader(omitted={key}).properties("synthetic.service", (key,))
+                    self.assertEqual([name for name, _ in self.calls], ["systemctl"])
+
+    def test_nonempty_filter_displays_are_never_erased_or_admitted(self):
+        for key in ("RestrictAddressFamilies", "SystemCallFilter"):
+            for display in ("AF_UNIX", "~getppid", "~ ", " ~", "~~"):
+                with self.subTest(key=key, display=display):
+                    self.props[key] = display
+                    actual = self.reader().properties("synthetic.service", self.h.UNIT_PROPERTIES)
+                    self.assertEqual(actual[key], display)
+                    with self.assertRaisesRegex(SetupError, "host_unsupported"):
+                        self.h.validate_unit(actual)
+                self.props[key] = ""
+
+    def test_two_filters_need_independent_typed_confirmations(self):
+        self.props.update(RestrictAddressFamilies="~", SystemCallFilter="~")
+        for key in ("RestrictAddressFamilies", "SystemCallFilter"):
+            with self.subTest(contradictory=key), self.assertRaisesRegex(SetupError, "host_unsupported"):
+                self.reader(filter_responses={key: b"(bas) true 0"}).properties(
+                    "synthetic.service", self.h.UNIT_PROPERTIES)
+
+    def test_unrequested_filters_do_not_acquire_bus_queries(self):
+        actual = self.reader().properties("synthetic.service", ("LoadState", "User"))
+        self.assertEqual(actual, {"LoadState": "loaded", "User": "wazuh-indexer"})
+        self.assertEqual([name for name, _ in self.calls], ["systemctl"])
+
+    def test_confirmed_filters_preserve_every_unit_admission_condition(self):
+        self.props.update(RestrictAddressFamilies="~", SystemCallFilter="~")
+        actual = self.reader().properties("synthetic.service", self.h.UNIT_PROPERTIES)
+        self.h.validate_unit(actual)
+        changes = [(key, "/unreviewed") for key in self.h.UNIT_EMPTY]
+        changes += [(key, "yes") for key in self.h.UNIT_NO]
+        changes += [("User", "root"), ("Group", "root"), ("LoadState", "not-found"),
+                    ("ActiveState", "inactive"), ("FragmentPath", "/run/systemd/system/synthetic.service"),
+                    ("CapabilityBoundingSet", "cap_net_admin"), ("CapabilityBoundingSet", "cap_dac_override")]
+        for key, value in changes:
+            with self.subTest(key=key), self.assertRaisesRegex(SetupError, "host_unsupported"):
+                self.h.validate_unit(actual | {key: value})
+        for key in self.h.UNIT_PROPERTIES:
+            with self.subTest(missing=key), self.assertRaisesRegex(SetupError, "host_unsupported"):
+                self.h.validate_unit({k: v for k, v in actual.items() if k != key})
 
     def test_only_omitted_execstartpre_needs_exact_independent_empty(self):
         actual = self.reader(omitted={"ExecStartPre"}).properties("synthetic-unit.service", self.h.UNIT_PROPERTIES)
         self.assertEqual(actual, self.props)
         self.assertEqual(self.h.COMMANDS["busctl"], "/usr/bin/busctl")
-        self.assertEqual(self.calls[-1], ("busctl", ("--system", "get-property", "org.freedesktop.systemd1",
+        self.assertIn(("busctl", ("--system", "get-property", "org.freedesktop.systemd1",
                          "/org/freedesktop/systemd1/unit/synthetic_2dunit_2eservice",
-                         "org.freedesktop.systemd1.Service", "ExecStartPre")))
+                         "org.freedesktop.systemd1.Service", "ExecStartPre")), self.calls)
         self.h.validate_unit(actual)
 
     def test_other_missing_fields_never_query_fallback(self):

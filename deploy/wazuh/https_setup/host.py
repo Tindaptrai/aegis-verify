@@ -668,20 +668,29 @@ class LinuxHost:
         if (type(unit) is not str or len(unit) > 255 or
                 not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.@-]*\.service", unit)):
             raise SetupError("host_unsupported")
+        # Match systemd's bus_label_escape, not filesystem/unit-name escaping.
+        label = "".join(char if char.isalpha() or index > 0 and char.isdigit()
+                        else "_%02x" % ord(char) for index, char in enumerate(unit))
+        def service_property(key):
+            return self.run("busctl", "--system", "get-property", "org.freedesktop.systemd1",
+                            "/org/freedesktop/systemd1/unit/" + label,
+                            "org.freedesktop.systemd1.Service", key)
         text = self.run("systemctl", "show", unit, "--no-pager", "--property=" + ",".join(keys)).decode()
         props = dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
         if set(props) == set(keys) - {"ExecStartPre"} and "ExecStartPre" in keys:
-            # Match systemd's bus_label_escape, not filesystem/unit-name escaping.
-            label = "".join(char if char.isalpha() or index > 0 and char.isdigit()
-                            else "_%02x" % ord(char) for index, char in enumerate(unit))
-            response = self.run("busctl", "--system", "get-property", "org.freedesktop.systemd1",
-                                "/org/freedesktop/systemd1/unit/" + label,
-                                "org.freedesktop.systemd1.Service", "ExecStartPre")
+            response = service_property("ExecStartPre")
             if response not in (b"a(sasbttttuii) 0", b"a(sasbttttuii) 0\n"):
                 raise SetupError("host_unsupported")
             props["ExecStartPre"] = ""
         if set(props) != set(keys):
             raise SetupError("host_unsupported")
+        for key in ("RestrictAddressFamilies", "SystemCallFilter"):
+            if key in props and props[key] in ("", "~"):
+                # systemctl renders an empty deny-list as '~'. Empty display
+                # also needs typed denial-mode confirmation: true/0 restricts.
+                if service_property(key) not in (b"(bas) false 0", b"(bas) false 0\n"):
+                    raise SetupError("host_unsupported")
+                props[key] = ""
         return props
 
     def firewall(self):

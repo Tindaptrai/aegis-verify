@@ -1629,11 +1629,40 @@ TimeoutStopSec=5
 ExecStart=/usr/bin/true
 '''
             empty_name = fixture.unit("empty-prestart", property_service)
-            nonempty_name = fixture.unit("nonempty-prestart", property_service + "ExecStartPre=/usr/bin/true\n")
+            nonempty_name = fixture.unit("nonempty-prestart", property_service + "ExecStartPre=/usr/bin/true\n"
+                                         "RestrictAddressFamilies=AF_UNIX\nSystemCallFilter=~getppid\n")
             fixture.systemctl("daemon-reload")
             fixture.systemctl("start", empty_name)
             fixture.systemctl("start", nonempty_name)
             self.assertEqual(h.LinuxHost().properties(empty_name, ("ExecStartPre", "LoadState"))["ExecStartPre"], "")
+            filters = ("RestrictAddressFamilies", "SystemCallFilter")
+            unrestricted = {}
+            for unit in (empty_name, nonempty_name):
+                # Separate actual display, typed bus and production-reader queries.
+                raw = command("systemctl", "show", unit, "--no-pager", "--property=" + ",".join(filters)).stdout
+                display = dict(line.split("=", 1) for line in raw.decode("ascii").splitlines())
+                self.assertEqual(set(display), set(filters))
+                canonical = h.LinuxHost().properties(unit, filters)
+                # Owned fixture names contain only letters/digits/hyphens/dot.
+                path = "/org/freedesktop/systemd1/unit/" + unit.replace("-", "_2d").replace(".", "_2e")
+                for key in filters:
+                    typed = command("busctl", "--system", "get-property", "org.freedesktop.systemd1",
+                                    path, "org.freedesktop.systemd1.Service", key).stdout
+                    if unit == empty_name:
+                        self.assertIn(display[key], ("", "~"))
+                        self.assertIn(typed, (b"(bas) false 0", b"(bas) false 0\n"))
+                        self.assertEqual(canonical[key], "")
+                        unrestricted[key] = {"display": display[key],
+                                             "dbus": typed.decode("ascii").removesuffix("\n"),
+                                             "canonical": canonical[key]}
+                    else:
+                        expected = {"RestrictAddressFamilies": ("AF_UNIX", b'(bas) true 1 "AF_UNIX"'),
+                                    "SystemCallFilter": ("~getppid", b'(bas) false 1 "getppid"')}
+                        self.assertEqual(display[key], expected[key][0])
+                        self.assertIn(typed, (expected[key][1], expected[key][1] + b"\n"))
+                        self.assertEqual(canonical[key], display[key])
+                        self.assertNotEqual(canonical[key], "")
+            OBSERVATIONS.setdefault(self.id(), {})["unrestricted_filters"] = unrestricted
             owned_property_units = {empty_name, nonempty_name}
             class OmittedPropertyCommands(h.Commands):
                 bus_reads = 0

@@ -149,6 +149,11 @@ def validate_native_observations(observations):
         require(item.get("host_firewall_before_sha256") == item.get("host_firewall_after_sha256"))
         require(item.get("fixture_cleanup_verified") is True)
     strict = observations[prefix + "test_systemd_every_start_guard"]
+    filters = strict.get("unrestricted_filters")
+    require(type(filters) is dict and set(filters) == {"RestrictAddressFamilies", "SystemCallFilter"})
+    for record in filters.values():
+        require(type(record) is dict and set(record) == {"display", "dbus", "canonical"})
+        require(record["display"] in ("", "~") and record["dbus"] == "(bas) false 0" and record["canonical"] == "")
     require(strict.get("loader_scope") == "owned_namespace_inventory_not_host_eligibility" and strict.get("strict_path_exception_not_used") is True)
     from deploy.wazuh.https_setup.ufw_host import LOADERS
     mapping = strict.get("loader_query_mapping", {})

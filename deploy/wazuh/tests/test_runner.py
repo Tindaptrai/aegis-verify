@@ -245,10 +245,38 @@ class RunnerTests(unittest.TestCase):
                            "probe": "nft-no-ufw-chains-v1", "owner_full_class_check": "pending", "vendor_lab_acceptance": False})
         item["preservation_hashes"]["fresh_nft"] = {"before": nft["foreign"]["before_sha256"], "after": nft["foreign"]["after_sha256"]}
         strict = dict(common, loader_scope="owned_namespace_inventory_not_host_eligibility", strict_path_exception_not_used=True,
+                      unrestricted_filters={key: {"display": "~", "dbus": "(bas) false 0", "canonical": ""}
+                                            for key in ("RestrictAddressFamilies", "SystemCallFilter")},
                       loader_query_mapping={role: "aegis-native-0123456789ab-loader-" + role.split(".")[0] + ".service" for role in ufw_host.LOADERS},
                       loader_facts={role: {"LoadState": "loaded", "ActiveState": "inactive", "UnitFileState": "disabled"} for role in ufw_host.LOADERS})
         return {prefix + "test_nft_allowed_denied_sources": dict(common), prefix + "test_systemd_every_start_guard": strict,
                 prefix + "test_ufw_disabled_wrapper_preserved": item}
+
+    def test_native_default_filters_require_closed_raw_typed_and_canonical_proof(self):
+        gate = self.runner()
+        identity = gate.NATIVE_MODULE + ".NativeTests.test_systemd_every_start_guard"
+        for display in ("", "~"):
+            observations = self.observation_fixture(gate)
+            for record in observations[identity]["unrestricted_filters"].values():
+                record["display"] = display
+            gate.validate_native_observations(observations)
+        changes = [lambda item: item.pop("unrestricted_filters"),
+                   lambda item: item["unrestricted_filters"].__setitem__("extra", {})]
+        for key in ("RestrictAddressFamilies", "SystemCallFilter"):
+            changes.append(lambda item, key=key: item["unrestricted_filters"].pop(key))
+            for field, value in (("display", "~getppid"), ("dbus", "(bas) true 0"),
+                                 ("dbus", "(bas) false 1"), ("dbus", "(bas) false 0\n"),
+                                 ("canonical", "~"), ("extra", "unreviewed")):
+                changes.append(lambda item, key=key, field=field, value=value:
+                               item["unrestricted_filters"][key].__setitem__(field, value))
+            for field in ("display", "dbus", "canonical"):
+                changes.append(lambda item, key=key, field=field: item["unrestricted_filters"][key].pop(field))
+        for index, change in enumerate(changes):
+            with self.subTest(mutation=index):
+                observations = self.observation_fixture(gate)
+                change(observations[identity])
+                with self.assertRaises((ValueError, KeyError, TypeError)):
+                    gate.validate_native_observations(observations)
 
     def test_closed_ufw_observations_require_every_preservation_and_transition(self):
         gate = self.runner()

@@ -196,6 +196,16 @@ Debian đã review. Không thêm Python dependency. Preflight từ chối unit/d
 sandbox, firewall loader, YAML hoặc metadata ngoài hợp đồng; không tự sửa owner,
 mode hay tắt firewall loader để vượt qua lỗi.
 
+Riêng `RestrictAddressFamilies` và `SystemCallFilter`, systemd 255 có thể hiển thị
+deny-list rỗng là `~`. Reader chỉ chuẩn hóa chuỗi đúng `~` hoặc chuỗi rỗng thành
+rỗng khi truy vấn `busctl get-property` độc lập cho đúng unit/thuộc tính trả về
+đúng `(bas) false 0` (cho phép một newline cuối). Allow-list, filter có phần tử,
+giá trị mâu thuẫn/không rõ hoặc truy vấn lỗi đều không đủ để admission; không bỏ
+qua hay xóa restriction thật. Native gate ghi riêng `{display, dbus, canonical}`
+cho hai thuộc tính mặc định của unit fixture và kiểm tra filter thật vẫn khác
+rỗng. Đây là bằng chứng reader trên unit sở hữu riêng; không phải stock vendor
+admission hoặc owner lab acceptance. Kiểm tra toàn bộ metadata/sandbox vẫn giữ nguyên.
+
 ## Bàn giao và lệnh đầu tiên: check chỉ đọc
 
 Chuyển ZIP đã đối chiếu checksum vào Indexer. Giải nén bản đã review vào staging
