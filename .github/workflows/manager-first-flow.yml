@@ -112,11 +112,21 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Prepare container runtime gate artifact directory
+        id: gate_artifacts
+        shell: python
+        run: |
+          import os
+          import tempfile
+          directory = tempfile.mkdtemp(prefix="manager-postgres-", dir=os.environ["RUNNER_TEMP"])
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("directory=" + directory + "\n")
       - name: Verify and propagate exact checked-out source commit
         env:
           REQUESTED_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          AEGIS_MANAGER_GATE_DIR: ${{ steps.gate_artifacts.outputs.directory }}
         run: |
-          python scripts/run_required_manager_tests.py --verify-source --workspace "$GITHUB_WORKSPACE" --requested-commit "$REQUESTED_SOURCE_COMMIT" --github-env "$GITHUB_ENV" --output "$RUNNER_TEMP/manager-postgres-source.json" --run-url "$AEGIS_EXECUTION_GATE_URL"
+          python scripts/run_required_manager_tests.py --verify-source --workspace "$GITHUB_WORKSPACE" --requested-commit "$REQUESTED_SOURCE_COMMIT" --github-env "$GITHUB_ENV" --output "$AEGIS_MANAGER_GATE_DIR/manager-postgres-source.json" --run-url "$AEGIS_EXECUTION_GATE_URL"
       - name: Install isolated test runtime
         run: |
           apt-get update
@@ -130,17 +140,32 @@ jobs:
         run: |
           dotnet build agent/connection/Aegis.Connection.Tests -c Release
           echo "AEGIS_EXECUTION_VECTOR_TEST_EXE=$GITHUB_WORKSPACE/agent/connection/Aegis.Connection.Tests/bin/Release/net10.0/Aegis.Connection.Tests.dll" >> "$GITHUB_ENV"
-      - name: Require real PostgreSQL races, nginx v2 isolation and execution vectors
+      - name: Require PostgreSQL races, native onboarding, nginx isolation and execution vectors
+        env:
+          AEGIS_MANAGER_GATE_DIR: ${{ steps.gate_artifacts.outputs.directory }}
         run: |
           python manager/manage.py makemigrations --check --dry-run --settings=aegis_manager.ci_settings
-          python scripts/run_required_manager_tests.py --settings aegis_manager.ci_settings --output "$RUNNER_TEMP/manager-postgres-results.json" --source-commit "$AEGIS_MANAGER_SOURCE_COMMIT" --run-url "$AEGIS_EXECUTION_GATE_URL" --require postgres_accounts --require postgres_control --require postgres_devices --require postgres_catalog --require postgres_execution --require nginx_execution --require vectors accounts.tests control.tests devices.tests catalog.tests
+          python scripts/run_required_manager_tests.py --settings aegis_manager.ci_settings --output "$AEGIS_MANAGER_GATE_DIR/manager-postgres-results.json" --source-commit "$AEGIS_MANAGER_SOURCE_COMMIT" --run-url "$AEGIS_EXECUTION_GATE_URL" --require postgres_accounts --require postgres_control --require postgres_devices --require postgres_catalog --require postgres_execution --require postgres_connections --require native_connections_policy --require native_connections_storage --require native_connections_tls --require nginx_execution --require vectors accounts.tests control.tests devices.tests catalog.tests connections.tests
+      - name: Require both source and results artifacts before qualification
+        id: verify_gate_artifacts
+        shell: python
+        env:
+          AEGIS_MANAGER_GATE_DIR: ${{ steps.gate_artifacts.outputs.directory }}
+        run: |
+          import os
+          from pathlib import Path
+          directory = Path(os.environ["AEGIS_MANAGER_GATE_DIR"])
+          for name in ("manager-postgres-source.json", "manager-postgres-results.json"):
+              path = directory / name
+              if not path.is_file() or path.stat().st_size == 0:
+                  raise SystemExit("manager_gate_artifact_missing")
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: Manager-PostgreSQL-required-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/manager-postgres-source.json
-            ${{ runner.temp }}/manager-postgres-results.json
+            ${{ steps.gate_artifacts.outputs.directory }}/manager-postgres-source.json
+            ${{ steps.gate_artifacts.outputs.directory }}/manager-postgres-results.json
           if-no-files-found: error
 
 
@@ -210,7 +235,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $commit = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python scripts/run_required_manager_tests.py --settings aegis_manager.test_settings --output (Join-Path $env:RUNNER_TEMP 'manager-windows-results.json') --source-commit $commit --run-url $env:AEGIS_EXECUTION_GATE_URL --require vectors accounts.tests control.tests devices.tests catalog.tests
+          python scripts/run_required_manager_tests.py --settings aegis_manager.test_settings --output (Join-Path $env:RUNNER_TEMP 'manager-windows-results.json') --source-commit $commit --run-url $env:AEGIS_EXECUTION_GATE_URL --require vectors accounts.tests control.tests devices.tests catalog.tests connections.tests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish and verify self-contained agent
         run: |

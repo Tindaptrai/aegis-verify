@@ -24,21 +24,40 @@ PUBLISHED_SUBPHASES = frozenset(('install', 'service_status', 'heartbeat', 'netw
                                'missingvendor', 'upgrade', 'uninstall', 'cleanup'))
 PUBLISHED_GATE_STAGES = frozenset(('published_fixture', 'published_authority', 'published_tls',
     'published_connect', 'published_status', 'published_run', 'published_wait', 'published_native_install',
-    'published_native_restart', 'published_native_reinstall', 'published_native_status', 'published_native_uninstall'))
+    'published_native_restart', 'published_native_reinstall', 'published_native_status', 'published_native_uninstall',
+    'published_native_execution_upgrade', 'published_native_missing_vendor', 'published_native_cleanup'))
+PUBLISHED_NATIVE_ACTION_STAGES = dict(Install='published_native_install', Restart='published_native_restart',
+    Reinstall='published_native_reinstall', Status='published_native_status', Uninstall='published_native_uninstall',
+    ExecutionUpgrade='published_native_execution_upgrade', MissingVendor='published_native_missing_vendor', Cleanup='published_native_cleanup')
 PUBLISHED_GATE_CODES = frozenset(('published_cli_failed', 'published_native_failed', 'wait_timeout'))
 PUBLISHED_EXCEPTION_TYPES = frozenset(('AssertionError', 'AttributeError', 'ValueError', 'TypeError',
     'KeyError', 'IndexError', 'RuntimeError', 'OSError', 'PermissionError', 'FileNotFoundError',
     'TimeoutError', 'TimeoutExpired'))
 
 
-def published_failure_diagnostic(subphase, error, gate_stage=None, gate_codes=()):
+def published_failure_diagnostic(subphase, error, gate_stage=None, gate_codes=(), *, native_failure=None):
     """Project fixed labels only; captured output and exception messages stay private."""
     native_stage = native_code = None
-    if type(error) is AssertionError and len(error.args) == 1 and type(error.args[0]) is str and len(error.args[0]) <= 600:
-        match = re.fullmatch(r'Native (?:Install|Restart|Reinstall|Status|Uninstall|unknown) failed '
+    if native_failure is not None:
+        if type(native_failure) is dict and set(native_failure) == {'action','stage','code','exit_code'}:
+            action, stage, code, exit_code = (native_failure[key] for key in ('action','stage','code','exit_code'))
+            owner = getattr(error, 'gate_native_action', None)
+            if (type(action) is str and action in PUBLISHED_NATIVE_ACTION_STAGES and type(owner) is str and owner == action
+                    and (exit_code is None or type(exit_code) is int and -(2**31) <= exit_code < 2**31)):
+                empty_pair = stage is None and code is None
+                pair = None
+                if type(stage) is str and type(code) is str and len(stage) <= 128 and len(code) <= 128:
+                    pair = presence.native_diagnostic(json.dumps(dict(stage=stage, code=code)))
+                    if stage.startswith('status_upgrade_') and action != 'ExecutionUpgrade': pair = None
+                if empty_pair or pair:
+                    gate_stage = PUBLISHED_NATIVE_ACTION_STAGES[action]
+                    if pair: native_stage, native_code = pair.split(':', 1)
+    elif type(error) is AssertionError and len(error.args) == 1 and type(error.args[0]) is str and len(error.args[0]) <= 600:
+        match = re.fullmatch(r'Native (?:Install|Restart|Reinstall|Status|Uninstall|ExecutionUpgrade|MissingVendor|Cleanup|unknown) failed '
                              r'\[([a-z_]+):([a-z0-9_-]+)\]; output withheld', error.args[0])
         if match:
             safe = presence.native_diagnostic(json.dumps(dict(stage=match[1], code=match[2])))
+            if match[1].startswith('status_upgrade_') and not error.args[0].startswith('Native ExecutionUpgrade failed '): safe = None
             if safe is not None:
                 native_stage, native_code = safe.split(':', 1)
     return dict(subphase=subphase if type(subphase) is str and subphase in PUBLISHED_SUBPHASES else None,
@@ -451,6 +470,21 @@ ConvertTo-Json -InputObject $rows -Compress
                 f'Native Install failed [installer:{code}]; output withheld'))
             self.assertEqual(row['native_code'], code)
 
+    def test_published_snapshot_projects_upgrade_site_without_changing_six_fields(self):
+        native = dict(action='ExecutionUpgrade', stage='status_upgrade_initial', code='state_invalid', exit_code=1)
+        error = AssertionError('PRIVATE_MESSAGE')
+        error.gate_native_action = 'ExecutionUpgrade'
+        row = published_failure_diagnostic('upgrade', error, native_failure=native)
+        self.assertEqual(row, dict(subphase='upgrade', exception_type='AssertionError',
+            gate_stage='published_native_execution_upgrade', gate_codes=[],
+            native_stage='status_upgrade_initial', native_code='state_invalid'))
+        cycle = {}; cycle['cycle'] = cycle
+        for bad in (cycle, native | {'raw':'PRIVATE'}, native | {'exit_code':True},
+                    native | {'action':'Status'}, native | {'stage':'PRIVATE'}):
+            row = published_failure_diagnostic('upgrade', error, native_failure=bad)
+            self.assertIsNone(row['native_stage'])
+            self.assertNotIn('PRIVATE', json.dumps(row))
+
     def test_published_failure_withholds_private_malformed_and_unbounded_values(self):
         for message in ('private-path token=value',
                         'Native Install failed [installer:private-code]; output withheld',
@@ -484,6 +518,8 @@ ConvertTo-Json -InputObject $rows -Compress
                     if action == failure_action:
                         case.gate_stage = 'published_native_install' if action == 'Install' else None
                         case.gate_codes = ('published_native_failed',)
+                        original.gate_native_action = action
+                        case.gate_native_failure = dict(action=action,stage='installer',code='service_operation_failed',exit_code=1)
                         raise original
                     if action == 'Uninstall':
                         case.gate_stage = 'published_native_uninstall'
@@ -509,6 +545,50 @@ ConvertTo-Json -InputObject $rows -Compress
                                  dict(executed=0, passed=0, failed=0, skipped=0) if failure_action == 'Install'
                                  else dict(executed=1, passed=0, failed=1, skipped=0))
                 self.assertNotIn('private', json.dumps(report))
+
+    def test_execution_report_uses_actual_native_first_and_cleanup_snapshots(self):
+        for platform, cleanup_fails in (('nt', False), ('nt', True), ('posix', False), ('posix', True)):
+            with self.subTest(platform=platform, cleanup_fails=cleanup_fails), tempfile.TemporaryDirectory() as temporary:
+                case = ExecutionPublishedNativeTests('test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default')
+                case.owner = object(); case.root = Path(temporary); case.origin='https://synthetic.invalid'
+                case.server = SimpleNamespace(routes=[],execution_reports=[{'ready':False}])
+                case.wait_until=Mock(); case.assert_network_snapshot=Mock()
+                def native(action, **kwargs):
+                    if action in ('Install','MissingVendor'):
+                        return dict(service_status='Running',device_id='synthetic-id')
+                    return presence.PublishedConnectionTests.native_phase(case,action,**kwargs)
+                case.native_phase=native
+                # Replace only the presence module's binding; changing global os.name
+                # would also change pathlib's host behavior on Windows/POSIX.
+                native_os=SimpleNamespace(name=platform,environ=dict(os.environ,
+                    AEGIS_CONNECTION_SERVICE_PACKAGE=temporary,
+                    SystemRoot=os.environ.get('SystemRoot',str(Path(temporary)/'synthetic-system-root'))))
+                def child(command, **kwargs):
+                    action_flag='-Action' if '-Action' in command else '--action'
+                    action=command[command.index(action_flag)+1]
+                    if action == 'ExecutionUpgrade':
+                        return subprocess.CompletedProcess([],1,'','{"stage":"status_upgrade_stopped","code":"state_invalid"}')
+                    if action == 'Uninstall' and cleanup_fails:
+                        return subprocess.CompletedProcess([],1,'','{"stage":"uninstall","code":"service_operation_failed"}')
+                    return subprocess.CompletedProcess([],0,json.dumps(dict(action=action,device_id='synthetic-id',
+                        state='enrolled',service_status='absent',identity_preserved=True)),'')
+                with patch.dict(os.environ,AEGIS_EXECUTION_NATIVE_OUTPUT_ROOT=temporary,AEGIS_CONNECTION_SERVICE_PACKAGE=temporary), \
+                        patch.object(presence,'create_pairing_code',return_value={'code':'synthetic-code'}), \
+                        patch.object(presence.Device,'objects',Mock()), patch.object(presence,'os',native_os), \
+                        patch.object(presence.subprocess,'run',side_effect=child):
+                    with self.assertRaises(AssertionError) as caught:
+                        case.test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default()
+                self.assertEqual(caught.exception.gate_native_action,'ExecutionUpgrade')
+                report=json.loads((Path(temporary)/'published-results.json').read_text())
+                first=report['diagnostics'][0]
+                self.assertEqual((first['subphase'],first['gate_stage'],first['native_stage'],first['native_code']),
+                    ('upgrade','published_native_execution_upgrade','status_upgrade_stopped','state_invalid'))
+                self.assertEqual(len(report['diagnostics']),2 if cleanup_fails else 1)
+                self.assertEqual(report['categories']['upgrade_rollback_journal']['failed'],2 if cleanup_fails else 1)
+                if cleanup_fails:
+                    second=report['diagnostics'][1]
+                    self.assertEqual((second['subphase'],second['gate_stage'],second['native_stage'],second['native_code']),
+                        ('uninstall','published_native_uninstall','uninstall','service_operation_failed'))
 
     def test_published_report_captures_postconditions_and_normal_cleanup_without_crediting_checks(self):
         for failure_subphase in ('upgrade', 'cleanup', None):
@@ -547,11 +627,35 @@ ConvertTo-Json -InputObject $rows -Compress
                     passed=1 if failure_subphase == 'upgrade' else 2, failed=0, skipped=0))
                 self.assertNotIn('private', json.dumps(report))
 
+    def test_first_native_failure_in_cleanup_after_postcondition_is_retained(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            case=ExecutionPublishedNativeTests('test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default')
+            case.owner=object();case.root=Path(temporary);case.origin='https://synthetic.invalid'
+            case.server=SimpleNamespace(routes=[],execution_reports=[{'ready':False}])
+            case.wait_until=Mock();case.assert_network_snapshot=Mock()
+            def native(action, **kwargs):
+                if action != 'Uninstall': return dict(service_status='Running',device_id='synthetic-id')
+                return presence.PublishedConnectionTests.native_phase(case,action,**kwargs)
+            case.native_phase=native
+            manager=Mock();manager.count.return_value=2
+            with patch.dict(os.environ,AEGIS_EXECUTION_NATIVE_OUTPUT_ROOT=temporary,AEGIS_CONNECTION_SERVICE_PACKAGE=temporary), \
+                    patch.object(presence,'create_pairing_code',return_value={'code':'synthetic-code'}), \
+                    patch.object(presence.Device,'objects',manager), patch.object(presence.subprocess,'run',return_value=
+                        subprocess.CompletedProcess([],1,'','{"stage":"uninstall","code":"service_operation_failed"}')):
+                with self.assertRaises(AssertionError):
+                    case.test_real_published_service_mtls_upgrade_unknown_journal_and_no_execution_default()
+            rows=json.loads((Path(temporary)/'published-results.json').read_text())['diagnostics']
+            self.assertEqual(len(rows),2)
+            self.assertIsNone(rows[0]['native_stage'])
+            self.assertEqual((rows[1]['subphase'],rows[1]['gate_stage'],rows[1]['native_stage'],rows[1]['native_code']),
+                ('uninstall','published_native_uninstall','uninstall','service_operation_failed'))
+
     @unittest.skipUnless(os.name == 'nt', 'Windows gate diagnostic boundary')
     def test_wrapper_rejects_private_or_unbounded_published_diagnostics(self):
         record = dict(subphase='install', exception_type='AssertionError', gate_stage='published_native_install',
                       gate_codes=['published_native_failed'], native_stage='installer', native_code='service_operation_failed')
         invalid = [[record] * 3, [record | {'raw': 'private-value'}],
+                   [record | {'native_stage':'status_upgrade_initial'}],
                    [record | {'subphase': 'private-value'}], [record | {'exception_type': 'private-value'}],
                    [record | {'gate_stage': 'private-value'}], [record | {'gate_codes': ['private-value']}],
                    [record | {'gate_codes': ['published_native_failed'] * 9}],
@@ -562,19 +666,24 @@ ConvertTo-Json -InputObject $rows -Compress
 $value=$env:AEGIS_TEST_PUBLISHED_INPUT|ConvertFrom-Json
 $accepted=@(ConvertTo-GatePublishedDiagnostics $value.valid @('service_operation_failed'))
 $numeric=@(ConvertTo-GatePublishedDiagnostics $value.numeric @('service_operation_failed'))
+$sites=@();foreach($site in $value.sites){$sites+=@(ConvertTo-GatePublishedDiagnostics @($site) @('service_operation_failed'))}
 $empty=@(ConvertTo-GatePublishedDiagnostics @() @('service_operation_failed'))
 $rejected=0
 foreach($candidate in $value.invalid){
     try { $null=ConvertTo-GatePublishedDiagnostics $candidate @('service_operation_failed');throw 'unexpected_acceptance' }
     catch { if($_.Exception.Message -cne 'published_result_invalid'){throw};$rejected++ }
 }
-@{accepted=$accepted;numeric=$numeric;empty_count=$empty.Count;rejected=$rejected}|ConvertTo-Json -Depth 5 -Compress
+@{accepted=$accepted;numeric=$numeric;sites=$sites;empty_count=$empty.Count;rejected=$rejected}|ConvertTo-Json -Depth 5 -Compress
 ''', environment={'AEGIS_TEST_PUBLISHED_INPUT': json.dumps(dict(valid=[record], invalid=invalid,
-                numeric=[record | {'native_code': code} for code in ('win32_5', 'hresult_-2147024891')]))},
+                numeric=[record | {'native_code': code} for code in ('win32_5', 'hresult_-2147024891')],
+                sites=[record | {'gate_stage':'published_native_execution_upgrade','native_stage':stage}
+                        for stage in ('status_upgrade_initial','status_upgrade_stopped','status_upgrade_restarted')]))},
             helpers=('ConvertTo-GatePublishedDiagnostics',))
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), dict(accepted=[record], empty_count=0, rejected=len(invalid),
-            numeric=[record | {'native_code': code} for code in ('win32_5', 'hresult_-2147024891')]))
+            numeric=[record | {'native_code': code} for code in ('win32_5', 'hresult_-2147024891')],
+            sites=[record | {'gate_stage':'published_native_execution_upgrade','native_stage':stage}
+                    for stage in ('status_upgrade_initial','status_upgrade_stopped','status_upgrade_restarted')]))
         self.assertNotIn('private', result.stdout)
 
 
@@ -626,8 +735,13 @@ class ExecutionPublishedNativeTests(TransactionTestCase):
 
         def record_failure(error):
             if len(diagnostics) < 2:
+                snapshot = getattr(self, 'gate_native_failure', {})
+                if diagnostics:
+                    # A postcondition can fail before the first native failure,
+                    # which then belongs to cleanup rather than the first row.
+                    snapshot = getattr(self, 'gate_native_cleanup_failure', snapshot)
                 diagnostics.append(published_failure_diagnostic(subphase, error,
-                    getattr(self, 'gate_stage', None), getattr(self, 'gate_codes', ())))
+                    getattr(self, 'gate_stage', None), getattr(self, 'gate_codes', ()), native_failure=snapshot))
 
         def check(name, action):
             row = rows[name]

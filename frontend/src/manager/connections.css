@@ -1,0 +1,18 @@
+.connection-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:14px 0; }
+.connection-wizard { margin:20px 0; }
+.connection-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 20px; }
+.connection-steps { display:flex; flex-wrap:wrap; gap:18px; padding:0; list-style:none; color:var(--muted); }
+.connection-steps [aria-current=step],.integration-guides [aria-current=step] { color:var(--mint); }
+.connection-summary>div { display:grid; grid-template-columns:140px minmax(0,1fr); gap:12px; padding:8px 0; border-bottom:1px solid var(--border); }
+.connection-summary dt { color:var(--muted); }
+.connection-summary dd { margin:0; overflow-wrap:anywhere; }
+.connection-sources { display:grid; gap:16px; margin:20px 0; }
+.connection-sources p,.connection-digest { overflow-wrap:anywhere; }
+.guide-content { margin-top:20px; max-width:1000px; line-height:1.8; }
+.guide-content h2 { margin-top:24px; }
+.guide-content table { width:100%; border-collapse:collapse; }
+.guide-content td,.guide-content th { border:1px solid var(--border); padding:10px; text-align:left; }
+.guide-content pre { overflow:auto; background:var(--surface); border-radius:8px; padding:16px; }
+.guide-content a { color:var(--mint); }
+.guide-unavailable { border:1px dashed var(--border); border-radius:8px; padding:15px; }
+@media (max-width:760px) { .connection-fields { grid-template-columns:1fr; } .connection-summary>div { grid-template-columns:1fr; gap:4px; } }

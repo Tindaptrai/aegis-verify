@@ -1,8 +1,22 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ManagerApp } from './ManagerApp';
 import { ManagerApiError } from './api';
 import { anonymousSession, signedInApiFixture, userSession } from './test-fixtures';
+import { connectionsFixture, tested } from './connections-test-fixtures';
+import { ConnectionsApiError } from './connectionsApi';
+
+async function startConnectionProbe() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Kết nối' }));
+  fireEvent.click(await screen.findByRole('button', { name: 'Thêm Wazuh' }));
+  for (const [label, value] of [['Tên nguồn', 'Synthetic source'], ['Môi trường', 'synthetic'], ['HTTPS Indexer', 'https://indexer.example:9200'], ['Index đã review', 'reviewed-alerts-*'], ['Tài khoản Indexer', 'synthetic-reader']]) {
+    fireEvent.change(screen.getByLabelText(label!), { target: { value } });
+  }
+  const ca = new File(['synthetic public CA'], 'public-ca.pem'); Object.defineProperty(ca, 'text', { value: async () => 'synthetic public CA' });
+  fireEvent.change(screen.getByLabelText('Public CA PEM'), { target: { files: [ca] } }); await screen.findByText('Public CA đã nạp trong bộ nhớ.');
+  fireEvent.change(screen.getByLabelText('Mật khẩu Indexer'), { target: { value: 'synthetic-test-secret' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Kiểm tra kết nối' }));
+}
 
 async function login() {
   fireEvent.change(await screen.findByLabelText('Tên đăng nhập'), { target: { value: 'synthetic' } });
@@ -15,6 +29,61 @@ async function logout() {
 }
 
 describe('real Manager shell', () => {
+  afterEach(() => { window.history.replaceState(null, '', window.location.pathname); });
+  it('opens an initial guide hash and follows guide steps, unsupported hashes and browser back', async () => {
+    window.history.replaceState(null, '', '#integration/wazuh/4.14.4/self-managed/ca');
+    render(<ManagerApp api={signedInApiFixture('viewer')} connectionsApi={connectionsFixture()} />);
+    expect(await screen.findByRole('heading', { name: 'Wazuh 4.14.4 · self-managed' })).toBeVisible();
+    expect(screen.getByText(/root-ca.pem/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Tài khoản & quyền đọc' }));
+    await waitFor(() => expect(window.location.hash).toBe('#integration/wazuh/4.14.4/self-managed/account'));
+    await act(async () => { window.location.hash = '#integration/wazuh/unknown/self-managed/ca'; window.dispatchEvent(new HashChangeEvent('hashchange')); });
+    expect(await screen.findByText('Chưa có hướng dẫn đã kiểm chứng cho sản phẩm, phiên bản hoặc kiểu triển khai này.')).toBeVisible();
+    act(() => { window.history.back(); });
+    expect(await screen.findByRole('list', { name: 'Thiết lập tài khoản Indexer' })).toBeVisible();
+  });
+  it('guide navigation cannot restore a pending private draft and keeps secrets out of URL', async () => {
+    const connections = connectionsFixture(); let finish!: (value: ReturnType<typeof tested>) => void;
+    connections.test = vi.fn(() => new Promise<ReturnType<typeof tested>>((resolve) => { finish = resolve; }));
+    render(<ManagerApp api={signedInApiFixture('admin')} connectionsApi={connections} />); await startConnectionProbe();
+    fireEvent.click(screen.getByRole('button', { name: 'Cách lấy public CA' }));
+    expect(window.location.hash).toBe('#integration/wazuh/4.14.4/self-managed/ca');
+    expect(window.location.href).not.toMatch(/synthetic|indexer\.example/);
+    await act(async () => { finish(tested()); });
+    fireEvent.click(screen.getByRole('button', { name: 'Quay lại Kết nối' }));
+    expect(screen.queryByText('Truy vấn thành công')).not.toBeInTheDocument(); expect(screen.queryByLabelText('Mật khẩu Indexer')).not.toBeInTheDocument();
+  });
+  it('allows view users to read versioned guides without requesting connection metadata', async () => {
+    const connections = connectionsFixture(); render(<ManagerApp api={signedInApiFixture('viewer')} connectionsApi={connections} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Kết nối' }));
+    expect(screen.queryByRole('button', { name: 'Thêm Wazuh' })).not.toBeInTheDocument(); expect(connections.list).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Hướng dẫn tích hợp' }));
+    expect(screen.getByRole('heading', { name: 'Wazuh 4.14.4 · self-managed' })).toBeVisible();
+  });
+  it('gates new source actions by manage_connections and unmounts private form on logout', async () => {
+    const connections = connectionsFixture(); let finish!: (value: ReturnType<typeof tested>) => void;
+    connections.test = vi.fn(() => new Promise<ReturnType<typeof tested>>((resolve) => { finish = resolve; }));
+    render(<ManagerApp api={signedInApiFixture('admin')} connectionsApi={connections} />);
+    await startConnectionProbe(); expect(connections.test).toHaveBeenCalledTimes(1);
+    await logout(); await screen.findByRole('heading', { name: 'Đăng nhập Manager' });
+    expect(screen.queryByLabelText('Mật khẩu Indexer')).not.toBeInTheDocument();
+    await act(async () => { finish(tested()); });
+    expect(screen.queryByText('Truy vấn thành công')).not.toBeInTheDocument();
+  });
+  it.each(['csrf', 'permission'] as const)('cannot restore a pending draft after shell %s refresh', async (change) => {
+    const connections = connectionsFixture(); const api = signedInApiFixture('admin');
+    const next = change === 'csrf' ? { ...userSession('admin'), csrf_token: 'rotated-csrf' } : userSession('viewer');
+    api.session = vi.fn().mockResolvedValueOnce(userSession('admin')).mockResolvedValueOnce(next);
+    let rejectList!: (reason: unknown) => void; let finishProbe!: (result: ReturnType<typeof tested>) => void;
+    connections.list = vi.fn(() => new Promise<Awaited<ReturnType<typeof connections.list>>>((_, reject) => { rejectList = reject; }));
+    connections.test = vi.fn(() => new Promise<ReturnType<typeof tested>>((resolve) => { finishProbe = resolve; }));
+    render(<ManagerApp api={api} connectionsApi={connections} />); await startConnectionProbe();
+    await act(async () => { rejectList(new ConnectionsApiError(403, 'permission_denied')); });
+    await waitFor(() => expect(api.session).toHaveBeenCalledTimes(2));
+    await act(async () => { finishProbe(tested()); });
+    expect(screen.queryByText('Truy vấn thành công')).not.toBeInTheDocument(); expect(screen.queryByLabelText('Mật khẩu Indexer')).not.toBeInTheDocument();
+    if (change === 'permission') expect(screen.queryByRole('button', { name: 'Thêm Wazuh' })).not.toBeInTheDocument();
+  });
   it('starts masked, logs in and displays only server overview counts', async () => {
     const api = signedInApiFixture('admin');
     api.session = vi.fn().mockResolvedValue(anonymousSession);

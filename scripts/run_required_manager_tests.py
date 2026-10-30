@@ -25,8 +25,42 @@ EXACT = {
     "published_service": PUBLISHED + "test_native_installer_network_reconnect_reinstall_archive_and_preserving_uninstall",
     "linux_presence_only": PUBLISHED + "test_linux_published_client_remains_presence_only_and_rejects_execution_options",
 }
-CATEGORIES = (*PREFIXES, *EXACT, "published_presence")
+# Each concrete native gate is mandatory: a class prefix with one remaining
+# passing test must not certify an accidentally deleted ownership/race check.
+REQUIRED_TESTS = {
+    'native_connections_policy': frozenset('connections.tests.' + suffix for suffix in (
+        'test_policy.NativePolicyTests.test_untrusted_parent_fails_closed',
+        'test_policy.NativeRootPolicyTests.test_trusted_root_owned_json_policy_loads',
+        'test_policy.NativeRootPolicyTests.test_final_file_symlink_is_rejected_after_trusted_load',
+        'test_policy.NativeRootPolicyTests.test_parent_symlink_is_rejected_after_trusted_load',
+    )),
+    'native_connections_storage': frozenset('connections.tests.test_storage.NativeStorageTests.' + name for name in (
+        'test_exclusive_write_and_tamper', 'test_link_parent_or_file_is_never_followed',
+        'test_cleanup_removes_only_expired_unreferenced_directory', 'test_cleanup_recovers_partial_orphan',
+    )),
+    'native_connections_tls': frozenset('connections.tests.test_probe.' + suffix for suffix in (
+        'SyntheticTlsTests.test_trusted_san_and_sni',
+        'SyntheticTlsTests.test_cn_only_leaf_is_refused_before_any_auth_request',
+        'SyntheticTlsTests.test_wrong_san_chain_and_expired_leaf_are_refused',
+        'SyntheticTlsTests.test_drip_feed_cannot_extend_absolute_response_deadline',
+        'ProbeTests.test_transport_pins_sockaddr_and_original_tls_hostname',
+    )),
+    'postgres_connections': frozenset('connections.tests.test_postgres.PostgresTests.' + name for name in (
+        'test_same_draft_same_key_publishes_exactly_one_registration',
+        'test_candidate_compare_swap_has_one_winner', 'test_competing_source_versions_have_one_winner',
+        'test_generation_rotation_during_io_blocks_test_and_save',
+        'test_session_rotation_during_io_blocks_test_and_save',
+        'test_permission_revocation_during_io_blocks_test_and_save',
+    )),
+}
+CATEGORIES = (*PREFIXES, *EXACT, *REQUIRED_TESTS, "published_presence")
 ROOT = Path(__file__).resolve().parents[1]
+NATIVE_ACTION_STAGES = {"Install": "published_native_install", "Restart": "published_native_restart",
+    "Reinstall": "published_native_reinstall", "Status": "published_native_status", "Uninstall": "published_native_uninstall",
+    "ExecutionUpgrade": "published_native_execution_upgrade", "MissingVendor": "published_native_missing_vendor", "Cleanup": "published_native_cleanup"}
+NATIVE_STAGES = frozenset(("preflight", "installer", "configuration", "status", "restart", "uninstall", "owner_conflict", "helper",
+    "status_upgrade_initial", "status_upgrade_stopped", "status_upgrade_restarted"))
+NATIVE_CODES = frozenset((ROOT / "scripts/tests/agent/native-diagnostic-codes.txt").read_text(encoding="ascii").splitlines())
 DIAGNOSTIC_STAGES = frozenset((
     "fixture_setup", "source_staging", "source_tls", "authority_setup", "environment_setup",
     "unit_enable", "unit_start", "worker_health", "service_properties", "worker_lock",
@@ -36,6 +70,7 @@ DIAGNOSTIC_STAGES = frozenset((
     "published_tls", "published_connect", "published_status", "published_run", "published_wait",
     "published_native_install", "published_native_restart", "published_native_reinstall",
     "published_native_status", "published_native_uninstall",
+    "published_native_execution_upgrade", "published_native_missing_vendor", "published_native_cleanup",
 ))
 DIAGNOSTIC_CODES = frozenset(("worker_process_failed", "published_cli_failed", "published_native_failed",
     "source_probe_failed", "wait_timeout", "gate_execution_failed", "unexpected_success"))
@@ -54,10 +89,38 @@ def diagnostic_id(test):
     if test is None: return "gate_setup"
     identity = test.id()
     if type(identity) is str and len(identity) <= 256:
-        if re.fullmatch(r"(?:accounts|control|devices|catalog)\.tests\.[A-Za-z0-9_.]+", identity): return identity
-        holder = re.fullmatch(r"(setUpClass|tearDownClass|setUpModule|tearDownModule) \(((?:accounts|control|devices|catalog)\.tests\.[A-Za-z0-9_.]+)\)", identity)
+        if re.fullmatch(r"(?:accounts|control|devices|catalog|connections)\.tests\.[A-Za-z0-9_.]+", identity): return identity
+        holder = re.fullmatch(r"(setUpClass|tearDownClass|setUpModule|tearDownModule) \(((?:accounts|control|devices|catalog|connections)\.tests\.[A-Za-z0-9_.]+)\)", identity)
         if holder: return holder[2] + "." + holder[1]
     return "test_id_withheld"
+
+
+def safe_native_failure(value):
+    # Never recurse into test attributes or learn labels from exception text.
+    if type(value) is not dict or set(value) != {"action", "stage", "code", "exit_code"}: return {}
+    action, stage, code, exit_code = (value[name] for name in ("action", "stage", "code", "exit_code"))
+    if type(action) is not str or action not in (*NATIVE_ACTION_STAGES, "ExecutionUpgrade", "MissingVendor", "Cleanup", "unknown"): return {}
+    if exit_code is not None and (type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31): return {}
+    if stage is None and code is None: return dict(action=action, stage=None, code=None, exit_code=exit_code)
+    if type(stage) is not str or stage not in NATIVE_STAGES or type(code) is not str or len(code) > 128: return {}
+    if stage.startswith("status_upgrade_") and action != "ExecutionUpgrade": return {}
+    known = code in NATIVE_CODES
+    if not known:
+        match = re.fullmatch(r"(win32|hresult)_(-?(?:0|[1-9][0-9]*))", code)
+        if match:
+            number = int(match[2])
+            known = str(number) == match[2] and ((match[1] == "win32" and 0 <= number <= 65535)
+                or (match[1] == "hresult" and -(2 ** 31) <= number < 2 ** 31))
+    return dict(action=action, stage=stage, code=code, exit_code=exit_code) if known else {}
+
+
+def safe_revocation_status(value):
+    fields = {"process_exit_code", "heartbeat_200", "heartbeat_403", "other_responses"}
+    if type(value) is not dict or set(value) != fields: return {}
+    exit_code = value["process_exit_code"]
+    if exit_code is not None and (type(exit_code) is not int or not -(2 ** 31) <= exit_code < 2 ** 31): return {}
+    if any(type(value[name]) is not int or not 0 <= value[name] < 2 ** 31 for name in fields - {"process_exit_code"}): return {}
+    return {name: value[name] for name in sorted(fields)}
 
 
 def safe_diagnostic(test, err):
@@ -78,6 +141,13 @@ def safe_diagnostic(test, err):
     if exception not in EXCEPTION_CLASSES and exception != "UnexpectedSuccess": exception = "OtherException"
     stage = getattr(test, "gate_stage", None)
     stage = stage if type(stage) is str and stage in DIAGNOSTIC_STAGES else None
+    native_failure = safe_native_failure(getattr(test, "gate_native_failure", None))
+    if native_failure: stage = NATIVE_ACTION_STAGES.get(native_failure["action"])
+    native_cleanup_failure = safe_native_failure(getattr(test, "gate_native_cleanup_failure", None))
+    if native_cleanup_failure and native_cleanup_failure["action"] not in ("Uninstall", "Cleanup"): native_cleanup_failure = {}
+    traceback_action = getattr(err[1], "gate_native_action", None) if err is not None else None
+    if type(traceback_action) is not str or traceback_action not in (*NATIVE_ACTION_STAGES, "ExecutionUpgrade", "MissingVendor", "Cleanup", "unknown"):
+        traceback_action = None
     codes = getattr(test, "gate_codes", ())
     codes = sorted({code for code in codes[:16] if type(code) is str and code in DIAGNOSTIC_CODES}) if type(codes) in (tuple, list) else []
     service = getattr(test, "gate_service_status", None)
@@ -106,10 +176,14 @@ def safe_diagnostic(test, err):
             if type(value) is int and 0 <= value <= maximum: cleanup_status[name] = value
     return dict(test_id=diagnostic_id(test), exception_class=exception, frames=frames[-8:],
                 stage=stage, codes=codes, service_status=service_status, runtime_status=runtime_status,
-                cleanup_status=cleanup_status)
+                cleanup_status=cleanup_status, native_failure=native_failure,
+                native_cleanup_failure=native_cleanup_failure, native_traceback_action=traceback_action,
+                revocation_status=safe_revocation_status(getattr(test, "gate_revocation_status", None)))
 
 
 def category_for(identity):
+    for name, identities in REQUIRED_TESTS.items():
+        if identity in identities: return name
     for name, exact in EXACT.items():
         if identity == exact: return name
     for name, prefix in PREFIXES.items():
@@ -185,8 +259,10 @@ def build_report(result, required, source_commit, run_url, errors=()):
         if name not in CATEGORIES: raise ValueError("invalid_gate_category")
         actual = counts(state for identity, state in outcomes.items()
                         if category_for(identity) == name)
-        passed = actual["executed"] > 0 and actual["passed"] == actual["executed"] and actual["failed"] == actual["skipped"] == 0
+        missing = REQUIRED_TESTS.get(name, frozenset()) - outcomes.keys()
+        passed = not missing and actual["executed"] > 0 and actual["passed"] == actual["executed"] and actual["failed"] == actual["skipped"] == 0
         categories.append(dict(name=name, **actual, result="passed" if passed else "failed"))
+        if name in REQUIRED_TESTS: categories[-1]['missing'] = len(missing)
     totals = counts(outcomes.values())
     # Setup/teardown failures may have no started test, but must still fail the gate.
     suite_failures = len(result.failures) + len(result.errors) + len(result.unexpectedSuccesses) + len(result.expectedFailures)
@@ -200,6 +276,10 @@ def build_report(result, required, source_commit, run_url, errors=()):
 
 def prerequisites(required, *, vendor, environ, which=shutil.which):
     errors = set()
+    if any(name.startswith('native_connections_') for name in required):
+        if not sys.platform.startswith('linux'): errors.add('linux_required')
+    if 'native_connections_policy' in required and getattr(os, 'geteuid', lambda: None)() != 0:
+        errors.add('root_policy_fixture_required')
     if any(name.startswith("postgres_") or name == "manager_worker_service" for name in required) and vendor != "postgresql": errors.add("postgresql_required")
     if "nginx_execution" in required and which("nginx") is None: errors.add("nginx_required")
     for roles, variable, code, directory in (

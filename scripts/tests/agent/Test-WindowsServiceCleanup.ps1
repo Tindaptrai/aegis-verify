@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
+. (Join-Path $PSScriptRoot 'InstallerDiagnostics.ps1')
 $repo=(Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Test-WindowsService.ps1'),[ref]$tokens,[ref]$errors)
@@ -39,6 +40,10 @@ function Get-SyntheticStatus {
     $global:LASTEXITCODE=0
     $identity=if($case -ceq 'identity_conflict'){'6c2d47c2-1dd5-4235-a4ce-114679e0332f'}else{$expectedIdentity}
     [pscustomobject]@{device_id=$identity;state='enrolled'}|ConvertTo-Json -Compress
+}
+function Invoke-NativeStatusCommand([string]$Executable,[string]$StateDirectory) {
+    $json=& $Executable status --state-dir $StateDirectory
+    return @{stdout=($json -join "`n");stderr='';exit_code=$global:LASTEXITCODE}
 }
 function Read-NativeStatus([string]$Executable=$binary) {
     $script:statusReads++

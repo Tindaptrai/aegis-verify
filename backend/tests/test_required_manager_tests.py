@@ -1,14 +1,110 @@
 """CI certification counts real test outcomes and refuses missing required roles."""
 import importlib.util
+import ast
 import io
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# Explicit independent acceptance inventory: removing a single native test must
+# fail certification even when every other test in its class passed.
+CONNECTIONS_REQUIRED = {
+    'native_connections_policy': (
+        'test_policy.NativePolicyTests.test_untrusted_parent_fails_closed',
+        'test_policy.NativeRootPolicyTests.test_trusted_root_owned_json_policy_loads',
+        'test_policy.NativeRootPolicyTests.test_final_file_symlink_is_rejected_after_trusted_load',
+        'test_policy.NativeRootPolicyTests.test_parent_symlink_is_rejected_after_trusted_load',
+    ),
+    'native_connections_storage': (
+        'test_storage.NativeStorageTests.test_exclusive_write_and_tamper',
+        'test_storage.NativeStorageTests.test_link_parent_or_file_is_never_followed',
+        'test_storage.NativeStorageTests.test_cleanup_removes_only_expired_unreferenced_directory',
+        'test_storage.NativeStorageTests.test_cleanup_recovers_partial_orphan',
+    ),
+    'native_connections_tls': (
+        'test_probe.SyntheticTlsTests.test_trusted_san_and_sni',
+        'test_probe.SyntheticTlsTests.test_cn_only_leaf_is_refused_before_any_auth_request',
+        'test_probe.SyntheticTlsTests.test_wrong_san_chain_and_expired_leaf_are_refused',
+        'test_probe.SyntheticTlsTests.test_drip_feed_cannot_extend_absolute_response_deadline',
+        'test_probe.ProbeTests.test_transport_pins_sockaddr_and_original_tls_hostname',
+    ),
+    'postgres_connections': (
+        'test_postgres.PostgresTests.test_same_draft_same_key_publishes_exactly_one_registration',
+        'test_postgres.PostgresTests.test_candidate_compare_swap_has_one_winner',
+        'test_postgres.PostgresTests.test_competing_source_versions_have_one_winner',
+        'test_postgres.PostgresTests.test_generation_rotation_during_io_blocks_test_and_save',
+        'test_postgres.PostgresTests.test_session_rotation_during_io_blocks_test_and_save',
+        'test_postgres.PostgresTests.test_permission_revocation_during_io_blocks_test_and_save',
+    ),
+}
+
+
+def test_connections_gate_requires_every_concrete_native_test_and_rejects_skips():
+    gate = gate_module()
+    for category, suffixes in CONNECTIONS_REQUIRED.items():
+        assert category in gate.CATEGORIES
+        identities = ['connections.tests.' + suffix for suffix in suffixes]
+        result = gate.GateResult(io.StringIO(), True, 0)
+        result.started.update(identities)
+        result.outcomes.update(dict.fromkeys(identities, 'passed'))
+        assert report(result, (category,))['result'] == 'passed'
+        for identity in identities:
+            assert gate.category_for(identity) == category
+            for state in ('missing', 'skipped', 'failed'):
+                if state == 'missing':
+                    del result.outcomes[identity]
+                else:
+                    result.outcomes[identity] = state
+                assert report(result, (category,))['result'] == 'failed'
+                result.outcomes[identity] = 'passed'
+
+
+def test_connections_native_prerequisites_refuse_wrong_platform_and_nonroot(monkeypatch):
+    gate = gate_module()
+    monkeypatch.setattr(gate.sys, 'platform', 'win32')
+    assert 'linux_required' in gate.prerequisites(CONNECTIONS_REQUIRED, vendor='postgresql', environ={})
+    monkeypatch.setattr(gate.sys, 'platform', 'linux')
+    monkeypatch.setattr(gate.os, 'geteuid', lambda: 1000, raising=False)
+    assert 'root_policy_fixture_required' in gate.prerequisites(CONNECTIONS_REQUIRED, vendor='postgresql', environ={})
+    monkeypatch.setattr(gate.os, 'geteuid', lambda: 0)
+    assert gate.prerequisites(CONNECTIONS_REQUIRED, vendor='postgresql', environ={}) == []
+    assert 'postgresql_required' in gate.prerequisites(CONNECTIONS_REQUIRED, vendor='sqlite', environ={})
+
+
+def test_connections_diagnostic_ids_and_class_setup_are_safe():
+    gate = gate_module()
+    class Identity:
+        def __init__(self, identity): self.identity = identity
+        def id(self): return self.identity
+    identity = 'connections.tests.test_policy.NativeRootPolicyTests'
+    assert gate.diagnostic_id(Identity(identity + '.test_trusted_root_owned_json_policy_loads')) == identity + '.test_trusted_root_owned_json_policy_loads'
+    assert gate.diagnostic_id(Identity('setUpClass (' + identity + ')')) == identity + '.setUpClass'
+    assert gate.diagnostic_id(Identity(identity + '.private-value/secret')) == 'test_id_withheld'
+
+
+def test_connections_required_inventory_matches_concrete_native_classes():
+    gate = gate_module()
+    classes = {
+        'test_policy': {'NativePolicyTests', 'NativeRootPolicyTests'},
+        'test_storage': {'NativeStorageTests'},
+        'test_probe': {'SyntheticTlsTests'},
+        'test_postgres': {'PostgresTests'},
+    }
+    actual = {'connections.tests.test_probe.ProbeTests.test_transport_pins_sockaddr_and_original_tls_hostname'}
+    for module, selected in classes.items():
+        tree = ast.parse((ROOT / 'manager/connections/tests' / (module + '.py')).read_text())
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and node.name in selected:
+                actual.update('connections.tests.' + module + '.' + node.name + '.' + method.name
+                    for method in node.body if isinstance(method, ast.FunctionDef) and method.name.startswith('test_'))
+    required = set().union(*(gate.REQUIRED_TESTS[name] for name in CONNECTIONS_REQUIRED))
+    assert required == actual
 
 
 def gate_module():
@@ -196,6 +292,144 @@ def test_diagnostics_are_bounded_and_external_frames_custom_classes_are_withheld
     assert "PRIVATE" not in json.dumps(value)
 
 
+def test_native_failure_projects_first_action_and_closed_pair_instead_of_cleanup_stage():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    case.gate_stage = "published_native_uninstall"
+    case.gate_codes = ("published_native_failed",)
+    case.gate_native_failure = dict(action="Status", stage="status", code="state_invalid", exit_code=3)
+    diagnostic = gate.safe_diagnostic(case, None)
+    assert diagnostic["stage"] == "published_native_status"
+    assert diagnostic["native_failure"] == dict(action="Status", stage="status", code="state_invalid", exit_code=3)
+    case.gate_revocation_status = dict(process_exit_code=None, heartbeat_200=0, heartbeat_403=2, other_responses=1)
+    assert gate.safe_diagnostic(case, None)["revocation_status"] == case.gate_revocation_status
+
+
+def test_execution_actions_and_status_sites_project_without_schema_growth():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    for action, stage in (("ExecutionUpgrade", "published_native_execution_upgrade"),
+                          ("MissingVendor", "published_native_missing_vendor"), ("Cleanup", "published_native_cleanup")):
+        native_stage = "status_upgrade_stopped" if action == "ExecutionUpgrade" else "helper"
+        case.gate_native_failure = dict(action=action, stage=native_stage, code="state_invalid", exit_code=1)
+        result = gate.safe_diagnostic(case, None)
+        assert result["stage"] == stage
+        assert result["native_failure"] == case.gate_native_failure
+    case.gate_native_failure = dict(action="Status", stage="status_upgrade_initial", code="state_invalid", exit_code=1)
+    assert gate.safe_diagnostic(case, None)["native_failure"] == {}
+
+
+def test_native_and_revocation_diagnostics_reject_raw_extra_oversize_cycles_and_numbers():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    cycle = {}; cycle["cycle"] = cycle
+    native = dict(action="Status", stage="status", code="state_invalid", exit_code=3)
+    for value in ("PRIVATE", cycle, native | {"raw": "PRIVATE"}, native | {"action": "PRIVATE"},
+                  native | {"stage": "PRIVATE"}, native | {"code": "PRIVATE"}, native | {"code": "x" * 65537},
+                  native | {"exit_code": True}, native | {"exit_code": 2 ** 31},
+                  native | {"code": "win32_65536"}, native | {"code": "hresult_-2147483649"},
+                  native | {"stage": None}, native | {"code": cycle}):
+        case.gate_native_failure = value
+        diagnostic = gate.safe_diagnostic(case, None)
+        assert diagnostic["native_failure"] == {}
+        assert "PRIVATE" not in json.dumps(diagnostic)
+    case.gate_native_failure = native | {"code": "hresult_-2147024891"}
+    assert gate.safe_diagnostic(case, None)["native_failure"]["code"] == "hresult_-2147024891"
+    revoke = dict(process_exit_code=None, heartbeat_200=0, heartbeat_403=2, other_responses=1)
+    for value in (cycle, "PRIVATE", revoke | {"raw": "PRIVATE"}, revoke | {"process_exit_code": cycle},
+                  revoke | {"process_exit_code": True}, revoke | {"process_exit_code": 2 ** 31},
+                  revoke | {"heartbeat_403": True}, revoke | {"heartbeat_200": -1},
+                  revoke | {"other_responses": 2 ** 31}):
+        case.gate_revocation_status = value
+        diagnostic = gate.safe_diagnostic(case, None)
+        assert diagnostic["revocation_status"] == {}
+        assert "PRIVATE" not in json.dumps(diagnostic)
+
+
+def test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_raw_output(tmp_path, monkeypatch, failure_action='Status'):
+    gate = gate_module()
+    path = ROOT / 'manager/devices/tests/test_connection_agent.py'
+    tree = ast.parse(path.read_text())
+    selected = [node for node in tree.body if isinstance(node, ast.FunctionDef)
+                and node.name in {'native_diagnostic', 'assert_native_result', 'native_process_environment'}]
+    published = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'PublishedConnectionTests')
+    selected.append(next(node for node in published.body if isinstance(node, ast.FunctionDef) and node.name == 'native_phase'))
+    scope = dict(__file__=str(path), Path=Path, json=json, re=__import__('re'), os=os,
+                 NATIVE_DIAGNOSTIC_STAGES=gate.NATIVE_STAGES, NATIVE_DIAGNOSTIC_CODES=gate.NATIVE_CODES)
+    # Execute the actual functions with only the child-process boundary replaced.
+    exec(compile(ast.Module(body=selected, type_ignores=[]), str(path), 'exec'), scope)
+    class Case(unittest.TestCase):
+        native_phase = scope['native_phase']
+        def id(self): return gate.EXACT['published_service']
+        def runTest(self):
+            try:
+                self.native_phase(failure_action, identity='synthetic-id')
+            finally:
+                self.native_phase('Uninstall', identity='synthetic-id')
+    monkeypatch.setenv('AEGIS_CONNECTION_SERVICE_PACKAGE', str(tmp_path))
+    success = json.dumps(dict(action='Uninstall', device_id='synthetic-id', state='identity_denied',
+                              service_status='absent', identity_preserved=True))
+    for cleanup_exit, stderr, stdout, expected_pair in (
+        (0, '', success, None),
+        (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary"}', '', ('uninstall', 'uninstall_left_service_or_binary')),
+        (1, 'PRIVATE_KEY_AND_PATH', 'PRIVATE_STDOUT', (None, None)),
+        (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary","raw":"PRIVATE"}', '', (None, None)),
+        (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary","code":"PRIVATE"}', '', (None, None)),
+        (1, 'PRIVATE' * 100, '', (None, None)),
+        (1, '{"stage":"uninstall","code":"uninstall_left_service_or_binary"}', 'PRIVATE' * 700, (None, None)),
+    ):
+        native_stage = 'status' if failure_action == 'Status' else 'status_upgrade_stopped'
+        children = iter((subprocess.CompletedProcess([], 1, '', json.dumps(dict(stage=native_stage, code='state_invalid'))),
+                         subprocess.CompletedProcess([], cleanup_exit, stdout, stderr)))
+        scope['subprocess'] = SimpleNamespace(run=lambda *args, **kwargs: next(children))
+        case = Case(); case.root = tmp_path; case.origin = 'https://synthetic.invalid'
+        result = gate.GateResult(io.StringIO(), True, 0)
+        case.run(result)
+        value = gate.build_report(result, ('published_service',), 'a' * 40,
+                                 'https://github.com/example/project/actions/runs/1')
+        assert value['result'] == 'failed' and value['totals']['failed'] == 1
+        diagnostic = value['diagnostics'][0]
+        assert diagnostic['stage'] == ('published_native_status' if failure_action == 'Status' else 'published_native_execution_upgrade')
+        assert diagnostic['native_failure'] == dict(action=failure_action, stage=native_stage, code='state_invalid', exit_code=1)
+        expected_cleanup = {} if expected_pair is None else dict(
+            action='Uninstall', stage=expected_pair[0], code=expected_pair[1], exit_code=1)
+        assert diagnostic.get('native_cleanup_failure') == expected_cleanup
+        assert diagnostic.get('native_traceback_action') == (failure_action if cleanup_exit == 0 else 'Uninstall')
+        assert diagnostic['frames'] and all(frame['path'] == 'manager/devices/tests/test_connection_agent.py' for frame in diagnostic['frames'][-2:])
+        assert 'PRIVATE' not in json.dumps(value)
+
+
+def test_actual_execution_upgrade_finally_preserves_first_status_site(tmp_path, monkeypatch):
+    test_actual_native_finally_keeps_first_failure_and_projects_cleanup_without_raw_output(tmp_path, monkeypatch, 'ExecutionUpgrade')
+
+
+def test_cleanup_failure_and_traceback_action_reject_malformed_and_cyclic_metadata():
+    gate = gate_module()
+    case = unittest.FunctionTestCase(lambda: None)
+    cycle = {}; cycle['cycle'] = cycle
+    cleanup = dict(action='Uninstall', stage='uninstall', code='uninstall_left_service_or_binary', exit_code=1)
+    error = AssertionError('PRIVATE')
+    for value in ('PRIVATE', cycle, cleanup | {'raw': 'PRIVATE'}, cleanup | {'stage': cycle},
+                  cleanup | {'code': 'x' * 65537}, cleanup | {'exit_code': True}, cleanup | {'exit_code': 2 ** 31},
+                  cleanup | {'code': 'win32_65536'}, cleanup | {'action': 'Status'}):
+        case.gate_native_cleanup_failure = value
+        error.gate_native_action = cycle
+        diagnostic = gate.safe_diagnostic(case, (AssertionError, error, None))
+        assert diagnostic.get('native_cleanup_failure') == {}
+        assert diagnostic.get('native_traceback_action') is None
+        assert 'PRIVATE' not in json.dumps(diagnostic)
+    case.gate_native_cleanup_failure = cleanup
+    error.gate_native_action = 'Uninstall'
+    diagnostic = gate.safe_diagnostic(case, (AssertionError, error, None))
+    assert diagnostic.get('native_cleanup_failure') == cleanup
+    assert diagnostic.get('native_traceback_action') == 'Uninstall'
+    for value in ('PRIVATE', 'x' * 65537, True, cycle):
+        error.gate_native_action = value
+        diagnostic = gate.safe_diagnostic(case, (AssertionError, error, None))
+        assert diagnostic.get('native_traceback_action') is None
+        assert 'PRIVATE' not in json.dumps(diagnostic)
+
+
 def test_deep_traceback_and_class_setup_errors_remain_bounded_without_fake_execution():
     gate = gate_module()
     class SetupFailure(unittest.TestCase):
@@ -234,7 +468,7 @@ def test_release_workflow_installs_git_before_checkout_and_checks_pure_mode():
     assert '--workspace "$GITHUB_WORKSPACE"' in source
     assert '--requested-commit "$REQUESTED_SOURCE_COMMIT"' in source
     assert '--github-env "$GITHUB_ENV"' in source
-    assert '--output "$RUNNER_TEMP/manager-postgres-source.json"' in source
+    assert '--output "$AEGIS_MANAGER_GATE_DIR/manager-postgres-source.json"' in source
     artifact = next(step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@"))
     assert artifact["if"] == "always()" and "manager-postgres-source.json" in artifact["with"]["path"]
     agent = yaml.safe_load((ROOT / ".github/workflows/agent-connection.yml").read_text())
@@ -243,6 +477,52 @@ def test_release_workflow_installs_git_before_checkout_and_checks_pure_mode():
     assert "Test-InstallerContracts.ps1 -Pure" in script
     assert script.count("Test-InstallerContracts.ps1") == 2
     assert "Test-InstallerContracts.ps1 -Pure\n  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }" in script
+
+
+def test_container_gate_artifact_handoff_uses_runtime_directory_and_requires_both_files(tmp_path):
+    import yaml
+    steps = yaml.safe_load((ROOT / '.github/workflows/manager-first-flow.yml').read_text())['jobs']['manager-postgres']['steps']
+    prepare = next((step for step in steps if step.get('id') == 'gate_artifacts'), None)
+    assert prepare is not None, 'container gate must export its actual runtime artifact directory'
+    verify = next(step for step in steps if step.get('id') == 'verify_gate_artifacts')
+    assert prepare['shell'] == verify['shell'] == 'python'
+    runtime = tmp_path / 'container-runtime-temp'
+    runtime.mkdir()
+    outputs = tmp_path / 'github-output'
+    environment = {**os.environ, 'RUNNER_TEMP': str(runtime), 'GITHUB_OUTPUT': str(outputs)}
+    prepared = subprocess.run([sys.executable, '-c', prepare['run']], env=environment,
+                              capture_output=True, text=True, timeout=10)
+    assert prepared.returncode == 0
+    name, directory = outputs.read_text().strip().split('=', 1)
+    assert name == 'directory'
+    directory = Path(directory)
+    assert directory.is_dir() and directory.parent == runtime
+    reference = '${{ steps.gate_artifacts.outputs.directory }}'
+    writers = [step for step in steps if '--output "$AEGIS_MANAGER_GATE_DIR/' in step.get('run', '')]
+    assert len(writers) == 2
+    assert all(step['env']['AEGIS_MANAGER_GATE_DIR'] == reference for step in writers)
+    assert verify['env']['AEGIS_MANAGER_GATE_DIR'] == reference
+    # The qualifier must run on success; upload still preserves diagnostics after
+    # failure, when only one artifact may legitimately have been written.
+    assert verify.get('if', 'success()') == 'success()'
+    upload = next(step for step in steps if step.get('uses', '').startswith('actions/upload-artifact@'))
+    assert upload['if'] == 'always()'
+    uploaded = {Path(line.replace(reference, str(directory))) for line in upload['with']['path'].splitlines()}
+    source, results = directory / 'manager-postgres-source.json', directory / 'manager-postgres-results.json'
+    assert uploaded == {source, results}
+    environment['AEGIS_MANAGER_GATE_DIR'] = str(directory)
+    def qualify():
+        return subprocess.run([sys.executable, '-c', verify['run']], env=environment,
+                              capture_output=True, text=True, timeout=10).returncode
+    assert qualify() != 0
+    gate_module().write_report(source, {'result': 'passed'})
+    assert qualify() != 0
+    gate_module().write_report(results, {'result': 'passed'})
+    assert qualify() == 0
+    source.unlink()
+    assert qualify() != 0
+    source.write_text('')
+    assert qualify() != 0
 
 
 def test_source_verifier_uses_only_command_scoped_exact_resolved_workspace_trust():

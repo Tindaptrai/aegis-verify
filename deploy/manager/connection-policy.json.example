@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "targets": [
+    {
+      "origin": "https://REPLACE_REVIEWED_INDEXER_HOST:REPLACE_REVIEWED_PORT",
+      "addresses": ["REPLACE_APPROVED_ADDRESS"],
+      "indices": ["REPLACE_REVIEWED_INDEX_PATTERN"]
+    }
+  ]
+}
